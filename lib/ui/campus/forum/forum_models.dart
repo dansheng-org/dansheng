@@ -1,0 +1,325 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// DanXi-style forum data models for Dansheng.
+
+/// Sort order for community holes.
+enum ForumSortOrder {
+  lastReplied('updated', '最新回复'),
+  lastCreated('created', '最新发布');
+
+  final String value;
+  final String label;
+  const ForumSortOrder(this.value, this.label);
+}
+
+/// Represents a single floor (comment or original post) in a hole.
+class TeaFloor {
+  final int floorId;
+  final int holeId;
+  final String? content;
+  final String? anonyname;
+  final String? timeCreated;
+  final String? timeUpdated;
+  final bool deleted;
+  final int modified;
+  final int like;
+  final int dislike;
+  final List<String> fold;
+
+  const TeaFloor({
+    required this.floorId,
+    required this.holeId,
+    this.content,
+    this.anonyname,
+    this.timeCreated,
+    this.timeUpdated,
+    this.deleted = false,
+    this.modified = 0,
+    this.like = 0,
+    this.dislike = 0,
+    this.fold = const [],
+  });
+
+  factory TeaFloor.fromJson(Map<String, dynamic> json) {
+    final rawFold = json['fold'];
+    final List<String> parsedFold = [];
+    if (rawFold is List) {
+      for (final f in rawFold) {
+        if (f != null && f.toString().isNotEmpty) {
+          parsedFold.add(f.toString());
+        }
+      }
+    }
+
+    return TeaFloor(
+      floorId: _parseInt(json['floor_id']),
+      holeId: _parseInt(json['hole_id']),
+      content: json['content']?.toString(),
+      anonyname: json['anonyname']?.toString(),
+      timeCreated: json['time_created']?.toString(),
+      timeUpdated: json['time_updated']?.toString(),
+      deleted: json['deleted'] == true,
+      modified: _parseInt(json['modified']),
+      like: _parseInt(json['like']),
+      dislike: _parseInt(json['dislike']),
+      fold: parsedFold,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'floor_id': floorId,
+    'hole_id': holeId,
+    'content': content,
+    'anonyname': anonyname,
+    'time_created': timeCreated,
+    'time_updated': timeUpdated,
+    'deleted': deleted,
+    'modified': modified,
+    'like': like,
+    'dislike': dislike,
+    'fold': fold,
+  };
+}
+
+/// Preview of first and last floor on a hole.
+class TeaFloorPreview {
+  final TeaFloor? firstFloor;
+  final TeaFloor? lastFloor;
+
+  const TeaFloorPreview({this.firstFloor, this.lastFloor});
+
+  factory TeaFloorPreview.fromJson(Map<String, dynamic> json) {
+    return TeaFloorPreview(
+      firstFloor: json['first_floor'] is Map<String, dynamic>
+          ? TeaFloor.fromJson(json['first_floor'] as Map<String, dynamic>)
+          : null,
+      lastFloor: json['last_floor'] is Map<String, dynamic>
+          ? TeaFloor.fromJson(json['last_floor'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'first_floor': firstFloor?.toJson(),
+    'last_floor': lastFloor?.toJson(),
+  };
+}
+
+/// Represents a hole (thread) in the forum.
+class TeaHole {
+  final int holeId;
+  final int divisionId;
+  final String? timeCreated;
+  final String? timeUpdated;
+  final String? timeDeleted;
+  final int view;
+  final int reply;
+  final TeaFloorPreview? floors;
+  final List<String> tags;
+  final bool hidden;
+  final bool locked;
+  final bool frozen;
+
+  const TeaHole({
+    required this.holeId,
+    required this.divisionId,
+    this.timeCreated,
+    this.timeUpdated,
+    this.timeDeleted,
+    this.view = 0,
+    this.reply = 0,
+    this.floors,
+    this.tags = const [],
+    this.hidden = false,
+    this.locked = false,
+    this.frozen = false,
+  });
+
+  factory TeaHole.fromJson(Map<String, dynamic> json) {
+    TeaFloorPreview? floorsPreview;
+    if (json['floors'] is Map<String, dynamic>) {
+      floorsPreview = TeaFloorPreview.fromJson(
+        json['floors'] as Map<String, dynamic>,
+      );
+    } else if (json['first_floor'] is Map<String, dynamic>) {
+      floorsPreview = TeaFloorPreview(
+        firstFloor: TeaFloor.fromJson(
+          json['first_floor'] as Map<String, dynamic>,
+        ),
+        lastFloor: json['last_floor'] is Map<String, dynamic>
+            ? TeaFloor.fromJson(json['last_floor'] as Map<String, dynamic>)
+            : null,
+      );
+    }
+
+    final rawTags = json['tags'];
+    final List<String> parsedTags = [];
+    if (rawTags is List) {
+      for (final t in rawTags) {
+        if (t is String && t.isNotEmpty) {
+          parsedTags.add(t);
+        } else if (t is Map && t['name'] != null) {
+          parsedTags.add(t['name'].toString());
+        }
+      }
+    }
+
+    // Fallback: extract #hashtags from first floor content if tags array is empty
+    if (parsedTags.isEmpty) {
+      final firstFloor = floorsPreview?.firstFloor;
+      final content = firstFloor?.content;
+      if (content != null && content.isNotEmpty) {
+        final matches = RegExp(r'#([^\s#,，。！？]+)').allMatches(content);
+        for (final m in matches) {
+          final tag = m.group(1);
+          if (tag != null &&
+              tag.isNotEmpty &&
+              tag.length <= 16 &&
+              !parsedTags.contains(tag)) {
+            parsedTags.add(tag);
+          }
+        }
+      }
+    }
+
+    return TeaHole(
+      holeId: _parseInt(json['hole_id']),
+      divisionId: _parseInt(json['division_id']),
+      timeCreated: json['time_created']?.toString(),
+      timeUpdated: json['time_updated']?.toString(),
+      timeDeleted: json['time_deleted']?.toString(),
+      view: _parseInt(json['view']),
+      reply: _parseInt(json['reply']),
+      floors: floorsPreview,
+      tags: parsedTags,
+      hidden: json['hidden'] == true,
+      locked: json['locked'] == true,
+      frozen: json['frozen'] == true,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'hole_id': holeId,
+    'division_id': divisionId,
+    'time_created': timeCreated,
+    'time_updated': timeUpdated,
+    'time_deleted': timeDeleted,
+    'view': view,
+    'reply': reply,
+    'floors': floors?.toJson(),
+    'tags': tags,
+    'hidden': hidden,
+    'locked': locked,
+    'frozen': frozen,
+  };
+}
+
+/// Represents a division (category / board) in the forum.
+class TeaDivision {
+  final int divisionId;
+  final String name;
+  final String? description;
+  final List<TeaHole> pinned;
+
+  const TeaDivision({
+    required this.divisionId,
+    required this.name,
+    this.description,
+    this.pinned = const [],
+  });
+
+  factory TeaDivision.fromJson(Map<String, dynamic> json) {
+    final rawPinned = json['pinned'];
+    final List<TeaHole> parsedPinned = [];
+    if (rawPinned is List) {
+      for (final item in rawPinned) {
+        if (item is Map<String, dynamic>) {
+          parsedPinned.add(TeaHole.fromJson(item));
+        }
+      }
+    }
+
+    return TeaDivision(
+      divisionId: _parseInt(json['division_id']),
+      name: json['name']?.toString() ?? '分区',
+      description: json['description']?.toString(),
+      pinned: parsedPinned,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'division_id': divisionId,
+    'name': name,
+    'description': description,
+    'pinned': pinned.map((h) => h.toJson()).toList(),
+  };
+}
+
+/// Search result model.
+class ForumSearchResult {
+  final int holeId;
+  final int? floorId;
+  final String content;
+  final String? anonyname;
+  final String? timeCreated;
+  final List<String> tags;
+  final bool deleted;
+
+  const ForumSearchResult({
+    required this.holeId,
+    this.floorId,
+    required this.content,
+    this.anonyname,
+    this.timeCreated,
+    this.tags = const [],
+    this.deleted = false,
+  });
+
+  factory ForumSearchResult.fromJson(Map<String, dynamic> json) {
+    final rawTags = json['tags'];
+    final List<String> parsedTags = [];
+    if (rawTags is List) {
+      for (final t in rawTags) {
+        if (t is String && t.isNotEmpty) {
+          parsedTags.add(t);
+        } else if (t is Map && t['name'] != null) {
+          parsedTags.add(t['name'].toString());
+        }
+      }
+    }
+
+    final rawContent =
+        json['content']?.toString() ?? json['text']?.toString() ?? '';
+    final isDeleted = json['deleted'] == true;
+
+    // Fallback: extract #hashtags from content if tags array is empty
+    if (parsedTags.isEmpty && rawContent.isNotEmpty) {
+      final matches = RegExp(r'#([^\s#,，。！？]+)').allMatches(rawContent);
+      for (final m in matches) {
+        final tag = m.group(1);
+        if (tag != null &&
+            tag.isNotEmpty &&
+            tag.length <= 16 &&
+            !parsedTags.contains(tag)) {
+          parsedTags.add(tag);
+        }
+      }
+    }
+
+    return ForumSearchResult(
+      holeId: _parseInt(json['hole_id']),
+      floorId: json['floor_id'] != null ? _parseInt(json['floor_id']) : null,
+      content: rawContent,
+      anonyname: json['anonyname']?.toString(),
+      timeCreated: json['time_created']?.toString(),
+      tags: parsedTags,
+      deleted: isDeleted,
+    );
+  }
+}
+
+int _parseInt(dynamic val) {
+  if (val is int) return val;
+  if (val is num) return val.toInt();
+  if (val is String) return int.tryParse(val) ?? 0;
+  return 0;
+}

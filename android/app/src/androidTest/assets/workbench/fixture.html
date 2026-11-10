@@ -1,0 +1,219 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Synthetic Workbench Fixture</title></head>
+<body>
+<h2>Synthetic Workbench Page</h2>
+<script>
+window.fixtureIdentity = 'fixture-workbench-account';
+window.fixtureCalls = [];
+window.fixtureNextWriteError = false;
+window.fixtureNextWriteTimeout = false;
+window.fixtureReply = null;
+window.fixtureAppointments = null;
+
+window.fetch = function(url, options) {
+  options = options || {};
+  const method = (options.method || 'GET').toUpperCase();
+  const urlStr = String(url);
+  window.fixtureCalls.push({transport: 'fetch', url: urlStr + '?synthetic-waf=dynamic', method: method});
+
+  // Identity probe endpoint (RFC 6901 pointer /d/number checked against active account)
+  if (urlStr.includes('/reservation/site/user/detail')) {
+    return Promise.resolve({
+      status: 200,
+      url: urlStr,
+      text: async () => JSON.stringify({
+        e: 'OK',
+        d: {
+          number: window.fixtureIdentity,
+          name: 'Synthetic Student'
+        }
+      })
+    });
+  }
+
+  // Sports venues list
+  if (urlStr.includes('/reservation/api/topic/resource-list')) {
+    return Promise.resolve({
+      status: 200,
+      url: urlStr,
+      text: async () => JSON.stringify(window.fixtureReply || {
+        e: 'OK',
+        d: {
+          data: [
+            {
+              base: {
+                id: 900,
+                name: '江湾体育馆-羽毛球场',
+                type: 1
+              }
+            }
+          ]
+        }
+      })
+    });
+  }
+
+  // Calendar endpoint with DanXi shape: time periods, resources (courts), and per-court cell state
+  if (urlStr.includes('/reservation/site/resource/calendar')) {
+    return Promise.resolve({
+      status: 200,
+      url: urlStr,
+      text: async () => JSON.stringify(window.fixtureReply || {
+        e: 'OK',
+        d: {
+          time: [
+            { id: 71, str_time: '10:00-11:00', start_time: '10:00', end_time: '11:00' },
+            { id: 72, str_time: '11:00-12:00', start_time: '11:00', end_time: '12:00' }
+          ],
+          resource: [
+            { id: 901, name: '1号羽毛球场' },
+            { id: 902, name: '2号羽毛球场' }
+          ],
+          data: {
+            '2099-01-03': {
+              '901': {
+                '71': { num: 1, status: 0, occupy: false, read_only: false },
+                '72': { num: 1, status: 0, occupy: false, read_only: false }
+              },
+              '902': {
+                '71': { num: 0, status: 1, occupy: true, read_only: false },
+                '72': { num: 0, status: 1, occupy: true, read_only: false }
+              }
+            }
+          }
+        }
+      })
+    });
+  }
+
+  // Appointments history
+  if (urlStr.includes('/reservation/site/appointment/appointment-list') || urlStr.includes('/reservation/site/appointmentList')) {
+    const defaultData = [
+      {
+        id: 30,
+        resource_name: '江湾体育馆-羽毛球场',
+        status: 0,
+        status_name: '已预约',
+        type: 7,
+        is_cancel: true,
+        slots: [
+          {
+            date: '2099-01-03',
+            time: '10:00-11:00',
+            resource_id: 901,
+            resource_name: '1号羽毛球场',
+            active: true,
+            can_cancel: true
+          }
+        ]
+      }
+    ];
+    return Promise.resolve({
+      status: 200,
+      url: urlStr,
+      text: async () => JSON.stringify(window.fixtureReply || {
+        e: 'OK',
+        d: {
+          data: window.fixtureAppointments || defaultData
+        }
+      })
+    });
+  }
+
+  // Appointment detail
+  if (urlStr.includes('/reservation/site/appointment/appointment-detail')) {
+    return Promise.resolve({
+      status: 200,
+      url: urlStr,
+      text: async () => JSON.stringify(window.fixtureReply || {
+        e: 'OK',
+        d: {
+          id: 30,
+          resource_name: '江湾体育馆-羽毛球场',
+          status: 0,
+          status_name: '已预约',
+          qrcode: 'synthetic-qr-code',
+          appointment_time: [
+            {
+              date: '2099-01-03',
+              str_time: '10:00-11:00',
+              resource_id: 901,
+              resource_name: '1号羽毛球场',
+              active: true,
+              can_cancel: true
+            }
+          ]
+        }
+      })
+    });
+  }
+
+  return Promise.resolve({
+    status: 200,
+    url: urlStr,
+    text: async () => JSON.stringify(window.fixtureReply || { e: 'OK', d: { dynamic: true } })
+  });
+};
+
+window.XMLHttpRequest = class {
+  constructor() {
+    this.method = 'GET';
+    this.url = '';
+    this.headers = {};
+    this.status = 0;
+    this.responseText = '';
+    this.responseURL = '';
+  }
+  open(method, url) {
+    this.method = method;
+    this.url = url + '?synthetic-waf=dynamic';
+  }
+  setRequestHeader(k, v) {
+    this.headers[k] = v;
+  }
+  send(form) {
+    const isForm = (typeof FormData !== 'undefined' && form instanceof FormData);
+    window.fixtureCalls.push({
+      transport: 'xhr',
+      url: this.url,
+      method: this.method,
+      sign: this.headers['sign-key'],
+      form: isForm,
+      body: typeof form === 'string' ? form : null
+    });
+
+    if (window.fixtureNextWriteError) {
+      window.fixtureNextWriteError = false;
+      setTimeout(() => {
+        if (this.onerror) this.onerror();
+      }, 15);
+      return;
+    }
+
+    if (window.fixtureNextWriteTimeout) {
+      window.fixtureNextWriteTimeout = false;
+      setTimeout(() => {
+        if (this.ontimeout) this.ontimeout();
+      }, 15);
+      return;
+    }
+
+    this.status = 200;
+    this.responseURL = this.url;
+    if (this.url.includes('/reservation/site/resource/launch')) {
+      this.responseText = JSON.stringify({ e: 'OK', m: '预约成功' });
+    } else {
+      this.responseText = JSON.stringify(window.fixtureReply || { e: 'OK', d: { dynamic: true } });
+    }
+    setTimeout(() => {
+      if (this.onload) this.onload();
+    }, 15);
+  }
+  abort() {
+    if (this.onabort) this.onabort();
+  }
+};
+</script>
+</body>
+</html>
