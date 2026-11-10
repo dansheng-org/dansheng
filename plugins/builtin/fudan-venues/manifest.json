@@ -1,0 +1,181 @@
+{
+  "id": "official.fudan-venues",
+  "version": "0.1.0",
+  "api_version": 1,
+  "entry": "main.mjs",
+  "name": "Fudan venues (official built-in manual)",
+  "capabilities": [
+    "browser.request",
+    "browser.write",
+    "browser.evaluate",
+    "browser.login",
+    "storage.read",
+    "storage.write",
+    "ui.publish"
+  ],
+  "network": [
+    "https://booking.fudan.edu.cn",
+    "https://id.fudan.edu.cn",
+    "https://uis.fudan.edu.cn"
+  ],
+  "actions": {
+    "visibleLogin": {
+      "description": "Hand off to trusted visible Android login; never accepts credentials",
+      "mutating": false
+    },
+    "venues": {
+      "description": "Read sports venues in the authenticated page",
+      "mutating": false
+    },
+    "calendar": {
+      "description": "Read venue calendar with time slots and per-court availability",
+      "mutating": false
+    },
+    "appointments": {
+      "description": "Read appointment history",
+      "mutating": false
+    },
+    "detail": {
+      "description": "Read appointment voucher details",
+      "mutating": false
+    },
+    "prepareManual": {
+      "description": "Validate and prepare canonical reservation input and human preview summary",
+      "mutating": false
+    },
+    "reserve": {
+      "description": "Execute manual single reservation POST with preview approval and availability recheck",
+      "mutating": true
+    },
+    "reconcile": {
+      "description": "Reconcile uncertain reservation journal against appointment history",
+      "mutating": false
+    },
+    "prepareCancel": {
+      "description": "Validate and prepare canonical appointment cancellation and human preview summary",
+      "mutating": false
+    },
+    "cancel": {
+      "description": "Cancel appointment after host approval with fresh server comparison",
+      "mutating": true
+    },
+    "reconcileCancel": {
+      "description": "Reconcile uncertain appointment cancellation against appointment history",
+      "mutating": false
+    },
+    "journal": {
+      "description": "Read uncertain reservation journal entries",
+      "mutating": false
+    }
+  },
+  "ui": [
+    {
+      "id": "visible_login",
+      "type": "action",
+      "title": "统一身份认证",
+      "ui_version": 1,
+      "fields": [],
+      "buttons": [
+        {
+          "label": "登录复旦场馆系统",
+          "action": "visibleLogin"
+        }
+      ]
+    },
+    {
+      "id": "venue_calendar",
+      "type": "form",
+      "title": "场馆日历与场地状态",
+      "ui_version": 1,
+      "fields": [
+        {
+          "id": "venue_id",
+          "label": "场馆",
+          "type": "select",
+          "source": {
+            "action": "venues"
+          },
+          "clearOnChange": ["target_date"]
+        },
+        {
+          "id": "target_date",
+          "label": "预约日期",
+          "type": "date"
+        }
+      ],
+      "buttons": [
+        {
+          "label": "查询场次与日历",
+          "action": "calendar",
+          "fields": ["venue_id", "target_date"]
+        }
+      ]
+    },
+    {
+      "id": "manual_reserve",
+      "type": "form",
+      "title": "手动预约场地",
+      "ui_version": 1,
+      "time_zone": "Asia/Shanghai",
+      "fields": [
+        {
+          "id": "task_id",
+          "label": "任务编号",
+          "type": "identifier"
+        },
+        {
+          "id": "venue_id",
+          "label": "场馆编号",
+          "type": "select",
+          "source": {
+            "action": "venues"
+          },
+          "clearOnChange": ["period_id", "court_id"]
+        },
+        {
+          "id": "target_date",
+          "label": "预约日期",
+          "type": "date",
+          "clearOnChange": ["period_id", "court_id"]
+        },
+        {
+          "id": "period_id",
+          "label": "时段编号",
+          "type": "text"
+        },
+        {
+          "id": "time",
+          "label": "时段描述",
+          "type": "text"
+        },
+        {
+          "id": "court_id",
+          "label": "场地编号",
+          "type": "text"
+        }
+      ],
+      "buttons": [
+        {
+          "label": "提交预约",
+          "action": "reserve",
+          "prepare": "prepareManual",
+          "fields": ["task_id", "venue_id", "target_date", "period_id", "court_id", "time"],
+          "confirm": true
+        }
+      ]
+    },
+    {
+      "id": "appointments_view",
+      "type": "action",
+      "title": "我的预约记录",
+      "ui_version": 1,
+      "fields": [],
+      "buttons": [
+        {
+          "label": "刷新预约记录",
+          "action": "appointments"
+        }
+      ]
+    }
+  ]
+}

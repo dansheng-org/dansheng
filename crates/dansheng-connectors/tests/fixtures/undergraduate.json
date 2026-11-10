@@ -1,0 +1,6 @@
+{
+  "studentTableVms": [{"activities": [
+    {"lessonId": 700001, "lessonCode": "SYNTH101.01", "courseName": "合成数学课", "teachers": ["虚构教师甲", "虚构教师乙"], "room": "测试楼101", "weekday": 1, "startUnit": 1, "endUnit": 3, "weekIndexes": [1, 2, 4]},
+    {"lessonId": 700002, "lessonCode": "SYNTH102.01", "courseName": "合成周日课", "teachers": [], "room": null, "weekday": 7, "startUnit": 11, "endUnit": 12, "weekIndexes": [1, 2, 3]}
+  ]}]
+}

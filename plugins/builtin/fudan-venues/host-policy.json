@@ -1,0 +1,111 @@
+{
+  "binding_v1": {
+    "binding_version": 1,
+    "plugin_id": "official.fudan-venues",
+    "identity_probe": {
+      "url": "https://booking.fudan.edu.cn/reservation/site/user/detail",
+      "method": "GET",
+      "top_level_origin": "https://booking.fudan.edu.cn",
+      "headers": {
+        "sign-key": "/reservation/site/user/detailget",
+        "Accept": "application/json"
+      },
+      "success_pointer": "/e",
+      "success_value": "OK",
+      "json_pointer": "/d/number"
+    },
+    "consent_scopes": {
+      "reserve": {
+        "key": "/task_id"
+      },
+      "cancel": {
+        "key": "/appointment_id"
+      }
+    },
+    "rules": [
+      {
+        "action": "reserve",
+        "url": "https://booking.fudan.edu.cn/reservation/site/resource/launch",
+        "transport": "xhr",
+        "headers": {
+          "Accept": "application/json, text/plain, */*",
+          "sign-key": "/reservation/site/resource/launchpost"
+        },
+        "key": [
+          "manual",
+          { "$input": "account_id" },
+          { "$input": "task_id" },
+          { "$input": "target_date" },
+          { "$input": "venue_id" },
+          { "$input": "period_id" },
+          { "$input": "court_id" }
+        ],
+        "form": {
+          "data": {
+            "$json": [
+              {
+                "resource_ids": [{ "$input": "court_id" }],
+                "group_id": { "$input": "venue_id" },
+                "period": [
+                  {
+                    "date": { "$input": "target_date" },
+                    "period_id": { "$input": "period_id" }
+                  }
+                ],
+                "number": 1
+              }
+            ]
+          },
+          "data_colle": "[]",
+          "collective": "0",
+          "captcha": {
+            "$json": {
+              "token": "",
+              "pointJson": ""
+            }
+          }
+        }
+      },
+      {
+        "action": "cancel",
+        "url": "https://booking.fudan.edu.cn/reservation/site/appointment/appointment-cancel",
+        "transport": "xhr",
+        "headers": {
+          "Accept": "application/json, text/plain, */*",
+          "sign-key": "/reservation/site/appointment/appointment-cancelpost"
+        },
+        "key": [
+          "cancel",
+          { "$input": "account_id" },
+          { "$input": "appointment_id" }
+        ],
+        "form": {
+          "appointment_id": { "$text": { "$input": "appointment_id" } },
+          "appointment_detail_id": {
+            "$json": { "$input": "appointment_detail_id" }
+          },
+          "appointment_data_ids": {
+            "$json": { "$input": "appointment_data_ids" }
+          }
+        }
+      },
+      {
+        "action": "cancel",
+        "url": "https://booking.fudan.edu.cn/reservation/site/third-party/cancel-appointment",
+        "transport": "xhr",
+        "headers": {
+          "Accept": "application/json, text/plain, */*",
+          "sign-key": "/reservation/site/third-party/cancel-appointmentpost"
+        },
+        "key": [
+          "cancel",
+          { "$input": "account_id" },
+          { "$input": "appointment_id" }
+        ],
+        "form": {
+          "appointment_id": { "$text": { "$input": "appointment_id" } }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+/target/
+/dist/
+/.local/
+/reference/*/
+**/node_modules/
+**/.gradle/
+**/build/
+**/local.properties
+*.db
+*.db-shm
+*.db-wal
+*.log

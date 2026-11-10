@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "references": [
+    {"id":"danxi","url":"https://github.com/DanXi-Dev/DanXi.git","branch":"main","commit":"3c1f5f026fbc7ca50e151865f813cdb381807abe","directory":"reference/DanXi","license":"GPL-3.0-or-later"},
+    {"id":"dela","url":"https://github.com/Chang-Yo/Dela.git","branch":"dev","commit":"e82da12f0ddc3e9dec647e5acabe907ac5ee07c3","directory":"reference/Dela","license":"GPL-3.0-or-later"},
+    {"id":"danxi-local-sports","source":"C:/Code/danxi","branch":"codex/main","commit":"f6a4532d6ae080950b6dcc5e87f6b9331d1a0b41","directory":"reference/DanXi-local-sports","license":"GPL-3.0-or-later","snapshot":"selected committed sports source and tests only"}
+  ]
+}

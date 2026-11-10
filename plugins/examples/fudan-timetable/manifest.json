@@ -1,0 +1,14 @@
+{
+  "id": "official.fudan-timetable",
+  "version": "0.1.0",
+  "api_version": 1,
+  "entry": "main.mjs",
+  "name": "Fudan timetable through host HTTP session",
+  "capabilities": ["auth.status", "auth.requireLogin", "http.request", "sources.write", "ui.publish"],
+  "network": ["https://fdjwgl.fudan.edu.cn", "http://yjsxk.fudan.edu.cn", "http://yjsxktest.fudan.sh.cn"],
+  "actions": {
+    "syncUndergraduate": {"description": "Read a selected undergraduate timetable through a host-managed HTTP Cookie session", "mutating": false, "input_schema": {"type": "object", "required": ["account_id", "semester_id", "starts_on"], "properties": {"account_id": {"type": "string", "minLength": 1}, "semester_id": {"type": "string", "pattern": "^[0-9]+$"}, "starts_on": {"type": "string", "description": "Monday of week 1, YYYY-MM-DD"}}, "additionalProperties": false}},
+    "syncPostgraduate": {"description": "Read the current postgraduate timetable; semester metadata is supplied explicitly", "mutating": false, "input_schema": {"type": "object", "required": ["account_id", "semester_id", "starts_on"], "properties": {"account_id": {"type": "string", "minLength": 1}, "semester_id": {"type": "string", "minLength": 1}, "starts_on": {"type": "string"}, "endpoint": {"type": "string", "enum": ["primary", "secondary"]}}, "additionalProperties": false}}
+  },
+  "ui": [{"id": "timetable", "type": "list", "title": "Fudan timetable"}]
+}

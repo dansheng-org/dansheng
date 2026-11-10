@@ -1,0 +1,14 @@
+{
+  "id": "fixture.closed-loop",
+  "version": "0.1.0",
+  "api_version": 1,
+  "entry": "main.mjs",
+  "name": "Synthetic local closed loop",
+  "capabilities": ["auth.status", "auth.requireLogin", "http.request", "storage.read", "storage.write", "sources.read", "sources.write", "ui.publish"],
+  "network": ["http://127.0.0.1:19765"],
+  "actions": {
+    "sync": {"description": "Read the synthetic loopback fixture, save private/source data and publish a card", "mutating": false},
+    "readCache": {"description": "Read the synthetic private cache without network or authentication", "mutating": false}
+  },
+  "ui": [{"id": "summary", "type": "card", "title": "Synthetic course"}]
+}

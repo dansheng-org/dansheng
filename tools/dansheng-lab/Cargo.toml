@@ -1,0 +1,28 @@
+[package]
+name = "dansheng-lab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+dansheng-core = { path = "../../crates/dansheng-core" }
+dansheng-host = { path = "../../crates/dansheng-host" }
+dansheng-connectors = { path = "../../crates/dansheng-connectors", features = ["webvpn"] }
+axum = { version = "0.8.9", features = ["json"] }
+clap = { version = "4", features = ["derive"] }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+zeroize = { version = "1", features = ["derive"] }
+scraper = "0.24"
+
+[dev-dependencies]
+tempfile.workspace = true
+reqwest.workspace = true
+async-trait.workspace = true
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

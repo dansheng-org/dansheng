@@ -1,0 +1,7 @@
+{
+  "success": true,
+  "results": [
+    {"KCDM": "SYNTHPG01", "KCMC": "合成研究生课程", "JASMC": "虚构楼202", "JSXM": "虚构教师丙", "ZCBH": "101010", "XQ": 2, "KSJCDM": 6},
+    {"KCMC": "合成晚间课程", "JASMC": null, "JSXM": null, "ZCBH": "011000", "XQ": "7", "KSJCDM": "11"}
+  ]
+}

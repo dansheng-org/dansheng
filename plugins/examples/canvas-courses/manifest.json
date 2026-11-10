@@ -1,0 +1,14 @@
+{
+  "id": "official.canvas-courses",
+  "version": "0.1.0",
+  "api_version": 1,
+  "entry": "main.mjs",
+  "name": "Canvas courses through host HTTP session",
+  "capabilities": ["auth.status", "auth.requireLogin", "http.request", "sources.read", "sources.write", "ui.publish"],
+  "network": ["https://elearning.fudan.edu.cn"],
+  "actions": {
+    "syncCourses": {"description": "Read Canvas courses through a host-managed HTTP session and save typed sources", "mutating": false, "input_schema": {"type": "object", "required": ["account_id"], "properties": {"account_id": {"type": "string", "minLength": 1}}, "additionalProperties": false}},
+    "cachedCourses": {"description": "Read this plugin's locally saved course sources", "mutating": false}
+  },
+  "ui": [{"id": "courses", "type": "list", "title": "Canvas courses"}]
+}

@@ -1,0 +1,37 @@
+# Standalone contract runner while the connector's manifest/export is integrated
+# by another contributor. It compiles exactly ../mod.rs, not a copied implementation.
+[package]
+name = "dansheng-mail-contract-tests"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "GPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[lib]
+path = "../mod.rs"
+
+[dependencies]
+dansheng-core = { path = "../../../../dansheng-core" }
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+log = { version = "0.4", features = ["max_level_info"] }
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util"] }
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
+mail-parser = { version = "1", features = ["full_encoding"] }
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+rcgen = "0.14"

@@ -1,0 +1,9 @@
+{
+  "version": "0.2.0",
+  "browser": "nativewebview",
+  "supportsAndroid": true,
+  "supportsDesktop": false,
+  "missingDesktopCapability": "CapabilityUnavailable",
+  "requires": ["authenticated-page-session", "visible-login", "host-mutation-authorization", "host-wake-binding"],
+  "note": "Separate typed package metadata; no unsupported manifest v1 extension is assumed."
+}

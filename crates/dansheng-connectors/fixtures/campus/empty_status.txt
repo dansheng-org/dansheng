@@ -1,0 +1,2 @@
+{"status":[{"id":"901","room":"SYNTH]101"},{"id":"902","room":"SYNTH202"}],"time3":"
+<script>this tail is deliberately not JSON;
