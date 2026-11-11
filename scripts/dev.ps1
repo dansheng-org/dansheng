@@ -1,10 +1,20 @@
 # Dot-source this file to use the portable, project-local Windows toolchain.
+param([string]$ToolchainRoot)
 $DanshengRoot = Split-Path -Parent $PSScriptRoot
-$DanshengTools = Join-Path $DanshengRoot '.local\toolchain'
+if(-not $ToolchainRoot){$ToolchainRoot=$env:DANSHENG_TOOLCHAIN_ROOT}
+$DanshengTools = if($ToolchainRoot){[IO.Path]::GetFullPath($ToolchainRoot)}else{Join-Path $DanshengRoot '.local\toolchain'}
+if(-not $ToolchainRoot -and -not(Test-Path -LiteralPath (Join-Path $DanshengTools 'cargo/bin/cargo.exe'))){
+    $DanshengWorkspaceModule=Join-Path $DanshengRoot 'tools/workspace/Dansheng.Workspace.psm1'
+    if(Test-Path -LiteralPath $DanshengWorkspaceModule){
+        Import-Module $DanshengWorkspaceModule -Force
+        $DanshengPrimaryRoot=Split-Path -Parent (Get-DsRepository $DanshengRoot).common_dir
+        $DanshengTools=Join-Path $DanshengPrimaryRoot '.local/toolchain'
+    }
+}
 if (Test-Path -LiteralPath (Join-Path $DanshengTools 'cargo\bin\cargo.exe')) {
-    $env:CARGO_HOME = Join-Path $DanshengTools 'cargo'
+    if(-not $env:CARGO_HOME){$env:CARGO_HOME=if($env:DANSHENG_TASK_RUNTIME){Join-Path $env:DANSHENG_TASK_RUNTIME 'cargo-home'}else{Join-Path $DanshengTools 'cargo'}}
     $env:RUSTUP_HOME = Join-Path $DanshengTools 'rustup'
-    $env:PATH = "$env:CARGO_HOME\bin;$env:PATH"
+    $env:PATH = "$(Join-Path $DanshengTools 'cargo/bin');$env:PATH"
     # The portable stable installation is currently 1.99.1, matching rust-toolchain.toml.
     # Explicit selection prevents parallel rustup auto-installers racing on Windows.
     $env:RUSTUP_TOOLCHAIN = 'stable-x86_64-pc-windows-gnu'
@@ -22,5 +32,6 @@ if ($DanshengMingw) {
     $env:PATH = "$env:PATH;$DanshengMingwBin"
     $env:LIBCLANG_PATH = $DanshengMingwBin
 }
-$DanshengNdk = 'C:\Android\Sdk\ndk\30.0.16138531\toolchains\llvm\prebuilt\windows-x86_64\bin'
+$DanshengAndroidSdk=if($env:ANDROID_SDK_ROOT){$env:ANDROID_SDK_ROOT}elseif($env:ANDROID_HOME){$env:ANDROID_HOME}else{'C:/Android/Sdk'}
+$DanshengNdk = Join-Path $DanshengAndroidSdk 'ndk/30.0.16138531/toolchains/llvm/prebuilt/windows-x86_64/bin'
 if (Test-Path -LiteralPath (Join-Path $DanshengNdk 'libclang.dll')) { $env:LIBCLANG_PATH = $DanshengNdk }

@@ -1,5 +1,15 @@
-param([string]$Directory=(Join-Path (Split-Path -Parent $PSScriptRoot) 'dist/dansheng-core-0.1.0'))
+param([string]$Directory,[string]$RuntimeRoot)
 $ErrorActionPreference='Stop'
+. "$PSScriptRoot/runtime-common.ps1"
+if(-not $Directory){
+    $PackageRuntime=Resolve-DanshengRuntimeRoot -Root (Split-Path -Parent $PSScriptRoot) -RuntimeRoot $RuntimeRoot
+    $Directory=Join-Path $PackageRuntime 'dist/dansheng-core-0.1.0'
+}
+$Directory=Get-DanshengCheckedPath $Directory
+if($RuntimeRoot -or $env:DANSHENG_TASK_RUNTIME){
+    $PackageRuntime=Resolve-DanshengRuntimeRoot -Root (Split-Path -Parent $PSScriptRoot) -RuntimeRoot $RuntimeRoot
+    $Directory=Get-DanshengRuntimeOutput -RuntimeRoot $PackageRuntime -Path $Directory
+}
 $PackageProof=Get-Content -Raw -LiteralPath (Join-Path $Directory 'build-info.json') | ConvertFrom-Json
 $PackageChecks=[Collections.Generic.List[object]]::new()
 function Get-EntryHash([IO.Compression.ZipArchiveEntry]$Entry){
@@ -36,7 +46,13 @@ foreach($PackageSum in $PackageSums){
                 if($PackageSourceLine -notmatch '^([a-f0-9]{64})  (.+)$'){throw 'Invalid source hash entry'}
                 $PackageSourceHash=$Matches[1];$PackageSourceName=$Matches[2]
                 if(-not $PackageEntries.ContainsKey($PackageSourceName) -or (Get-EntryHash $PackageEntries[$PackageSourceName]) -cne $PackageSourceHash){throw 'Source archive content hash mismatch'}
-                if($PackageSourceName -match '(^|/)(\.git|\.local|target|build|node_modules|\.gradle|vault|profiles|dist)(/|$)'){throw 'Generated or private files found in source archive'}
+                if($PackageSourceName -match '(^|/)(\.git|\.local|target|build|node_modules|\.gradle|vault|profiles|logs|dist)(/|$)' -or $PackageSourceName -match '(^|/)(credentials\.txt|\.env(?:\..*)?|local\.properties|key\.properties|[^/]+\.(?:jks|keystore))$'){throw 'Generated or private files found in source archive'}
+            }
+            if($PackageProof.validation_document){
+                $PackageValidationName=$PackageProof.validation_document.path
+                $PackageValidationHash=$PackageProof.validation_document.sha256
+                if($PackageValidationName -isnot [string] -or $PackageValidationHash -notmatch '^[a-f0-9]{64}$' -or -not $PackageEntries.ContainsKey($PackageValidationName)){throw 'Declared validation document is missing from the source archive'}
+                if((Get-EntryHash $PackageEntries[$PackageValidationName]) -cne $PackageValidationHash){throw 'Source validation document differs from its build metadata'}
             }
         } else {
             $PackageBinaryName=if($PackageName.EndsWith('-windows-x64.zip')){'dansheng-host.exe'}else{'libdansheng_ffi.so'}
@@ -48,6 +64,7 @@ foreach($PackageSum in $PackageSums){
             foreach($PackageMetadataName in @('build-info.json','source-manifest.sha256','binary-source-manifest.sha256','dependency-licenses.json')){
                 if((Get-EntryHash $PackageEntries[$PackageMetadataName]) -cne (Get-FileHash -LiteralPath (Join-Path $Directory $PackageMetadataName) -Algorithm SHA256).Hash.ToLowerInvariant()){throw 'Bundled metadata mismatch'}
             }
+            if($PackageProof.validation_document -and (Get-EntryHash $PackageEntries['VALIDATION.md']) -cne $PackageProof.validation_document.sha256){throw 'Bundled validation document differs from its build metadata'}
             if((Get-EntryText $PackageEntries['LICENSE']).Length -lt 100 -or (Get-EntryText $PackageEntries['THIRD-PARTY-NOTICES.txt']).Length -lt 100){throw 'Missing license text'}
         }
         $PackageChecks.Add([ordered]@{archive=$PackageName;entries=$PackageEntries.Count;sha256=$PackageHash;verified=$true})

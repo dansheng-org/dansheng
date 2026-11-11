@@ -372,17 +372,44 @@ mod tests {
     fn registered_service_surface_excludes_configuration_and_credential_presentation() {
         use dansheng_core::services::CoreService;
         for (method, capability) in dansheng_connectors::core_adapter::CampusService.methods() {
-            let is_query = !matches!(method, "canvas.configure" | "fudan.qr.present");
-            if is_query {
+            let is_query = (method.starts_with("fudan.")
+                || method.starts_with("canvas.")
+                || method.starts_with("community."))
+                && capability.ends_with(".read")
+                && !method.ends_with(".configure");
+            if METHODS.contains(&method) {
                 assert!(
                     capability.ends_with(".read"),
-                    "campus query has a non-read capability: {method}"
+                    "exposed campus method has a non-read capability: {method}"
                 );
             }
             assert_eq!(
                 METHODS.contains(&method),
                 is_query,
                 "campus method surface mismatch: {method}"
+            );
+        }
+        for method in [
+            "fudan.ecard.login",
+            "fudan.ecard.session",
+            "fudan.academic.login",
+            "fudan.life.login",
+            "fudan.portal.bind",
+            "fudan.qr.present",
+            "fudan.library.reader.observe",
+            "fudan.library.reader.bind",
+            "fudan.library.reader.clear",
+            "canvas.configure",
+            "canvas.token.bind",
+            "canvas.uis.login",
+            "community.tea.login",
+            "community.tea.publish",
+            "community.tea.reply",
+            "community.tea.reconcile",
+        ] {
+            assert!(
+                !METHODS.contains(&method),
+                "sensitive campus method must not be exposed: {method}"
             );
         }
         for (method, _) in dansheng_connectors::mail::MailService::default().methods() {

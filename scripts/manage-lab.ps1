@@ -3,13 +3,16 @@ param(
     [ValidateSet('academic','canvas','ecard','webvpn')][string]$Target='webvpn',
     [ValidateSet('direct','gateway','auto')][string]$Mode='auto',
     [string[]]$Origins,
-    [string]$Profile=(Join-Path $env:LOCALAPPDATA 'dansheng-lab\profiles\manual')
+    [string]$Profile,
+    [string]$RuntimeRoot
 )
 $ErrorActionPreference='Stop'
+. "$PSScriptRoot/runtime-common.ps1"
+$Profile=Resolve-DanshengLabProfile -Root (Split-Path -Parent $PSScriptRoot) -Profile $Profile -RuntimeRoot $RuntimeRoot
 $Control=Get-Content -Raw -LiteralPath (Join-Path $Profile 'lab-control.json') | ConvertFrom-Json
 $Base=[uri]$Control.base_url
 if($Base.Scheme -ne 'http' -or $Base.Host -ne '127.0.0.1'){throw 'Invalid local lab endpoint'}
-$Handler=[Net.Http.HttpClientHandler]::new();$Handler.UseProxy=$false
+$Handler=[Net.Http.HttpClientHandler]::new();$Handler.UseProxy=$false;$Handler.AllowAutoRedirect=$false
 $Client=[Net.Http.HttpClient]::new($Handler);$Client.Timeout=[TimeSpan]::FromSeconds(65)
 $Endpoint=if($Action -eq 'login'){'login'}else{'routes/webvpn'}
 $Body=if($Action -eq 'login'){@{target=$Target}}else{@{mode=$Mode}}

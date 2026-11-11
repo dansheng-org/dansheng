@@ -1,0 +1,4 @@
+{"e":0,"m":"ok","d":{"total":3,"list":[
+{"task_id":"synthetic-task-1","task_name":"合成申请一","node_name":"合成节点","task_created":"2026-11-09 09:00:00","inst_creator_name":"SYNTHETIC-PERSON-OMIT","form_url_view":"https://myform.fudan.edu.cn/view?token=SYNTHETIC-SIGNATURE-ONE","process_pic_url":"https://foreign.example.invalid/diagram?ticket=SYNTHETIC-SIGNATURE-TWO","form_mobile_url_view":"https://myform.fudan.edu.cn/mobile?task=SYNTHETIC-SIGNATURE-THREE"},
+{"id":"synthetic-task-2","task_name":"合成申请二","node_name":"合成节点二","task_created":"2026-11-09 10:00:00"}
+]}}

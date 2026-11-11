@@ -23,10 +23,15 @@ Codex 工具进程继承了 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`WS_PRO
 
 ## 固定调用入口
 
+迁移后先进入已登记任务，worker 的新输出、会话 ID 和锁文件写到该任务 runtime 的
+`workers/`。原 C 盘 `.local/workers` 和网络故障证据保留原文，下面的现行入口不续写
+那份历史目录。仅在已经授权委派的任务中调用 worker。
+
 ```powershell
-./scripts/invoke-agy-worker.ps1 `
+$runtime = $env:DANSHENG_TASK_RUNTIME
+./scripts/invoke-agy-worker.ps1 -RuntimeRoot $runtime `
   -Name readme-review `
-  -PromptFile .local/readme-prompt.txt `
+  -PromptFile (Join-Path $runtime 'tmp/readme-prompt.txt') `
   -Scope README.md
 ```
 
@@ -37,11 +42,11 @@ Codex 工具进程继承了 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`WS_PRO
 续接使用已保存的 ID：
 
 ```powershell
-$session = Get-Content -Raw .local/workers/readme-review-session.json | ConvertFrom-Json
-./scripts/invoke-agy-worker.ps1 `
+$session = Get-Content -Raw (Join-Path $runtime 'workers/readme-review-session.json') | ConvertFrom-Json
+./scripts/invoke-agy-worker.ps1 -RuntimeRoot $runtime `
   -Name readme-followup `
   -ConversationId $session.conversation_id `
-  -PromptFile .local/readme-followup.txt `
+  -PromptFile (Join-Path $runtime 'tmp/readme-followup.txt') `
   -Scope README.md
 ```
 

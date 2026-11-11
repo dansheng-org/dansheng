@@ -1,0 +1,5 @@
+{"e":0,"m":"ok","d":{"total":0,"list":[
+{"id":70001,"name":"合成服务一","dsc":"<p>公共目录样例</p>","category_name":"合成分类","has_permission":"y","contact":"SYNTHETIC-CONTACT-OMIT","extra_url":{"pc_url":"https://my.fudan.edu.cn/simple_list/example","mobile_url":"https://zlapp.fudan.edu.cn/site/example?type=1"}},
+{"id":"70002","name":"合成服务二","has_permission":"n","extra_url":{"pc_url":"https://foreign.example.invalid/entry?token=SYNTHETIC-SIGNATURE","mobile_url":"https://ehall.fudan.edu.cn/view?signature=SYNTHETIC-SIGNATURE"}},
+{"id":"70003","name":"合成服务三","extra_url":{"pc_url":"https://user:SYNTHETIC-PASSWORD@my.fudan.edu.cn/private","mobile_url":"https://booking.fudan.edu.cn/reservation/fe/site/special/special?id=48"}}
+]}}

@@ -38,12 +38,21 @@ Client configs must point at a local trusted endpoint; treat editing one like
 editing the local application's startup settings. Keep token files private.
 
 ```powershell
-dansheng-host serve --data-dir C:/private/dansheng
-dansheng-host call core.info --data-dir C:/private/dansheng
-dansheng-host call sources.query '{"kind":"timetable"}' --data-dir C:/private/dansheng
-dansheng-host call --request '{"id":"inspect","method":"core.info","params":{}}' --data-dir C:/private/dansheng
-dansheng-host schema
+$Profile = Join-Path $env:DANSHENG_TASK_RUNTIME 'profiles/core'
+$HostBinary = Join-Path $env:CARGO_TARGET_DIR 'debug/dansheng-host.exe'
+# Enter the registered D:/Worktrees/<task>/core task first.
+./scripts/start-local.ps1 -Background
+& $HostBinary call core.info --data-dir $Profile
+& $HostBinary call sources.query '{"kind":"timetable"}' --data-dir $Profile
+& $HostBinary call --request '{"id":"inspect","method":"core.info","params":{}}' --data-dir $Profile
+& $HostBinary schema
 ```
+
+`scripts/start-local.ps1` selects the actual `CARGO_TARGET_DIR` and passes the
+task profile explicitly. Cargo/Pub/Gradle preparation is provided by Core's
+`tools/workspace/Initialize-DanshengTask.ps1`. Task files and output now live
+under `D:/Worktrees` and `D:/Code/dansheng-workspace/local/runtime`; installed
+SDKs and preserved older user profiles keep their real C-drive locations.
 
 `call` emits the full core Response JSON. `call`, `mcp`, and `schema` never open the
 database. IPC disconnection after dispatch returns `OutcomeUnknown`; interrupted
@@ -69,7 +78,7 @@ core policy using the authenticated MCP principal.
 An owner can grant reads explicitly, for example:
 
 ```powershell
-dansheng-host call permissions.set '{"subject":"desktop-mcp","grant":{"capabilities":["sources.read","jobs.status","events.poll","plugins.list"],"account_ids":["campus"],"source_ids":["fudan.timetable"]}}' --data-dir C:/private/dansheng
+& $HostBinary call permissions.set '{"subject":"desktop-mcp","grant":{"capabilities":["sources.read","jobs.status","events.poll","plugins.list"],"account_ids":["campus"],"source_ids":["fudan.timetable"]}}' --data-dir $Profile
 ```
 
 Use actual local account/source identifiers in the grant. `sources.read` alone

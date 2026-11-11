@@ -1,0 +1,5 @@
+{"participants":[{"id":9007199254740993,"display_name":"Fixture learner","avatar_image_url":"https://files.example.invalid/avatar?token=SYNTHETIC_DO_NOT_PERSIST"}],
+ "unread_entries":["9007199254740993123456789"],"forced_entries":[],
+ "entry_ratings":{"SYNTHETIC_DO_NOT_PERSIST":1},
+ "view":[{"id":"9007199254740993123456789","user_id":9007199254740993,"message":"<p>First <a href=\"https://files.example.invalid/file?token=SYNTHETIC_DO_NOT_PERSIST\">reply</a>.</p>",
+ "replies":[{"id":2,"user_id":8,"parent_id":"9007199254740993123456789","message":"<style>SYNTHETIC_DO_NOT_PERSIST</style><p>Second reply</p>","replies":null}]}]}

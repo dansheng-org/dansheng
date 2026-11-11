@@ -1,3 +1,5 @@
+. "$PSScriptRoot/runtime-common.ps1"
+
 function Get-DanshengNativePrefixFlags {
     param([Parameter(Mandatory)][string]$TargetDirectory)
     $ReleaseNativePath=[IO.Path]::GetFullPath($TargetDirectory).Replace('\','/')
@@ -54,7 +56,10 @@ function Get-DanshengBinaryKind {
 }
 
 function Write-DanshengBuildReceipt {
-    param([string]$Root,[object]$Before,[string]$Binary,[string]$Target,[string[]]$Features,[string]$Receipt,[string[]]$BuildArguments,[string]$LinkerVersion)
+    param([string]$Root,[object]$Before,[string]$Binary,[string]$Target,[string[]]$Features,[string]$Receipt,[string[]]$BuildArguments,[string]$LinkerVersion,[string]$RuntimeRoot)
+    $ReleaseRuntime=Resolve-DanshengRuntimeRoot -Root $Root -RuntimeRoot $RuntimeRoot
+    $Binary=Get-DanshengRuntimeOutput -RuntimeRoot $ReleaseRuntime -Path $Binary
+    $Receipt=Get-DanshengRuntimeOutput -RuntimeRoot $ReleaseRuntime -Path $Receipt
     $ReleaseAfter=Get-DanshengBuildSource -Root $Root
     if($Before.sha256 -cne $ReleaseAfter.sha256){throw 'Release source changed during the build; no receipt written'}
     if((Get-DanshengBinaryKind -Path $Binary) -cne $Target){throw 'Release binary architecture mismatch'}
@@ -77,16 +82,15 @@ function Write-DanshengBuildReceipt {
 }
 
 function Assert-DanshengBuildReceipt {
-    param([string]$Root,[string]$Receipt,[string]$Target)
+    param([string]$Root,[string]$Receipt,[string]$Target,[string]$RuntimeRoot)
+    $ReleaseRuntime=Resolve-DanshengRuntimeRoot -Root $Root -RuntimeRoot $RuntimeRoot
+    $Receipt=Get-DanshengRuntimeOutput -RuntimeRoot $ReleaseRuntime -Path $Receipt
     $ReleaseProof=Get-Content -Raw -LiteralPath $Receipt | ConvertFrom-Json
     $ReleaseCurrent=Get-DanshengBuildSource -Root $Root
     if($ReleaseProof.format -cne 'dansheng-build-v1' -or $ReleaseProof.target -cne $Target -or $ReleaseProof.source_sha256 -cne $ReleaseCurrent.sha256){throw "Build receipt does not match current source or target: $Target"}
     if($ReleaseProof.rustc -notmatch '^rustc 1\.99\.1 '){throw 'Release receipt does not use the pinned Rust toolchain'}
     if($ReleaseProof.source_date_epoch -cne '0' -or $ReleaseProof.native_source_prefix -cne '/dansheng-build'){throw 'Release receipt lacks deterministic native compiler settings'}
-    $ReleaseArtifact=[IO.Path]::GetFullPath($ReleaseProof.artifact_path)
-    $ReleaseBoundary=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-    if(-not $ReleaseArtifact.StartsWith($ReleaseBoundary,[StringComparison]::OrdinalIgnoreCase)){throw 'Release artifact must stay inside the workspace'}
-    if((Get-Item -LiteralPath $ReleaseArtifact).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Linked release artifact refused'}
+    $ReleaseArtifact=Get-DanshengRuntimeOutput -RuntimeRoot $ReleaseRuntime -Path $ReleaseProof.artifact_path
     if((Get-DanshengBinaryKind $ReleaseArtifact) -cne $Target -or (Get-FileHash -LiteralPath $ReleaseArtifact -Algorithm SHA256).Hash.ToLowerInvariant() -cne $ReleaseProof.artifact_sha256){throw "Artifact does not match its build receipt: $Target"}
     $ReleaseProof
 }

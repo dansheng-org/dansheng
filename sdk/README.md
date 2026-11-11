@@ -15,6 +15,17 @@ import type {
 包名 `@dansheng/plugin-sdk` 是私有 scoped 包。`sdk/package.json` 没有 `dependencies`；
 TypeScript 只在 `devDependencies` 中，用于 `npm run typecheck`。
 
+原生 UI、IPC 和 FFI 客户端可从 `@dansheng/plugin-sdk/campus-services` 导入
+本轮新增校园只读 RPC 的参数和返回类型；示例见 `examples/campus-services.ts`。
+它涵盖本科目录/大纲、eHall 目录与任务、图书馆书目/馆藏及分离的当前/历史借阅，
+以及 Canvas 经典测验、讨论、作业分组、本人提交和已发布成绩。ID 用字符串保留。
+
+这些声明没有扩展 `PluginContext` 或 QuickJS 的方法门面。业务调用由已注册的
+`CampusService` 检查当前账号、能力和来源权限；MCP只暴露满足 `.read` 能力的
+方法，宿主配置/登录/读者绑定另列。公共目录的 `coverage` 与 eHall 的
+`complete/stop` 必须保留，课程缓存投影不能当独立详情读取。私人借阅协议尚未
+进行本人实读验收，宿主先独立验证并保存读者指纹，再同步。凭据仍由平台托管。
+
 ## Manifest v1
 
 `PluginManifest` 与 core 的 Rust 类型一致：

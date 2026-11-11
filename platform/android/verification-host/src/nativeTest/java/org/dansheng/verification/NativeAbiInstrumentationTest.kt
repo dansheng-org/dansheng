@@ -173,6 +173,13 @@ class NativeAbiInstrumentationTest : InstrumentationTestCase() {
         val root = activity.filesDir.resolve("sports-fixture-" + UUID.randomUUID()).apply { mkdirs() }
         val manifest = JSONObject(activity.assets.open("fudan-sports/manifest.json").bufferedReader().use { it.readText() })
         val fixtureOrigin = manifest.getJSONArray("network").getString(0)
+        // The trusted synthetic host grants this exact plugin/account/origin
+        // access to the owner's fixture page. Production sharing defaults stay
+        // in the adapter; plugin JSON cannot provide this host approval.
+        instrumentation.runOnMainSync {
+            activity.fixtureSharedReader = "plugin:" + manifest.getString("id")
+            activity.fixtureSharedOrigin = fixtureOrigin
+        }
         // The origin comes from typed plugin data. loadDataWithBaseURL + blockNetworkLoads
         // executes ONLY bundled fixture HTML; no request goes to the real school host.
         val loginDone = CountDownLatch(1); val loginResult = AtomicReference<Result<JSONObject>>()
@@ -194,14 +201,18 @@ class NativeAbiInstrumentationTest : InstrumentationTestCase() {
         for (file in activity.assets.list("fudan-sports")!!) {
             activity.assets.open("fudan-sports/$file").use { input -> packageDir.resolve(file).outputStream().use { input.copyTo(it) } }
         }
+        var pairedRuntimeDigest = ""
         if (pairedPackage) {
             fun sha256(bytes: ByteArray) = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
                 .joinToString("") { "%02x".format(it.toInt() and 255) }
             val files = packageDir.listFiles()!!.sortedBy { it.name }
             assertEquals(7, files.size)
             val inventory = files.joinToString("") { sha256(it.readBytes()) + "  " + it.name + "\n" }
-            assertEquals("unchanged original package bytes", "d13a9b3a96d1020051d60d28749576a0dfa1a4889730a737bfeaf0f0cef2becd",
-                sha256(inventory.toByteArray(Charsets.UTF_8)))
+            pairedRuntimeDigest = sha256(inventory.toByteArray(Charsets.UTF_8))
+            // Pinned to this research branch's original seven runtime files.
+            // Their hashes match source-before.json; pack.mjs is an authoring tool.
+            assertEquals("current source runtime package bytes", "98545163241a0a31c7d53c3e26a9a35696cc2df65ea3d01ced7f1b4e73649547",
+                pairedRuntimeDigest)
         }
         NativeCore.load()
         val engineRef = java.util.concurrent.atomic.AtomicLong()
@@ -317,7 +328,7 @@ class NativeAbiInstrumentationTest : InstrumentationTestCase() {
                 }
                 assertTrue(checked.await(3, TimeUnit.SECONDS)); assertTrue("only the synthetic venue GET may execute", onlySyntheticGet)
                 instrumentation.sendStatus(0, android.os.Bundle().apply {
-                    putString("paired_package_sha256", "d13a9b3a96d1020051d60d28749576a0dfa1a4889730a737bfeaf0f0cef2becd")
+                    putString("paired_package_sha256", pairedRuntimeDigest)
                     putString("paired_venue", venue.toString()); putString("paired_ui", ui.toString())
                     putString("paired_storage_stop", stopped.toString()); putString("paired_source_owner", "owner")
                 })

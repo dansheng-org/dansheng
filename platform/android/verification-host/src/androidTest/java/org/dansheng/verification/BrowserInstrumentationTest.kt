@@ -121,4 +121,32 @@ class BrowserInstrumentationTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync { activity.allowFixtureWrites = false }
         assertEquals("ApprovalRequired", (call("browser.request", request(handle, write = true), writable).exceptionOrNull() as PortError).code)
     }
+    private fun script(text: String) {
+        val done = CountDownLatch(1)
+        instrumentation.runOnMainSync { activity.fixtureView!!.evaluateJavascript(text) { done.countDown() } }
+        assertTrue(done.await(3, TimeUnit.SECONDS))
+    }
+    fun testBindingOriginAndSafePaginationMetadata() {
+        val handle = login()
+        val state = call("browser.evaluate", JSONObject().put("account_id", "fixture-a")
+            .put("operation", "session.status").put("require_authenticated", true)
+            .put("url", "https://fixture.invalid/")).getOrThrow()
+        assertEquals("fixture-a", state.getString("account_id"))
+        assertEquals("https://fixture.invalid", state.getString("origin"))
+        assertEquals(handle, state.getString("session_handle"))
+        script("window.fixtureHeaders={'content-type':'application/json','link':'<https://fixture.invalid/api?page=2>; rel=\"next\"','set-cookie':'SYNTHETIC_SECRET'};window.fixtureResponseUrl='https://fixture.invalid/api?user_id=123&page=1&ticket=SYNTHETIC_SECRET';")
+        val response = call("browser.request", request(handle, "/api?user_id=123&page=1")).getOrThrow()
+        assertEquals("https://fixture.invalid/api?user_id=123&page=1", response.getString("url"))
+        assertTrue(response.getJSONObject("headers").getString("link").contains("page=2"))
+        assertFalse(response.toString().contains("SYNTHETIC_SECRET"))
+        script("window.fixtureHeaders={};window.fixtureResponseUrl='https://fixture.invalid/api?user_id=123&user_id=456&page=1';")
+        assertEquals("https://fixture.invalid/api?page=1", call("browser.request", request(handle, "/api?user_id=123&page=1")).getOrThrow().getString("url"))
+    }
+    fun testSignedPaginationFailsWithoutLeakingOrNativeFallback() {
+        val handle = login()
+        script("window.fixtureHeaders={'link':'<https://fixture.invalid/api?access_token=SYNTHETIC_SECRET>; rel=\"next\"'};")
+        val response = call("browser.request", request(handle))
+        assertEquals("BrowserRequestFailed", (response.exceptionOrNull() as PortError).code)
+        assertFalse(response.toString().contains("SYNTHETIC_SECRET"))
+    }
 }

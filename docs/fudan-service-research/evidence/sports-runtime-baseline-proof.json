@@ -1,0 +1,43 @@
+{
+  "algorithm": "ordinal SHA256 UTF8 manifest LF",
+  "files": [
+    {
+      "path": "NOTICE.md",
+      "sha256": "213d2ea16c8b57c786df07e6b8fb6d2cfdb26a674e1a14b3f9ca1de1fcb50c51",
+      "matches_research_start": true
+    },
+    {
+      "path": "api.mjs",
+      "sha256": "700089b02ef4c647c7a21fe7de42477e09df718428866c29e35ca749b4072655",
+      "matches_research_start": true
+    },
+    {
+      "path": "main.mjs",
+      "sha256": "c7eb0770dd97d847af4b1b857b97a4b160522d59d44f032bfc2713f8358af6f9",
+      "matches_research_start": true
+    },
+    {
+      "path": "manifest.json",
+      "sha256": "1f86e55eda873437b6b96d4280a4d6c44894c83800bd12a0f8a3e7b2f4250125",
+      "matches_research_start": true
+    },
+    {
+      "path": "platform-support.json",
+      "sha256": "cdca921955ecc27962b4b8c2047f18342ca95540313d88066052089f7b728435",
+      "matches_research_start": true
+    },
+    {
+      "path": "policy.mjs",
+      "sha256": "42914bfc2355e1b212fb86bd96ea8deb4b0047abfe92fa19903fb1b0b962bb75",
+      "matches_research_start": true
+    },
+    {
+      "path": "types.d.ts",
+      "sha256": "75fd3add8293a20c4f2530b484567f89fe6377b6a889ec727bf91bfbebd0b282",
+      "matches_research_start": true
+    }
+  ],
+  "package_sha256": "98545163241a0a31c7d53c3e26a9a35696cc2df65ea3d01ced7f1b4e73649547",
+  "source_before_matched": true,
+  "old_test_literal": "d13a9b3a96d1020051d60d28749576a0dfa1a4889730a737bfeaf0f0cef2becd"
+}

@@ -2,20 +2,28 @@
 //! Official campus connectors and optional native mail services.
 //! Campus networking and authentication are supplied by the host transport.
 
+pub mod academic_catalog;
+pub mod academic_programs;
 pub mod campus;
 pub mod canvas;
 pub mod community;
 #[cfg(feature = "services")]
 pub mod core_adapter;
+pub mod ehall;
 pub mod energy_history;
+#[cfg(feature = "services")]
+mod expanded_services;
 #[cfg(feature = "services")]
 pub mod forum_actions;
 pub mod fudan;
+pub mod library;
 #[cfg(feature = "login")]
 pub mod login;
 #[cfg(feature = "services")]
 pub mod mail;
 pub mod models;
+#[cfg(feature = "services")]
+mod page_transport;
 pub mod transport;
 #[cfg(feature = "webvpn")]
 pub mod webvpn;

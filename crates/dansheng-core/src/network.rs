@@ -70,6 +70,55 @@ pub struct HttpResponse {
     pub download: Option<DownloadReceipt>,
 }
 
+/// Bounded native HTTP bytes for trusted Rust adapters. This is not a text IPC
+/// response: credentials are mediated by the same policy as normal requests.
+/// Raw bytes deliberately have no revealing Debug or automatic serialization.
+#[derive(Clone)]
+pub struct BinaryHttpResponse {
+    pub status: u16,
+    pub url: String,
+    pub headers: BTreeMap<String, String>,
+    pub body: Vec<u8>,
+}
+
+struct WireResponse {
+    status: u16,
+    url: String,
+    headers: BTreeMap<String, String>,
+    body: Vec<u8>,
+    download: Option<DownloadReceipt>,
+    max_bytes: u64,
+    mutating_request: bool,
+}
+
+impl WireResponse {
+    fn into_text(self) -> CoreResult<HttpResponse> {
+        let body = decode_text(&self.body, &self.headers, self.max_bytes).map_err(|error| {
+            if self.mutating_request {
+                CoreError::new("NeedsReconciliation", "write response could not be decoded")
+            } else {
+                error
+            }
+        })?;
+        Ok(HttpResponse {
+            status: self.status,
+            url: self.url,
+            headers: self.headers,
+            body,
+            download: self.download,
+        })
+    }
+
+    fn into_binary(self) -> BinaryHttpResponse {
+        BinaryHttpResponse {
+            status: self.status,
+            url: self.url,
+            headers: self.headers,
+            body: self.body,
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DownloadReceipt {
     pub status: u16,
@@ -109,6 +158,7 @@ struct Session {
     origin: String,
     generation: String,
     bearer: Option<String>,
+    secret_headers: BTreeMap<String, String>,
     jar: Arc<SessionJar>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -117,10 +167,119 @@ pub enum CredentialKind {
     Any,
     Cookie,
     Bearer,
+    /// Explicitly selected, origin-bound nonstandard credentials. Any never sends them.
+    SecretHeaders,
     /// No backend credentials. The account may still own gateway authentication.
     Anonymous,
 }
-type SessionCopy = (String, Option<String>, Arc<SessionJar>);
+type SessionCopy = (
+    String,
+    Option<String>,
+    Arc<SessionJar>,
+    BTreeMap<String, String>,
+);
+
+fn validate_secret_headers(
+    values: BTreeMap<String, String>,
+) -> CoreResult<BTreeMap<String, String>> {
+    if values.len() > 16 {
+        return Err(CoreError::invalid("too many secret headers"));
+    }
+    let mut validated = BTreeMap::new();
+    let mut bytes = 0usize;
+    for (name, value) in values {
+        if name.len() > 128 {
+            return Err(CoreError::invalid("invalid secret header name"));
+        }
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| CoreError::invalid("invalid secret header name"))?
+            .as_str()
+            .to_owned();
+        if matches!(
+            name.as_str(),
+            "authorization"
+                | "cookie"
+                | "cookie2"
+                | "set-cookie"
+                | "set-cookie2"
+                | "www-authenticate"
+                | "host"
+                | "content-length"
+                | "connection"
+                | "keep-alive"
+                | "transfer-encoding"
+                | "te"
+                | "trailer"
+                | "upgrade"
+                | "expect"
+                | "forwarded"
+                | "via"
+        ) || name.starts_with("proxy-")
+            || name.starts_with("x-forwarded-")
+        {
+            return Err(CoreError::invalid("reserved secret header name"));
+        }
+        bytes = bytes.saturating_add(name.len()).saturating_add(value.len());
+        if value.trim().is_empty()
+            || value.len() > 8192
+            || bytes > 32768
+            || value.bytes().any(|b| !matches!(b, 0x20..=0x7e))
+            || HeaderValue::from_str(&value).is_err()
+        {
+            return Err(CoreError::invalid("invalid secret header value or size"));
+        }
+        if validated.insert(name, value).is_some() {
+            return Err(CoreError::invalid("duplicate secret header name"));
+        }
+    }
+    Ok(validated)
+}
+
+fn reject_secret_header_collision(
+    headers: &HeaderMap,
+    session: Option<&SessionCopy>,
+) -> CoreResult<()> {
+    if session.is_some_and(|(_, _, _, secret_headers)| {
+        secret_headers.keys().any(|name| headers.contains_key(name))
+    }) {
+        return Err(CoreError::new(
+            "PermissionDenied",
+            "caller headers conflict with host credentials",
+        ));
+    }
+    Ok(())
+}
+
+fn secret_header_value(value: &str) -> CoreResult<HeaderValue> {
+    let mut value = HeaderValue::from_str(value)
+        .map_err(|_| CoreError::new("SessionError", "invalid secret header"))?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+pub(crate) fn secret_headers_from_value(
+    value: Option<&Value>,
+) -> CoreResult<BTreeMap<String, String>> {
+    let Some(value) = value else {
+        return Ok(BTreeMap::new());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| CoreError::invalid("secret headers must be an object"))?;
+    if object.len() > 16 {
+        return Err(CoreError::invalid("too many secret headers"));
+    }
+    let values = object
+        .iter()
+        .map(|(key, value)| {
+            value
+                .as_str()
+                .map(|value| (key.clone(), value.to_owned()))
+                .ok_or_else(|| CoreError::invalid("secret header values must be strings"))
+        })
+        .collect::<CoreResult<BTreeMap<_, _>>>()?;
+    validate_secret_headers(values)
+}
 #[derive(Clone)]
 struct Transfer {
     sink: Option<PathBuf>,
@@ -128,6 +287,7 @@ struct Transfer {
     resume: bool,
     credentials: CredentialKind,
     gateway: bool,
+    body_bytes: Option<Vec<u8>>,
 }
 impl Transfer {
     fn buffered(credentials: CredentialKind) -> Self {
@@ -137,6 +297,7 @@ impl Transfer {
             resume: false,
             credentials,
             gateway: false,
+            body_bytes: None,
         }
     }
 }
@@ -207,18 +368,26 @@ impl Network {
             .map_err(|_| CoreError::new("SessionError", "session lock poisoned"))?;
         Ok(account
             .and_then(|account| sessions.get(&(account.to_owned(), origin.to_owned())))
-            .map(|s| (s.origin.clone(), s.bearer.clone(), s.jar.clone())))
+            .map(|s| {
+                (
+                    s.origin.clone(),
+                    s.bearer.clone(),
+                    s.jar.clone(),
+                    s.secret_headers.clone(),
+                )
+            }))
     }
     fn session_matches(session: Option<&SessionCopy>, kind: CredentialKind) -> bool {
         if kind == CredentialKind::Anonymous {
             return true;
         }
-        let Some((_, token, jar)) = session else {
+        let Some((_, token, jar, secret_headers)) = session else {
             return false;
         };
         match kind {
             CredentialKind::Any => true,
             CredentialKind::Bearer => token.as_ref().is_some_and(|token| !token.trim().is_empty()),
+            CredentialKind::SecretHeaders => !secret_headers.is_empty(),
             CredentialKind::Cookie => jar
                 .0
                 .lock()
@@ -233,7 +402,7 @@ impl Network {
         {
             return true;
         }
-        if kind == CredentialKind::Bearer {
+        if matches!(kind, CredentialKind::Bearer | CredentialKind::SecretHeaders) {
             return false;
         }
         self.routes(account).is_ok_and(|routes| {
@@ -256,9 +425,37 @@ impl Network {
         bearer: Option<String>,
         cookies: Vec<String>,
     ) -> CoreResult<()> {
+        self.set_session_with_headers(account, origin, bearer, cookies, BTreeMap::new())
+    }
+    pub fn set_session_with_headers(
+        &self,
+        account: &str,
+        origin: &str,
+        bearer: Option<String>,
+        cookies: Vec<String>,
+        secret_headers: BTreeMap<String, String>,
+    ) -> CoreResult<()> {
+        let secret_headers = validate_secret_headers(secret_headers)?;
+        if !secret_headers.is_empty()
+            && (account.is_empty() || account.len() > 256 || account.chars().any(char::is_control))
+        {
+            return Err(CoreError::invalid("invalid secret header account"));
+        }
         let url = Url::parse(origin).map_err(|_| CoreError::invalid("invalid session origin"))?;
         if url.scheme() != "https" && url.scheme() != "http" {
             return Err(CoreError::invalid("invalid session scheme"));
+        }
+        if !secret_headers.is_empty()
+            && (url.host_str().is_none()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.path() != "/"
+                || url.query().is_some()
+                || url.fragment().is_some())
+        {
+            return Err(CoreError::invalid(
+                "secret headers require an exact session origin",
+            ));
         }
         let mut store = cookie_store::CookieStore::default();
         for cookie in cookies {
@@ -277,6 +474,7 @@ impl Network {
                     origin,
                     generation: uuid::Uuid::new_v4().to_string(),
                     bearer,
+                    secret_headers,
                     jar,
                 },
             );
@@ -299,6 +497,7 @@ impl Network {
                             .bearer
                             .as_ref()
                             .is_some_and(|token| !token.trim().is_empty())
+                            || !session.secret_headers.is_empty()
                             || session
                                 .jar
                                 .0
@@ -311,6 +510,7 @@ impl Network {
     pub fn has_session_for_origin(&self, account: &str, origin: &str) -> bool {
         self.credential_available(account, origin, CredentialKind::Cookie)
             || self.credential_available(account, origin, CredentialKind::Bearer)
+            || self.credential_available(account, origin, CredentialKind::SecretHeaders)
     }
     pub fn session_fingerprint(&self, account: Option<&str>) -> CoreResult<String> {
         let Some(account) = account else {
@@ -355,7 +555,11 @@ impl Network {
                 .map_err(|_| CoreError::new("SessionError", "cookie lock poisoned"))?;
             cookie_store::serde::json::save_incl_expired_and_nonpersistent(&jar, &mut bytes)
                 .map_err(|_| CoreError::new("SessionError", "cannot serialize cookie session"))?;
-            values.push(serde_json::json!({"origin":session.origin,"generation":session.generation,"bearer":session.bearer,"cookie_store":serde_json::from_slice::<Value>(&bytes)?}));
+            let mut value = serde_json::json!({"origin":session.origin,"generation":session.generation,"bearer":session.bearer,"cookie_store":serde_json::from_slice::<Value>(&bytes)?});
+            if !session.secret_headers.is_empty() {
+                value["secret_headers"] = serde_json::to_value(&session.secret_headers)?;
+            }
+            values.push(value);
         }
         Ok(Value::Array(values))
     }
@@ -364,6 +568,7 @@ impl Network {
             .as_array()
             .ok_or_else(|| CoreError::new("SessionError", "invalid stored session"))?;
         let mut pending = Vec::new();
+        let mut origins = std::collections::HashSet::new();
         for value in values {
             let origin = value["origin"]
                 .as_str()
@@ -372,10 +577,12 @@ impl Network {
                 .map_err(|_| CoreError::new("SessionError", "invalid stored origin"))?;
             if !matches!(url.scheme(), "http" | "https")
                 || url.origin().ascii_serialization() != origin
+                || !origins.insert(origin.to_owned())
             {
                 return Err(CoreError::new("SessionError", "invalid stored origin"));
             }
             let bytes = serde_json::to_vec(&value["cookie_store"])?;
+            let secret_headers = secret_headers_from_value(value.get("secret_headers"))?;
             let store = cookie_store::serde::json::load(std::io::Cursor::new(bytes))
                 .map_err(|_| CoreError::new("SessionError", "invalid stored cookies"))?;
             pending.push((
@@ -387,6 +594,7 @@ impl Network {
                         .map(str::to_owned)
                         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                     bearer: value["bearer"].as_str().map(str::to_owned),
+                    secret_headers,
                     jar: Arc::new(SessionJar(Mutex::new(store))),
                 },
             ));
@@ -395,6 +603,7 @@ impl Network {
             .sessions
             .lock()
             .map_err(|_| CoreError::new("SessionError", "session lock poisoned"))?;
+        sessions.retain(|(a, _), _| a != account);
         for (key, value) in pending {
             sessions.insert(key, value);
         }
@@ -413,7 +622,8 @@ impl Network {
             input,
             Transfer::buffered(CredentialKind::Any),
         )
-        .await
+        .await?
+        .into_text()
     }
     pub async fn request_with_credentials(
         &self,
@@ -423,7 +633,34 @@ impl Network {
         kind: CredentialKind,
     ) -> CoreResult<HttpResponse> {
         self.execute(principal, grant, input, Transfer::buffered(kind))
-            .await
+            .await?
+            .into_text()
+    }
+
+    /// Send an optional raw body and receive raw bytes, without UTF-8, JSON,
+    /// charset or base64 conversion. The request and response buffer limit is
+    /// 8 MiB. Text `input.body` is rejected to avoid two competing body sources.
+    /// All credentials, grants, DNS/TLS checks, redirect handling and uncertain
+    /// write outcomes use the same native execution path as text requests.
+    pub async fn request_bytes(
+        &self,
+        principal: &Principal,
+        grant: &Grant,
+        input: HttpRequest,
+        body_bytes: Option<Vec<u8>>,
+        kind: CredentialKind,
+    ) -> CoreResult<BinaryHttpResponse> {
+        if input.body.is_some() {
+            return Err(CoreError::invalid(
+                "binary requests use body_bytes, not text body",
+            ));
+        }
+        let mut transfer = Transfer::buffered(kind);
+        transfer.body_bytes = body_bytes;
+        Ok(self
+            .execute(principal, grant, input, transfer)
+            .await?
+            .into_binary())
     }
     pub async fn download(
         &self,
@@ -447,9 +684,11 @@ impl Network {
                 resume,
                 credentials: CredentialKind::Any,
                 gateway: false,
+                body_bytes: None,
             },
         )
         .await?
+        .into_text()?
         .download
         .ok_or_else(|| CoreError::new("InternalError", "download receipt missing"))
     }
@@ -459,9 +698,19 @@ impl Network {
         grant: &Grant,
         mut input: HttpRequest,
         mut transfer: Transfer,
-    ) -> CoreResult<HttpResponse> {
+    ) -> CoreResult<WireResponse> {
         grant.check(principal, "http.request")?;
         grant.check_account(principal, input.account_id.as_deref())?;
+        if transfer
+            .body_bytes
+            .as_ref()
+            .is_some_and(|body| body.len() as u64 > transfer.max_bytes)
+        {
+            return Err(CoreError::new(
+                "RequestTooLarge",
+                "request body exceeds buffer quota",
+            ));
+        }
         let url = Url::parse(&input.url).map_err(|_| CoreError::invalid("invalid request URL"))?;
         validate_url(&url, principal, grant)?;
         let routes = input
@@ -524,13 +773,14 @@ impl Network {
         input: HttpRequest,
         transfer: Transfer,
         routes: &[GatewayRoute],
-    ) -> CoreResult<HttpResponse> {
+    ) -> CoreResult<WireResponse> {
         let Transfer {
             sink,
             max_bytes,
             resume,
             credentials,
             mut gateway,
+            mut body_bytes,
         } = transfer;
         grant.check(principal, "http.request")?;
         grant.check_account(principal, input.account_id.as_deref())?;
@@ -584,6 +834,7 @@ impl Network {
             headers.remove("authorization");
             headers.remove("cookie");
         }
+        let mut hidden_headers = std::collections::BTreeSet::new();
         let deadline = tokio::time::Instant::now()
             + Duration::from_millis(
                 input
@@ -620,6 +871,50 @@ impl Network {
             // The owner approved the transport gateway, but logical-origin/account
             // grants above still apply. Physical DNS and TLS validation remain on.
             validate_url(&physical, &Principal::owner(), grant)?;
+            let native = self.copy_session(
+                input.account_id.as_deref(),
+                &url.origin().ascii_serialization(),
+            )?;
+            let session = if route.is_some() {
+                self.copy_session(
+                    input.account_id.as_deref(),
+                    &physical.origin().ascii_serialization(),
+                )?
+            } else {
+                native.clone()
+            };
+            reject_secret_header_collision(&headers, native.as_ref())?;
+            reject_secret_header_collision(&headers, session.as_ref())?;
+            for (_, _, _, values) in native.iter().chain(session.iter()) {
+                hidden_headers.extend(values.keys().cloned());
+            }
+            // Every redirected origin must supply its own explicit credential.
+            // Gateway cookies alone cannot satisfy backend secret headers.
+            if credentials == CredentialKind::SecretHeaders
+                && (input.account_id.is_none()
+                    || !Self::session_matches(native.as_ref(), CredentialKind::SecretHeaders))
+            {
+                return Err(CoreError::new(
+                    "AuthenticationRequired",
+                    "account has no secret header credentials for this origin",
+                ));
+            }
+            let session_kind = if route.is_some() {
+                CredentialKind::Cookie
+            } else {
+                credentials
+            };
+            if (redirect == 0 || credentials == CredentialKind::SecretHeaders)
+                && input.account_id.is_some()
+                && (!Self::session_matches(session.as_ref(), session_kind)
+                    || (credentials == CredentialKind::Bearer
+                        && !Self::session_matches(native.as_ref(), CredentialKind::Bearer)))
+            {
+                return Err(CoreError::new(
+                    "AuthenticationRequired",
+                    "account has no credential of the required kind for this origin or gateway",
+                ));
+            }
             let host = physical
                 .host_str()
                 .ok_or_else(|| CoreError::invalid("URL has no host"))?
@@ -650,34 +945,6 @@ impl Network {
                 return Err(CoreError::new(
                     "PermissionDenied",
                     "private or special-use network requires explicit permission",
-                ));
-            }
-            let native = self.copy_session(
-                input.account_id.as_deref(),
-                &url.origin().ascii_serialization(),
-            )?;
-            let session = if route.is_some() {
-                self.copy_session(
-                    input.account_id.as_deref(),
-                    &physical.origin().ascii_serialization(),
-                )?
-            } else {
-                native.clone()
-            };
-            let session_kind = if route.is_some() {
-                CredentialKind::Cookie
-            } else {
-                credentials
-            };
-            if redirect == 0
-                && input.account_id.is_some()
-                && (!Self::session_matches(session.as_ref(), session_kind)
-                    || (credentials == CredentialKind::Bearer
-                        && !Self::session_matches(native.as_ref(), CredentialKind::Bearer)))
-            {
-                return Err(CoreError::new(
-                    "AuthenticationRequired",
-                    "account has no credential of the required kind for this origin or gateway",
                 ));
             }
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -719,7 +986,7 @@ impl Network {
             .with_root_certificates(roots)
             .with_no_client_auth();
             builder = builder.tls_backend_preconfigured(tls);
-            if let Some((_, _, jar)) = &session
+            if let Some((_, _, jar, _)) = &session
                 && (route.is_some()
                     || matches!(credentials, CredentialKind::Any | CredentialKind::Cookie))
             {
@@ -734,13 +1001,22 @@ impl Network {
             if sink.is_some() {
                 request = request.header(reqwest::header::ACCEPT_ENCODING, "identity");
             }
-            if let Some((origin, Some(token), _)) = &native
+            if let Some((origin, Some(token), _, _)) = &native
                 && matches!(credentials, CredentialKind::Any | CredentialKind::Bearer)
                 && *origin == url.origin().ascii_serialization()
             {
                 request = request.bearer_auth(token);
             }
-            if let Some(value) = &body {
+            if credentials == CredentialKind::SecretHeaders
+                && let Some((_, _, _, values)) = &native
+            {
+                for (name, value) in values {
+                    request = request.header(name, secret_header_value(value)?);
+                }
+            }
+            if let Some(bytes) = &body_bytes {
+                request = request.body(bytes.clone());
+            } else if let Some(value) = &body {
                 request = if let Some(text) = value.as_str() {
                     request.body(text.to_owned())
                 } else {
@@ -802,6 +1078,7 @@ impl Network {
                 {
                     method = Method::GET;
                     body = None;
+                    body_bytes = None;
                     headers.remove("content-type");
                 }
                 url = next;
@@ -811,10 +1088,11 @@ impl Network {
                 .headers()
                 .iter()
                 .filter(|(k, _)| {
-                    !matches!(
-                        k.as_str(),
-                        "set-cookie" | "authorization" | "proxy-authenticate"
-                    )
+                    !hidden_headers.contains(k.as_str())
+                        && !matches!(
+                            k.as_str(),
+                            "set-cookie" | "authorization" | "proxy-authenticate"
+                        )
                 })
                 .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.to_string(), v.to_owned())))
                 .collect();
@@ -914,10 +1192,12 @@ impl Network {
                             "response read deadline exceeded",
                         )
                     })?
-                    .map_err(|_| {
+                    .map_err(|error| {
                         CoreError::new(
                             if mutating_request {
                                 "NeedsReconciliation"
+                            } else if error.is_timeout() {
+                                "Timeout"
                             } else {
                                 "NetworkError"
                             },
@@ -953,19 +1233,14 @@ impl Network {
                 size,
                 sha256: hex::encode(digest.finalize()),
             });
-            let body = decode_text(&bytes, &safe_headers, max_bytes).map_err(|error| {
-                if mutating_request {
-                    CoreError::new("NeedsReconciliation", "write response could not be decoded")
-                } else {
-                    error
-                }
-            })?;
-            return Ok(HttpResponse {
+            return Ok(WireResponse {
                 status: status.as_u16(),
                 url: url.to_string(),
                 headers: safe_headers,
-                body,
+                body: bytes,
                 download,
+                max_bytes,
+                mutating_request,
             });
         }
         Err(CoreError::new("RedirectLimit", "too many redirects"))
@@ -1110,6 +1385,223 @@ fn public_address(ip: IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn secret_header_validation_never_echoes_rejected_values() {
+        let header = secret_header_value("SYNTHETIC-DO-NOT-ECHO").unwrap();
+        assert!(header.is_sensitive());
+        assert!(!format!("{header:?}").contains("SYNTHETIC-DO-NOT-ECHO"));
+        for name in [
+            "Authorization",
+            "Cookie",
+            "Host",
+            "Content-Length",
+            "Connection",
+            "TE",
+            "Transfer-Encoding",
+            "Trailer",
+            "Upgrade",
+            "Keep-Alive",
+            "Proxy-Authorization",
+            "proxy-custom",
+            "Forwarded",
+            "X-Forwarded-For",
+            "Set-Cookie",
+            "WWW-Authenticate",
+            "invalid name",
+            "invalid\rname",
+        ] {
+            let error =
+                validate_secret_headers([(name.into(), "SYNTHETIC-DO-NOT-ECHO".into())].into())
+                    .unwrap_err();
+            assert!(!format!("{error:?}").contains("SYNTHETIC-DO-NOT-ECHO"));
+        }
+        for value in [
+            "",
+            "   ",
+            "synthetic\r\ninjection",
+            "synthetic\tvalue",
+            "synthetic\0value",
+            "非ASCII",
+        ] {
+            let error = validate_secret_headers([("x-fixture-token".into(), value.into())].into())
+                .unwrap_err();
+            assert_eq!(error.code, "InvalidInput");
+            if !value.is_empty() {
+                assert!(!error.message.contains(value));
+            }
+        }
+        assert!(
+            validate_secret_headers([("x-fixture-token".into(), "s".repeat(8193))].into()).is_err()
+        );
+        assert!(validate_secret_headers([("x".repeat(129), "synthetic".into())].into()).is_err());
+        assert!(
+            validate_secret_headers(
+                (0..17)
+                    .map(|n| (format!("x-fixture-{n}"), "s".into()))
+                    .collect()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_secret_headers(
+                (0..5)
+                    .map(|n| (format!("x-fixture-{n}"), "s".repeat(8192)))
+                    .collect()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_secret_headers(
+                [
+                    ("X-Fixture-Token".into(), "one".into()),
+                    ("x-fixture-token".into(), "two".into())
+                ]
+                .into()
+            )
+            .is_err()
+        );
+        let valid =
+            validate_secret_headers([("X-Fixture-Token".into(), "synthetic".into())].into())
+                .unwrap();
+        assert!(valid.contains_key("x-fixture-token"));
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!([]),
+            serde_json::json!({"x-fixture-token":123}),
+        ] {
+            assert!(secret_headers_from_value(Some(&value)).is_err());
+        }
+    }
+
+    #[test]
+    fn secret_header_import_is_atomic_account_scoped_and_legacy_compatible() {
+        let network = Network::default();
+        let origin = "https://service.example";
+        network
+            .set_session_with_headers(
+                "a",
+                origin,
+                None,
+                vec![],
+                [("x-fixture-token".into(), "synthetic-a".into())].into(),
+            )
+            .unwrap();
+        network
+            .set_session_with_headers(
+                "b",
+                origin,
+                None,
+                vec![],
+                [("x-fixture-token".into(), "synthetic-b".into())].into(),
+            )
+            .unwrap();
+        let original = network.export_sessions("a").unwrap();
+        let fingerprint = network.session_fingerprint(Some("a")).unwrap();
+        let mut invalid = original.clone();
+        let mut second = original[0].clone();
+        second["origin"] = serde_json::json!("https://other.example");
+        second["secret_headers"] = serde_json::json!({"authorization":"SYNTHETIC-REJECTED"});
+        invalid.as_array_mut().unwrap().push(second);
+        let error = network.restore_sessions("a", &invalid).unwrap_err();
+        assert!(!format!("{error:?}").contains("SYNTHETIC-REJECTED"));
+        assert_eq!(network.export_sessions("a").unwrap(), original);
+        assert_eq!(network.session_fingerprint(Some("a")).unwrap(), fingerprint);
+        assert!(!network.has_session_for_origin("a", "https://other.example"));
+        assert!(network.credential_available("b", origin, CredentialKind::SecretHeaders));
+        let duplicate = serde_json::json!([original[0], original[0]]);
+        assert!(network.restore_sessions("a", &duplicate).is_err());
+        assert_eq!(network.export_sessions("a").unwrap(), original);
+
+        let restored = Network::default();
+        restored.restore_sessions("a", &original).unwrap();
+        assert_eq!(restored.export_sessions("a").unwrap(), original);
+        assert!(restored.has_session("a"));
+        assert!(!restored.credential_available("b", origin, CredentialKind::SecretHeaders));
+        let mut legacy = original.clone();
+        legacy[0].as_object_mut().unwrap().remove("secret_headers");
+        legacy[0]["bearer"] = serde_json::json!("synthetic-legacy");
+        restored.restore_sessions("a", &legacy).unwrap();
+        assert_eq!(restored.export_sessions("a").unwrap(), legacy);
+        assert!(!restored.credential_available("a", origin, CredentialKind::SecretHeaders));
+        assert!(restored.credential_available("a", origin, CredentialKind::Bearer));
+        network
+            .restore_sessions("a", &serde_json::json!([]))
+            .unwrap();
+        assert!(!network.has_session("a"));
+        assert!(network.has_session("b"));
+    }
+
+    #[test]
+    fn secret_header_origin_replacement_and_gateway_binding_are_exact() {
+        let network = Network::default();
+        let headers = || [("x-fixture-token".into(), "synthetic".into())].into();
+        for origin in [
+            "https://service.example/path",
+            "https://user@service.example",
+            "https://service.example?key=synthetic",
+            "https://service.example#part",
+        ] {
+            assert!(
+                network
+                    .set_session_with_headers("a", origin, None, vec![], headers())
+                    .is_err()
+            );
+        }
+        network
+            .set_session_with_headers("a", "https://service.example", None, vec![], headers())
+            .unwrap();
+        for origin in [
+            "http://service.example",
+            "https://service.example:444",
+            "https://sub.service.example",
+            "https://service.example.evil",
+        ] {
+            assert!(!network.credential_available("a", origin, CredentialKind::SecretHeaders));
+        }
+        let before = network.session_fingerprint(Some("a")).unwrap();
+        network
+            .set_session(
+                "a",
+                "https://service.example",
+                Some("synthetic-bearer".into()),
+                vec![],
+            )
+            .unwrap();
+        assert_ne!(before, network.session_fingerprint(Some("a")).unwrap());
+        assert!(!network.credential_available(
+            "a",
+            "https://service.example",
+            CredentialKind::SecretHeaders
+        ));
+        network
+            .set_routes(
+                "a",
+                vec![GatewayRoute {
+                    provider: "fixture".into(),
+                    origin: "https://backend.example".into(),
+                    gateway_prefix: "https://gateway.example/gate".into(),
+                    mode: RouteMode::Gateway,
+                }],
+            )
+            .unwrap();
+        network
+            .set_session_with_headers(
+                "a",
+                "https://gateway.example",
+                None,
+                vec!["GATEWAY=synthetic; Secure; Path=/".into()],
+                headers(),
+            )
+            .unwrap();
+        assert!(!network.credential_available(
+            "a",
+            "https://backend.example",
+            CredentialKind::SecretHeaders
+        ));
+        network.clear_session("a").unwrap();
+        assert!(!network.has_session("a"));
+        assert_eq!(network.export_sessions("a").unwrap(), serde_json::json!([]));
+    }
     #[test]
     fn scoped_lan_exception_requires_exact_owner_https_origin_and_routable_address() {
         use crate::api::PrincipalKind;

@@ -69,9 +69,14 @@ fixture package 的源码存在仍不是两端同包执行证明；父侧 normal
 
 新的同范围冻结批可使用：
 
+当前任务从 D 盘工作树运行，新的 snapshot/日志写到任务 runtime 的 `linux-validation`。
+下面 `$environment` 是 2026-11-06 留存环境的证据位置；不将旧 C 路径改成新的编译来源。
+是否执行或修改该留存发行版仍需对应授权，不因目录迁移自动重建或注销它。
+
 ~~~powershell
+# This is a retained 2026-11-06 environment/evidence directory, not a new output path.
 $environment = 'C:/Code/dansheng/.local/linux-validation/20261106T192944Z-f294b1ec'
-pwsh -NoProfile -File ./scripts/verify-linux.ps1 -ExecuteNative -CoreHostFfiOnly -KeepDistribution -EnvironmentDirectory $environment
+pwsh -NoProfile -File ./scripts/verify-linux.ps1 -RuntimeRoot $env:DANSHENG_TASK_RUNTIME -ExecuteNative -CoreHostFfiOnly -KeepDistribution -EnvironmentDirectory $environment
 ~~~
 
 亦可先 -PrepareSnapshot，再指定新的 -SnapshotDirectory；已执行快照拒绝覆盖。日志总流为 native-console.log，分阶段退出码为 linux-results/results/stages.tsv。

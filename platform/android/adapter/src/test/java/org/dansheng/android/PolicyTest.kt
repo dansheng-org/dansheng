@@ -53,4 +53,14 @@ class PolicyTest {
         error("InvalidWake") { s.copy(deadline = 200).validate(0) }
         error("InvalidWake") { s.copy(precision = "pretend-exact").validate(0) }
     }
+    @Test fun pageQueryFiltersCannotBeRestoredAfterRedirectBroadening() {
+        val requested = "https://example.invalid/api?user_id=123&page=1"
+        val origin = "https://example.invalid"
+        assertEquals(requested, safePageResponseUrl(requested + "&ticket=SYNTHETIC_SECRET", requested, origin))
+        assertEquals(origin + "/api?page=1", safePageResponseUrl(origin + "/api?user_id=456&page=1", requested, origin))
+        assertEquals(origin + "/api?page=1", safePageResponseUrl(origin + "/api?user_id=123&user_id=456&page=1", requested, origin))
+        assertEquals(origin + "/api?page=1", safePageResponseUrl(origin + "/api?page=1", requested, origin))
+        assertEquals(origin + "/api?user_id=123", safePageResponseUrl(origin + "/api?user_id=123&page=2", requested, origin))
+        error("OriginMismatch") { safePageResponseUrl("https://other.invalid/api", requested, origin) }
+    }
 }

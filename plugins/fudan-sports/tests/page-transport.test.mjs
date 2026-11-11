@@ -44,3 +44,31 @@ test('response body interrupted after POST preserves uncertainty',async()=>{
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(window.box.r.value.error,'NeedsReconciliation');
 });
+test('page transport retains safe pagination and discards credential headers',async()=>{
+  const safeLink='<https://fixture.invalid/api?page=2>; rel="next"';
+  const window={fetch:async(url)=>({status:200,url,text:async()=>'[]',headers:{get:name=>({
+    'content-type':'application/json','link':safeLink,'set-cookie':'SYNTHETIC_SECRET',
+    'authorization':'SYNTHETIC_SECRET'
+  })[name]??null}})};
+  vm.runInContext(source,vm.createContext({window,URL,AbortController,setTimeout,clearTimeout}))('box','r',{
+    method:'GET',url:'https://fixture.invalid/api',transport:'fetch',headers:{},timeout_ms:1000,max_body_chars:1000});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(window.box.r.value.headers.link,safeLink);
+  assert.equal(window.box.r.value.headers['content-type'],'application/json');
+  assert.equal(JSON.stringify(window.box.r.value).includes('SYNTHETIC_SECRET'),false);
+});
+test('signed and cross-origin Link headers fail without returning a partial list',async()=>{
+  for(const link of [
+    '<https://unrelated.invalid/api?page=2>; rel="next"',
+    '<https://fixture.invalid/api?access_token=SYNTHETIC_SECRET>; rel="next"',
+    '<https://fixture.invalid/api?api_key=SYNTHETIC_SECRET>; rel="next"',
+    '<https://fixture.invalid/api?sig=SYNTHETIC_SECRET>; rel="next"'
+  ]){
+    const window={fetch:async(url)=>({status:200,url,text:async()=>'[]',headers:{get:name=>name==='link'?link:null}})};
+    vm.runInContext(source,vm.createContext({window,URL,AbortController,setTimeout,clearTimeout}))('box','r',{
+      method:'GET',url:'https://fixture.invalid/api',transport:'fetch',headers:{},timeout_ms:1000,max_body_chars:1000});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(window.box.r.value.error,'BrowserRequestFailed');
+    assert.equal(JSON.stringify(window.box.r.value).includes('SYNTHETIC_SECRET'),false);
+  }
+});

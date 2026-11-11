@@ -19,6 +19,8 @@ class FixtureActivity : Activity() {
     var verifyLogin: (() -> Unit)? = null
     var hostSession: String? = null
     var allowFixtureWrites = true
+    var fixtureSharedReader: String? = null
+    var fixtureSharedOrigin: String? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -41,7 +43,15 @@ class FixtureActivity : Activity() {
                     }
                 }
             }
-        }, MutationAuthorizer { _, account, _ -> allowFixtureWrites && account == "fixture-a" })
+        }, MutationAuthorizer { _, account, _ -> allowFixtureWrites && account == "fixture-a" },
+            mayShareSession = { issuer, reader, account, url ->
+                // Explicit fixture policy; the adapter first checks current grants.
+                issuer == "owner" && account == "fixture-a" && (
+                    (reader == "plugin:fixture" && url?.startsWith("https://fixture.invalid/") == true) ||
+                    (reader == fixtureSharedReader && fixtureSharedOrigin != null &&
+                        url != null && origin(url) == fixtureSharedOrigin)
+                )
+            })
         container.addView(Button(this).apply {
             text = "Open visible fixture login"
             setOnClickListener {

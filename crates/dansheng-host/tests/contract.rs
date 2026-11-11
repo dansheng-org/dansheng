@@ -238,6 +238,41 @@ async fn exercise_cli_and_mcp_stdio(paths: &HostPaths) {
             .iter()
             .any(|tool| tool["name"] == "core_call")
     );
+    #[cfg(feature = "services")]
+    {
+        let names = response["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "core_call")
+            .unwrap()["inputSchema"]["properties"]["method"]["enum"]
+            .as_array()
+            .unwrap();
+        for name in [
+            "fudan.catalog.semesters",
+            "fudan.ehall.catalog",
+            "fudan.library.bibliography",
+            "canvas.quizzes.sync",
+            "canvas.grades.self",
+        ] {
+            assert!(
+                names.iter().any(|v| v == name),
+                "missing registered read method {name}"
+            );
+        }
+        for name in [
+            "fudan.library.reader.observe",
+            "fudan.library.reader.bind",
+            "fudan.library.reader.clear",
+            "canvas.configure",
+            "auth.session.set",
+        ] {
+            assert!(
+                !names.iter().any(|v| v == name),
+                "MCP exposed trusted configuration {name}"
+            );
+        }
+    }
     let response = rpc(&mut stdin,&mut stdout,json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"sources_query","arguments":{}}})).await;
     assert_ne!(response["result"]["isError"], true, "{response}");
     let response = rpc(&mut stdin,&mut stdout,json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"core_call","arguments":{"method":"permissions.set","params":{"principal":"owner"}}}})).await;

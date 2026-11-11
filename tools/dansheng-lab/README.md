@@ -4,15 +4,20 @@
 
 ## 启动与停止
 
-在项目根使用 PowerShell 7：
+先通过工作区管理器进入已登记的 `D:\Worktrees\<任务>\core`，初始化独立依赖缓存，
+再在项目根使用 PowerShell 7：
 
 ```powershell
-./scripts/start-lab.ps1
+./scripts/start-lab.ps1 -Port 0
 ```
 
-首次构建后，脚本隐藏启动本地服务并在默认浏览器打开一次性授权链接。默认地址 `http://127.0.0.1:19764`，只绑定 IPv4 loopback；端口被占用时不会终止其他进程。`-Port 0` 自动分配空闲端口。`-SkipBuild` 使用已构建程序，`-NoBrowser` 仅启动。
+首次构建后，脚本隐藏启动本地服务并在默认浏览器打开一次性授权链接。服务只绑定
+IPv4 loopback；`-Port 0` 自动分配空闲端口，输出实际地址。`-SkipBuild` 从实际
+`CARGO_TARGET_DIR` 使用已构建程序，`-NoBrowser` 仅启动。
 
-默认数据目录为 `%LOCALAPPDATA%\dansheng-lab\profiles\manual`，与源码、DanXi 及正式 Core profile 分离。可用 `-Profile` 指定另一个仓库外的测试目录。程序拒绝把 profile 放进当前源码工作区。
+脚本默认使用当前任务 runtime 的 `profiles/lab`；可通过 `DANSHENG_LAB_PROFILE`
+或 `-Profile` 选择该任务边界内的独立目录。没有任务环境时须显式给出独立 runtime/profile。
+原 C 盘 `%LOCALAPPDATA%\dansheng-lab` 数据保留，任务脚本不会隐式接管它。
 
 ```powershell
 ./scripts/probe-lab.ps1 -Probe status
@@ -21,7 +26,9 @@
 ./scripts/stop-lab.ps1
 ```
 
-重新运行启动脚本会复用正在运行的实例并生成新的一次性打开链接，不重置账号。停止通过本机管理令牌调用实例自身，不按不可靠的 PID 直接杀进程。后台日志只含启动地址或固定错误码，位于 `%LOCALAPPDATA%\dansheng-lab\logs`。
+重新运行启动脚本会复用当前任务正在运行的实例并生成新的一次性打开链接，不重置账号。
+停止通过本机管理令牌调用实例自身。后台日志位于当前任务 runtime 的 `logs/lab`，
+只含启动地址或固定错误码；`DANSHENG_LAB_LOG_DIR` 可在任务边界内另选位置。
 
 ## 用户录入
 

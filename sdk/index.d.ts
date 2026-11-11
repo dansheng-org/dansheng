@@ -1110,8 +1110,8 @@ export type BrowserResponseHeaders =
   | Array<[string, string]>;
 
 /**
- * browser.request 结果。body 是文本；Android 当前不导出响应头，其他平台
- * 可能提供 headers/final_url。
+ * browser.request 结果。body 是文本；Android 只导出有界 content-type 和安全的
+ * 同源分页 Link，URL 只保留未改变的调用方查询字段。其他平台可能提供 final_url。
  */
 export interface BrowserResponse {
   status: number;
@@ -1147,6 +1147,8 @@ export interface BrowserSession {
   account_id: string;
   authenticated: boolean;
   session_handle?: string;
+  /** 由可信平台确认的当前认证页面 origin；类型化页面连接器要求提供。 */
+  origin?: string;
 }
 
 /** browser.navigate 参数。 */

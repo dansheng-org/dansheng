@@ -1,17 +1,30 @@
 param(
-    [string]$Profile = (Join-Path $env:LOCALAPPDATA 'dansheng-lab\profiles\manual'),
-    [ValidateRange(0,65535)][int]$Port = 19764,
+    [string]$Profile,
+    [ValidateRange(0,65535)][int]$Port,
     [switch]$NoBrowser,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string]$RuntimeRoot,
+    [string]$TargetDirectory,
+    [string]$LogDirectory,
+    [switch]$Offline
 )
 $ErrorActionPreference='Stop'
 $LabRoot=Split-Path -Parent $PSScriptRoot
-$Profile=[IO.Path]::GetFullPath($Profile).TrimEnd([IO.Path]::DirectorySeparatorChar)
-if($Profile.Contains('"')){throw 'Invalid profile path'}
-$LabBinary=Join-Path $LabRoot 'target\debug\dansheng-lab.exe'
+. "$PSScriptRoot/runtime-common.ps1"
+$LabRuntime=if($RuntimeRoot -or $env:DANSHENG_TASK_RUNTIME){Resolve-DanshengRuntimeRoot -Root $LabRoot -RuntimeRoot $RuntimeRoot}else{$null}
+$Profile=Resolve-DanshengLabProfile -Root $LabRoot -Profile $Profile -RuntimeRoot $LabRuntime
+if(-not $PSBoundParameters.ContainsKey('Port')){$Port=if($LabRuntime){0}else{19764}}
+if(-not $TargetDirectory){$TargetDirectory=if($env:CARGO_TARGET_DIR){$env:CARGO_TARGET_DIR}elseif($LabRuntime){Join-Path $LabRuntime 'cargo-target'}else{Join-Path $LabRoot 'target'}}
+$TargetDirectory=Get-DanshengCheckedPath $TargetDirectory
+if($LabRuntime){$TargetDirectory=Get-DanshengRuntimeOutput -RuntimeRoot $LabRuntime -Path $TargetDirectory}
+$LabBinary=Get-DanshengCheckedPath (Join-Path $TargetDirectory 'debug/dansheng-lab.exe')
+if(-not $LogDirectory){$LogDirectory=if($env:DANSHENG_LAB_LOG_DIR){$env:DANSHENG_LAB_LOG_DIR}elseif($LabRuntime){Join-Path $LabRuntime 'logs/lab'}else{Join-Path $Profile 'logs'}}
+$LabLogRoot=Get-DanshengCheckedPath $LogDirectory
+if($LabRuntime){$LabLogRoot=Get-DanshengRuntimeOutput -RuntimeRoot $LabRuntime -Path $LabLogRoot}
 $LabControlPath=Join-Path $Profile 'lab-control.json'
 $LabHandler=[System.Net.Http.HttpClientHandler]::new()
 $LabHandler.UseProxy=$false
+$LabHandler.AllowAutoRedirect=$false
 $LabClient=[System.Net.Http.HttpClient]::new($LabHandler)
 $LabClient.Timeout=[TimeSpan]::FromSeconds(3)
 function Get-LabOpenLink {
@@ -40,12 +53,18 @@ try {
     if(-not $LabOpen){
         if(-not $SkipBuild){
             . "$PSScriptRoot/dev.ps1"
+            $LabSavedTarget=$env:CARGO_TARGET_DIR
+            $env:CARGO_TARGET_DIR=$TargetDirectory
             Push-Location -LiteralPath $LabRoot
-            try { & cargo build -p dansheng-lab --locked; if($LASTEXITCODE -ne 0){throw 'Lab build failed'} }
-            finally { Pop-Location }
+            try {
+                $LabBuildArgs=@('build','-p','dansheng-lab','--locked')
+                if($Offline){$LabBuildArgs+='--offline'}
+                & cargo @LabBuildArgs
+                if($LASTEXITCODE -ne 0){throw 'Lab build failed'}
+            }
+            finally { Pop-Location; $env:CARGO_TARGET_DIR=$LabSavedTarget }
         }
         if(-not(Test-Path -LiteralPath $LabBinary)){throw 'Build dansheng-lab before using -SkipBuild'}
-        $LabLogRoot=Join-Path $env:LOCALAPPDATA 'dansheng-lab\logs'
         New-Item -ItemType Directory -Force -Path $LabLogRoot | Out-Null
         $LabLogId=[guid]::NewGuid().ToString('N')
         $SavedProxies=@{}
@@ -70,4 +89,9 @@ try {
     if(-not $NoBrowser){Start-Process -FilePath $LabOpen.BrowserUrl | Out-Null}
     # Never print bootstrap/control tokens. The browser consumes its URL fragment.
     [ordered]@{url=$LabOpen.BaseUrl;pid=$LabOpen.Pid;profile=$Profile;browser_opened=(-not $NoBrowser)} | ConvertTo-Json
+}catch{
+    # This process object exists only when this invocation started the lab.
+    # Never terminate an instance merely found through an existing profile.
+    if($LabProcess -and -not $LabProcess.HasExited){$LabProcess.Kill()}
+    throw
 }finally{$LabClient.Dispose();$LabHandler.Dispose()}

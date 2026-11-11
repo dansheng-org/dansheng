@@ -1,10 +1,16 @@
 # dansheng-core
 
+本轮 Dev Drive 路径、构建来源与实际验收见 [D 盘工作流验证](docs/devdrive-validation.md)。
+
 本地优先、与 UI 分离的 Rust 校园数据和自动化内核。Android 内嵌同一个核心；Windows/Linux 通过本地服务供 UI、CLI 和 MCP 共用数据。项目采用 GPL-3.0-or-later。
 
 这是首个可运行的开发版本。代码实现、离线契约测试、模拟器执行和真实校园服务验证是不同的验收项；当前状态见 [验证记录](docs/validation.md)，长期阶段见 [roadmap](docs/roadmap.md)。生产 UI 不在这个仓库内。
 
-需要先录入凭据测试时，使用 [本地实验台](tools/dansheng-lab/README.md)：在 PowerShell 7 运行 `./scripts/start-lab.ps1`，浏览器会打开仅限本机的测试 UI。凭据通过 DPAPI 保存到仓库外的独立 profile，录入后可以运行预设的只读验证。
+活动主库为 `D:/Code/dansheng-core`，App 为独立仓库 `D:/Code/dansheng-app`。用户或 Herdr 将新任务工作树创建到 `D:/worktree`，Agent 在指定的树里开发、测试并按要求提交和合并。此前 `D:/Worktrees` 中的任务保留现状；可选登记与运行数据位于 `D:/Code/dansheng-workspace/local`。C 盘原项目和旧验收记录保留为参考。
+
+本次新增复旦开课目录与大纲、公共培养方案、eHall 目录与任务、图书馆发现与借阅接口，以及 Canvas 测验、讨论和本人学习数据。接口兼容性和本次测试见 [Core 集成记录](docs/core-integration-20261111.md)，各服务的实读范围和仍未接入项目见 [研究交付矩阵](docs/fudan-service-research/delivery-matrix.md)。
+
+需要先录入凭据测试时，使用 [本地实验台](tools/dansheng-lab/README.md)。进入任务后运行 `./scripts/start-lab.ps1`，脚本使用任务的独立 profile、日志和空闲本机端口；不会导入原账号。显式 `-Profile` 可选择已授权的外部 profile；真实登录和校园请求须单独授权。
 
 ## 组成
 
@@ -21,13 +27,13 @@
 
 ## 构建与测试
 
-需要 Rust 1.99.1 和平台 C 工具链。Windows 当前工作区的便携工具位于忽略的 `.local/toolchain`，不会加入用户全局 PATH：
+需要 Rust 1.99.1 和平台 C 工具链。Windows pinned 工具只读安装在 Core 主库的 `.local/toolchain`；任务不会复制工具到源码或修改全局 PATH。在用户或 Herdr 提供的工作树里，Agent 自动准备独立构建目录和运行资源，再执行以下检查。无需手动运行任务编号或 New/Initialize/Enter 脚本；配对工具可选，见[双仓库工作流](docs/DEVELOPMENT_WORKFLOW.md)。
 
 ```powershell
 . ./scripts/dev.ps1
-cargo test --workspace --all-features --locked
-cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
-cargo build -p dansheng-host --release --locked
+cargo test --workspace --all-features --locked --offline
+cargo clippy --workspace --all-features --all-targets --locked --offline -- -D warnings
+cargo build -p dansheng-host --release --locked --offline
 ```
 
 在其他机器上先安装 Rust 和本平台 C 编译器；不要依赖 `.local` 被提交。Linux 使用正常的 Rust/C 工具链，桌面凭据存储需要可用的 Secret Service。Windows 本地便携构建使用 GNU 工具链；CI 同时配置 Windows 和 Linux 原生验证。
@@ -49,22 +55,24 @@ cargo build -p dansheng-ffi --target x86_64-linux-android --release --locked
 
 Android 库、验证 APK、JNI 和模拟器命令见 [Android 接入说明](docs/android-sports.md)。C ABI 的唯一签名来源是 [dansheng.h](include/dansheng.h)。发布时使用 release 产物，debug `.so` 的调试信息不代表发布体积。
 
-生产 Android 工作台位于独立工程 `C:/Code/dansheng-app`。eHall 的[手动场馆服务](plugins/builtin/fudan-venues/README.md)随 APK 提供；[定时抢场](plugins/fudan-sports/README.md)单独发布成 `.dspack`，导入后默认关闭。eLearning、Agent 和论坛都是内置功能。
+生产 Android 工作台位于独立工程 `D:/Code/dansheng-app`。本地联调应显式选择同一任务的 Core 工作树，固定真实 SDK 身份；不要依赖旧目录名 `dansheng` 的兼容链接。eHall 的[手动场馆服务](plugins/builtin/fudan-venues/README.md)随 APK 提供；[定时抢场](plugins/fudan-sports/README.md)单独发布成 `.dspack`，导入后默认关闭。eLearning、Agent 和论坛都是内置功能。
 
-当前本机产物位于忽略的 `dist/dansheng-core-0.1.0/`，包含 Windows x64 可执行程序、Android ARM64 核心库、对应源码、许可证和 SHA-256。使用 `./scripts/build-windows-release.ps1` 与 `./scripts/build-android-release.ps1` 生成绑定源码的 receipts，再运行 `./scripts/package.ps1` 和 `./scripts/verify-package.ps1`。脚本拒绝旧产物与当前源码混配；独立构建、确定性归档及回退说明见 [发布流程](docs/release.md)。它们是开发版核心产物，Android ZIP 不是完整 App。
+新产物写入当前任务 runtime 的 `dist/dansheng-core-0.1.0/`，包含 Windows x64 可执行程序、Android ARM64 核心库、对应源码、许可证和 SHA-256。使用 `./scripts/build-windows-release.ps1` 与 `./scripts/build-android-release.ps1` 生成绑定源码的 receipts，再运行 `./scripts/package.ps1` 和 `./scripts/verify-package.ps1`；所有入口支持显式 `-RuntimeRoot`，默认使用已进入的任务 runtime。脚本拒绝旧产物与当前源码混配；独立构建、确定性归档及回退说明见 [发布流程](docs/release.md)。它们是开发版核心产物，Android ZIP 不是完整 App。旧 C 盘收据和产物保持原文，不改写编译来源。
 
 ## 桌面服务与 MCP
 
-在一个终端启动服务，在另一个终端调用。`--data-dir` 应当是独立、私有的应用数据目录：
+两个终端打开同一已创建的工作树，使用 Agent 准备的相同独立 runtime，再分别启动服务和调用。入口从实际 Cargo target 找到程序，并为 Host、CLI 和 MCP 显式传递相同的独立 `--data-dir`：
 
 ```powershell
-./target/debug/dansheng-host.exe --data-dir .local/demo-profile serve
-./target/debug/dansheng-host.exe --data-dir .local/demo-profile call core.info
-./target/debug/dansheng-host.exe --data-dir .local/demo-profile call plugins.list
-./target/debug/dansheng-host.exe --data-dir .local/demo-profile mcp
+./scripts/start-local.ps1 -Action serve -Offline
+./scripts/start-local.ps1 -Action call -Method core.info -SkipBuild
+./scripts/start-local.ps1 -Action call -Method plugins.list -SkipBuild
+./scripts/start-local.ps1 -Action mcp -SkipBuild
 ```
 
 只有服务持有数据库和调度器。客户端通过 Windows named pipe 或 Linux Unix socket 连接。MCP 使用单独的身份和令牌，初始没有业务数据权限；由可信 UI/管理 CLI 设置权限后，才能查询来源、调用插件、操作待办或调度任务。MCP 不能配置凭据、修改授权或信任插件发布者。
+
+`start-local.ps1 -Background` 仅用于 `serve`，返回该次启动的 PID 和独立日志路径；调用者只停止自己启动的进程。MCP 保持前台 stdio。Host 使用 runtime 的 `profiles/core`，实验室使用另一个 `profiles/lab`。未进入任务时请显式传独立 `-RuntimeRoot`，不要让原用户 profile 成为任务默认值。
 
 服务会在私有 profile 的 `host` 目录生成连接配置和令牌文件。不要把该目录放入仓库或诊断导出。详细协议与工具清单见 [Host 说明](crates/dansheng-host/README.md) 和 [业务服务](crates/dansheng-host/SERVICES.md)。
 

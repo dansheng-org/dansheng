@@ -7,11 +7,13 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { promisify } from 'node:util';
+import { smokeRuntime, smokeBinary, smokeOutput } from './runtime-paths.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
-const binary = process.env.DANSHENG_HOST_BIN || path.join(root, 'target/release/dansheng-host.exe');
+const runtime = smokeRuntime(root);
+const binary = smokeBinary(runtime, 'release');
 const packageDir = path.join(root, 'plugins/fixtures/closed-loop');
-const output = path.join(root, '.local/release-current');
+const output = smokeOutput(runtime, 'validation/shared-package');
 fs.mkdirSync(output, { recursive: true });
 const profile = path.join(fs.mkdtempSync(path.join(output, 'paired-')), 'profile');
 const execute = promisify(execFile);
@@ -95,7 +97,7 @@ function mcpClient() {
   }
   return { request, call, initialized() { mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }) + '\n'); } };
 }
-const report = { success: false, platform: 'windows-x64', phase: process.env.DANSHENG_VERIFICATION_PHASE || 'release',
+const report = { success: false, platform: 'windows-x64', phase: process.env.DANSHENG_VERIFICATION_PHASE || path.basename(path.dirname(binary)),
   binary_path: path.relative(root, binary), package_sha256: identity.sha256,
   package_files: identity.files, binary_sha256: hash(fs.readFileSync(binary)), checks: [] };
 try {

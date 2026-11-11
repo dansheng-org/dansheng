@@ -1,0 +1,23 @@
+[package]
+name = "fudan-service-research"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Research tooling is separate from the released workspace and its lockfile.
+[workspace]
+
+[dependencies]
+dansheng-core = { path = "../../crates/dansheng-core" }
+dansheng-connectors = { path = "../../crates/dansheng-connectors", features = ["login"] }
+chrono = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+# Remove credential-bearing dependency trace messages at compilation time.
+log = { version = "0.4", features = ["max_level_info"] }

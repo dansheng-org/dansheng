@@ -1,6 +1,8 @@
 # Interactive local entry only: no token argument, file, environment variable or log.
-param([string]$Profile=(Join-Path $env:LOCALAPPDATA 'dansheng-lab/profiles/manual'))
+param([string]$Profile,[string]$RuntimeRoot)
 $ErrorActionPreference='Stop'
+. "$PSScriptRoot/runtime-common.ps1"
+$Profile=Resolve-DanshengLabProfile -Root (Split-Path -Parent $PSScriptRoot) -Profile $Profile -RuntimeRoot $RuntimeRoot
 $CanvasControl=Get-Content -Raw -LiteralPath (Join-Path $Profile 'lab-control.json') | ConvertFrom-Json
 $CanvasBase=[uri]$CanvasControl.base_url
 if($CanvasBase.Scheme -ne 'http' -or $CanvasBase.Host -ne '127.0.0.1' -or $CanvasBase.UserInfo -or $CanvasBase.Query -or $CanvasBase.Fragment -or $CanvasBase.AbsolutePath -ne '/'){

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "9007199254740993123456789", "course_id": "81001", "title": "Classic practice quiz",
+    "description": "<p>Read <a href=\"https://files.example.invalid/file?X-Amz-Signature=SYNTHETIC_DO_NOT_PERSIST\">chapter one</a>.</p><script>SYNTHETIC_DO_NOT_PERSIST</script>",
+    "quiz_type": "practice_quiz", "assignment_group_id": "77", "time_limit": 20,
+    "allowed_attempts": -1, "question_count": 4, "points_possible": 10.0,
+    "published": true, "locked_for_user": true, "permissions": {"read":true,"manage":true},
+    "due_at": "2026-11-15T15:59:00Z", "access_code": "SYNTHETIC_DO_NOT_PERSIST",
+    "mobile_url": "https://canvas.example.invalid/take?access_token=SYNTHETIC_DO_NOT_PERSIST",
+    "html_url": "https://canvas.example.invalid/courses/81001/quizzes/9007199254740993123456789"
+  }
+]

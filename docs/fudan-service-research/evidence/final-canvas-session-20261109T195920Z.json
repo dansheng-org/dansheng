@@ -1,0 +1,152 @@
+{
+  "generated_at_utc": "2026-11-09T20:00:11.780723300+00:00",
+  "tool": "fudan-service-research/0.1.0",
+  "transport": "current_workspace_native_core",
+  "credential_file_read": true,
+  "raw_data_exported": false,
+  "remote_business_writes": 0,
+  "automatic_password_retries": 0,
+  "campus_lan_origins": [],
+  "public_checks": [],
+  "authenticated_checks": [
+    {
+      "service": "canvas",
+      "credential_mode": "password_http_session_research",
+      "state": "profile_identity_verified",
+      "error_code": null,
+      "progress": {
+        "requests_started": 9,
+        "stage": "session_ready"
+      },
+      "identity_matches": true,
+      "coverage": "profile_identity_then_bounded_learning_reads",
+      "checks": [
+        {
+          "case": "canvas_session_profile",
+          "logical_url": "https://elearning.fudan.edu.cn/api/v1/users/self/profile",
+          "method": "GET",
+          "authenticated_session": true,
+          "elapsed_ms": 321,
+          "http_status": 200,
+          "error_code": null,
+          "mime": "application/json",
+          "bytes": 633,
+          "json_kind": "object",
+          "json_keys": [
+            "id",
+            "login_id"
+          ],
+          "item_count": null,
+          "reported_total": null,
+          "api_code": null,
+          "password_inputs": 0,
+          "script_count": 0,
+          "login_markers": false,
+          "redirect_class": null
+        },
+        {
+          "case": "canvas_session_first_course",
+          "logical_url": "https://elearning.fudan.edu.cn/api/v1/courses?per_page=1",
+          "method": "GET",
+          "authenticated_session": true,
+          "elapsed_ms": 205,
+          "http_status": 200,
+          "error_code": null,
+          "mime": "application/json",
+          "bytes": 1048,
+          "json_kind": "array",
+          "json_keys": [],
+          "item_count": 1,
+          "reported_total": null,
+          "api_code": null,
+          "password_inputs": 0,
+          "script_count": 0,
+          "login_markers": false,
+          "redirect_class": null
+        }
+      ]
+    }
+  ],
+  "service_checks": [
+    {
+      "method": "canvas.quizzes.sync",
+      "outcome": "read_blocked",
+      "error_code": "SourceHttpError",
+      "http_status": 404,
+      "schema_field": null,
+      "elapsed_ms": 151,
+      "record_count": null,
+      "cached_count": null,
+      "coverage": null,
+      "section_count": null,
+      "module_count": null,
+      "section_coverage": null,
+      "course_tree_coverage": null,
+      "public_only": false
+    },
+    {
+      "method": "canvas.discussions.sync",
+      "outcome": "typed_read_succeeded",
+      "error_code": null,
+      "http_status": null,
+      "schema_field": null,
+      "elapsed_ms": 280,
+      "record_count": 0,
+      "cached_count": null,
+      "coverage": null,
+      "section_count": null,
+      "module_count": null,
+      "section_coverage": null,
+      "course_tree_coverage": null,
+      "public_only": false
+    },
+    {
+      "method": "canvas.assignment_groups.sync",
+      "outcome": "typed_read_succeeded",
+      "error_code": null,
+      "http_status": null,
+      "schema_field": null,
+      "elapsed_ms": 185,
+      "record_count": 1,
+      "cached_count": 1,
+      "coverage": null,
+      "section_count": null,
+      "module_count": null,
+      "section_coverage": null,
+      "course_tree_coverage": null,
+      "public_only": false
+    },
+    {
+      "method": "canvas.enrollments.self",
+      "outcome": "typed_read_succeeded",
+      "error_code": null,
+      "http_status": null,
+      "schema_field": null,
+      "elapsed_ms": 478,
+      "record_count": 0,
+      "cached_count": null,
+      "coverage": null,
+      "section_count": null,
+      "module_count": null,
+      "section_coverage": null,
+      "course_tree_coverage": null,
+      "public_only": false
+    },
+    {
+      "method": "canvas.grades.self",
+      "outcome": "typed_read_succeeded",
+      "error_code": null,
+      "http_status": null,
+      "schema_field": null,
+      "elapsed_ms": 390,
+      "record_count": 0,
+      "cached_count": null,
+      "coverage": null,
+      "section_count": null,
+      "module_count": null,
+      "section_coverage": null,
+      "course_tree_coverage": null,
+      "public_only": false
+    }
+  ]
+}

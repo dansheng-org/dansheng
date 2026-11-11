@@ -1,0 +1,4 @@
+{"e":"0","m":"ok","d":{"total":"2","list":[
+{"inst_id":"synthetic-instance-1","third_inst_name":"合成办件一","inst_status":"0","inst_created":"2026-11-08 09:00:00","name":"SYNTHETIC-APPLICANT-OMIT","form_url_view":"https://myform.fudan.edu.cn/view?token=SYNTHETIC-SIGNATURE"},
+{"third_inst_id":"synthetic-instance-2","third_inst_name":"合成办件二","inst_status":"awaiting_review_v2","inst_created":null,"process_pic_url":"https://myform.fudan.edu.cn/flow?token=SYNTHETIC-SIGNATURE"}
+]}}

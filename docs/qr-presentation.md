@@ -52,7 +52,10 @@ HTML 接受上限为 256 KiB（通用网络接收层仍有原有 8 MiB 上限）
 
 `tests/qr_presentation.rs` 另经真实 `CampusService` 注册与 Engine 分派验证 owner/provider 边界、独立 capability 和 native job 拒绝。`tests/campus.rs` 验证原 status 序列化/Debug 不泄露合成原码。所有数据为新建临时 fixture，不读取真实 QR、凭据或用户 profile。
 
-Windows 本地命令（隔离目标目录，不操作父线程 release 产物）：
+迁移后复现时，从 `D:/Worktrees/<任务>/core` 进入已登记任务，初始化自己的依赖缓存，
+使用任务的 `CARGO_TARGET_DIR`（位于 `D:/Code/dansheng-workspace/local/runtime`）执行下面
+相同的测试和 Clippy 命令。不要执行旧 C 路径赋值。以下保留的是 2026-11-06 验收时的
+原始 Windows 命令与编译路径，不操作或重标该历史产物：
 
 ```powershell
 . ./scripts/dev.ps1

@@ -1,20 +1,44 @@
-# Development launcher: use an installed Gradle 9.7.1; never download runtimes into core.
+# Development launcher: use a pinned read-only Gradle 9.7.1 installation.
 [CmdletBinding()]
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$GradleArguments)
 $ErrorActionPreference = 'Stop'
 $DanshengGradle = if ($env:GRADLE_HOME) {
     Join-Path $env:GRADLE_HOME 'bin/gradle.bat'
 } else {
-    Get-ChildItem -LiteralPath (Join-Path $env:USERPROFILE '.gradle/wrapper/dists/gradle-9.7.1-bin') -Filter gradle.bat -Recurse |
-        Select-Object -First 1 -ExpandProperty FullName
+    $DanshengGradleRoots=@(
+        $env:DANSHENG_GRADLE_INSTALL_ROOT,
+        $(if($env:DANSHENG_CACHE_ROOT){Join-Path $env:DANSHENG_CACHE_ROOT 'gradle/wrapper/dists/gradle-9.7.1-bin'}),
+        $(if($env:GRADLE_USER_HOME){Join-Path $env:GRADLE_USER_HOME 'wrapper/dists/gradle-9.7.1-bin'}),
+        'D:/DevCache/gradle/wrapper/dists/gradle-9.7.1-bin',
+        (Join-Path $env:USERPROFILE '.gradle/wrapper/dists/gradle-9.7.1-bin')
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique
+    foreach($DanshengGradleRoot in $DanshengGradleRoots){
+        $DanshengCandidate=Get-ChildItem -LiteralPath $DanshengGradleRoot -Filter gradle.bat -File -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -First 1 -ExpandProperty FullName
+        if($DanshengCandidate){$DanshengCandidate;break}
+    }
 }
 if (-not $DanshengGradle -or -not (Test-Path -LiteralPath $DanshengGradle)) {
     throw 'Install Gradle 9.7.1 or set GRADLE_HOME to its installation directory.'
 }
-if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = 'C:/Android/Sdk' }
+$DanshengAndroidSourceRoot=if($env:DANSHENG_CORE_ROOT){$env:DANSHENG_CORE_ROOT}else{Split-Path -Parent (Split-Path -Parent $PSScriptRoot)}
+. (Join-Path $DanshengAndroidSourceRoot 'scripts/runtime-common.ps1')
+$DanshengGradle=Get-DanshengCheckedPath $DanshengGradle
+if(-not(Test-Path -LiteralPath (Join-Path (Split-Path -Parent (Split-Path -Parent $DanshengGradle)) 'lib/gradle-launcher-9.7.1.jar'))){
+    throw 'The selected Gradle installation must be version 9.7.1'
+}
+if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = if($env:ANDROID_SDK_ROOT){$env:ANDROID_SDK_ROOT}else{'C:/Android/Sdk'} }
+# The installation stays read-only; Gradle's cache/project cache is task-owned.
+$DanshengRuntime=if($env:DANSHENG_TASK_RUNTIME){Resolve-DanshengRuntimeRoot -Root $DanshengAndroidSourceRoot -RuntimeRoot $env:DANSHENG_TASK_RUNTIME}else{$null}
+$DanshengSavedGradleHome=$env:GRADLE_USER_HOME
+if($DanshengRuntime){
+    $DanshengGradleCache=if($env:GRADLE_USER_HOME){$env:GRADLE_USER_HOME}else{Join-Path $DanshengRuntime 'gradle-cache'}
+    $env:GRADLE_USER_HOME=Get-DanshengRuntimeOutput -RuntimeRoot $DanshengRuntime -Path $DanshengGradleCache
+    $DanshengProjectCache=Get-DanshengRuntimeOutput -RuntimeRoot $DanshengRuntime -Path (Join-Path $DanshengRuntime 'gradle-project-cache/core-android')
+    $GradleArguments=@('--project-cache-dir',$DanshengProjectCache)+@($GradleArguments)
+}
 Push-Location -LiteralPath $PSScriptRoot
 try {
     & $DanshengGradle @GradleArguments
     $DanshengBuildExit = $LASTEXITCODE
-} finally { Pop-Location }
+} finally { Pop-Location; $env:GRADLE_USER_HOME=$DanshengSavedGradleHome }
 exit $DanshengBuildExit

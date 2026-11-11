@@ -1,0 +1,30 @@
+{
+  "observations": [
+    {
+      "case": "cloud_dns",
+      "result": "private_ipv4",
+      "source": "system_dns"
+    },
+    {
+      "case": "icourse_dns",
+      "result": "resolution_failed",
+      "source": "system_dns"
+    },
+    {
+      "case": "academic_public_script",
+      "context_path": "/student",
+      "course_info_id": "course.id",
+      "syllabus_id": "lesson.id",
+      "check_can_info": "null means no prohibition; nonempty response displays res.text"
+    },
+    {
+      "case": "course_detail_with_public_return_parameter",
+      "http_status": 404,
+      "bytes": 247,
+      "course_labels": false,
+      "password_inputs": 0
+    }
+  ],
+  "raw_data_exported": false,
+  "remote_business_writes": 0
+}

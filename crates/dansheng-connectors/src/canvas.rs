@@ -278,6 +278,242 @@ pub struct CanvasAnnouncement {
     pub course_id: Option<CanvasId>,
 }
 
+/// Classic Quizzes metadata only. New Quizzes use a separate LTI/New Quizzes API;
+/// this connector never launches an attempt or requests questions/access codes.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CanvasQuiz {
+    pub id: CanvasId,
+    pub title: String,
+    pub course_id: Option<CanvasId>,
+    pub description: Option<String>,
+    pub quiz_type: Option<String>,
+    pub assignment_id: Option<CanvasId>,
+    pub assignment_group_id: Option<CanvasId>,
+    pub time_limit: Option<u32>,
+    pub allowed_attempts: Option<i32>,
+    pub question_count: Option<u32>,
+    pub points_possible: Option<f64>,
+    pub due_at: Option<DateTime<Utc>>,
+    pub unlock_at: Option<DateTime<Utc>>,
+    pub lock_at: Option<DateTime<Utc>>,
+    pub published: Option<bool>,
+    pub locked_for_user: Option<bool>,
+    pub html_url: Option<String>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub permissions: Option<CanvasLearningPermissions>,
+}
+
+/// Retain read permission only, never teacher actions or authentication material.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasLearningPermissions {
+    pub read: Option<bool>,
+}
+
+/// Metadata intentionally excludes download/preview/avatar/feed URLs and verifier tokens.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasLearningAttachment {
+    pub id: Option<CanvasId>,
+    pub display_name: Option<String>,
+    pub filename: Option<String>,
+    #[serde(rename = "content-type", alias = "content_type")]
+    pub content_type: Option<String>,
+    pub size: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasDiscussionTopic {
+    pub id: CanvasId,
+    pub title: String,
+    pub course_id: Option<CanvasId>,
+    pub context_code: Option<String>,
+    /// Plain text derived from HTML; no active tags or URL attributes survive.
+    pub message: Option<String>,
+    pub html_url: Option<String>,
+    pub posted_at: Option<DateTime<Utc>>,
+    pub last_reply_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub discussion_type: Option<String>,
+    pub discussion_subentry_count: Option<u64>,
+    pub read_state: Option<String>,
+    pub require_initial_post: Option<bool>,
+    pub user_can_see_posts: Option<bool>,
+    pub locked: Option<bool>,
+    pub locked_for_user: Option<bool>,
+    pub is_announcement: Option<bool>,
+    pub permissions: Option<CanvasLearningPermissions>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub attachments: Vec<CanvasLearningAttachment>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasDiscussionEntry {
+    pub id: CanvasId,
+    pub user_id: Option<CanvasId>,
+    pub parent_id: Option<CanvasId>,
+    pub message: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: Option<bool>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub replies: Vec<CanvasDiscussionEntry>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasDiscussionParticipant {
+    pub id: CanvasId,
+    pub display_name: Option<String>,
+}
+
+/// A server-authorized cached view, without changing any entry's read state.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasDiscussionView {
+    pub view: Vec<CanvasDiscussionEntry>,
+    #[serde(default)]
+    pub participants: Vec<CanvasDiscussionParticipant>,
+    #[serde(default)]
+    pub unread_entries: Vec<CanvasId>,
+    #[serde(default)]
+    pub forced_entries: Vec<CanvasId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasGradingRules {
+    pub drop_lowest: Option<u32>,
+    pub drop_highest: Option<u32>,
+    #[serde(default)]
+    pub never_drop: Vec<CanvasId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CanvasAssignmentGroup {
+    pub id: CanvasId,
+    pub name: String,
+    pub course_id: Option<CanvasId>,
+    pub position: Option<u32>,
+    pub group_weight: Option<f64>,
+    pub rules: Option<CanvasGradingRules>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasSubmissionComment {
+    pub id: CanvasId,
+    pub author_id: Option<CanvasId>,
+    pub author_name: Option<String>,
+    pub comment: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+/// Current authenticated user's submission only. Authentication fields, preview
+/// URLs, grader/admin data and raw nested user/course objects are not retained.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CanvasSelfSubmission {
+    pub assignment_id: CanvasId,
+    pub user_id: CanvasId,
+    pub course_id: Option<CanvasId>,
+    pub attempt: Option<u32>,
+    pub body: Option<String>,
+    pub grade: Option<String>,
+    pub score: Option<f64>,
+    pub grade_matches_current_submission: Option<bool>,
+    pub submission_type: Option<String>,
+    pub workflow_state: Option<String>,
+    pub submitted_at: Option<DateTime<Utc>>,
+    pub graded_at: Option<DateTime<Utc>>,
+    pub posted_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub late: Option<bool>,
+    pub missing: Option<bool>,
+    pub excused: Option<bool>,
+    pub assignment_visible: Option<bool>,
+    pub html_url: Option<String>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub attachments: Vec<CanvasLearningAttachment>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub submission_comments: Vec<CanvasSubmissionComment>,
+}
+
+/// Published grades returned for this user. Unposted, SIS and observer data are ignored.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CanvasGrades {
+    pub current_grade: Option<String>,
+    pub final_grade: Option<String>,
+    pub current_score: Option<f64>,
+    pub final_score: Option<f64>,
+    pub current_points: Option<f64>,
+    pub html_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CanvasSelfEnrollment {
+    pub id: CanvasId,
+    pub course_id: CanvasId,
+    pub user_id: CanvasId,
+    pub course_section_id: Option<CanvasId>,
+    #[serde(rename = "type")]
+    pub enrollment_type: String,
+    pub enrollment_state: Option<String>,
+    pub role: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub grades: Option<CanvasGrades>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CanvasGradeSummary {
+    pub enrollment_id: CanvasId,
+    pub course_id: CanvasId,
+    pub user_id: CanvasId,
+    pub enrollment_state: Option<String>,
+    pub grades: Option<CanvasGrades>,
+}
+
+fn null_vec<'de, D: Deserializer<'de>, R: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Vec<R>, D::Error> {
+    Ok(Option::<Vec<R>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// HTML is converted to inert visible text. Attributes (including signed URLs),
+/// script/style/template contents and active embedded resources are discarded.
+fn learning_text(value: &mut Option<String>, max_bytes: usize) -> Result<(), ConnectorError> {
+    let Some(raw) = value.take() else {
+        return Ok(());
+    };
+    if raw.len() > max_bytes {
+        return Err(ConnectorError::LimitExceeded);
+    }
+    let fragment = scraper::Html::parse_fragment(&raw);
+    let text = fragment
+        .root_element()
+        .descendants()
+        .filter_map(|node| {
+            let text = node.value().as_text()?;
+            if node.ancestors().any(|ancestor| {
+                ancestor.value().as_element().is_some_and(|element| {
+                    matches!(
+                        element.name(),
+                        "script" | "style" | "template" | "iframe" | "object" | "embed"
+                    )
+                })
+            }) {
+                return None;
+            }
+            Some(text.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    // Escaping also makes text safe if a consumer accidentally treats it as HTML.
+    let text = text
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    if text.len() > max_bytes {
+        return Err(ConnectorError::LimitExceeded);
+    }
+    *value = Some(text);
+    Ok(())
+}
+
 /// Distinct construction modes select distinct host transport paths. This is not
 /// a fallback list. HostSession uses native HTTP cookies; BrowserSession explicitly
 /// requires page-context execution. No authentication/transport failure switches modes.
@@ -595,11 +831,26 @@ impl<T: ConnectorTransport> CanvasClient<T> {
             &self.origin,
         )?;
         let collection_path = initial_url.path().to_owned();
+        // A self-only enrollment query must stay self-only on every server Link
+        // and final redirect; dropping its filter would expose a course roster.
+        let user_filter = initial_url
+            .query_pairs()
+            .find(|(key, _)| key == "user_id")
+            .map(|(_, value)| value.into_owned());
+        let self_only = |candidate: &Url| {
+            user_filter.as_ref().is_none_or(|expected| {
+                let filters: Vec<_> = candidate
+                    .query_pairs()
+                    .filter(|(key, _)| key == "user_id" || key.starts_with("user_id["))
+                    .collect();
+                filters.len() == 1 && filters[0].0 == "user_id" && filters[0].1 == expected.as_str()
+            })
+        };
         let mut next = Some(initial_url);
         let mut visited = HashSet::new();
         let mut result = Vec::new();
         while let Some(url) = next {
-            if url.path() != collection_path {
+            if url.path() != collection_path || !self_only(&url) {
                 return Err(ConnectorError::UnsafeUrl);
             }
             if !visited.insert(url.as_str().to_owned()) {
@@ -632,7 +883,7 @@ impl<T: ConnectorTransport> CanvasClient<T> {
             )?;
             // A same-origin non-API redirect is not a successful Canvas data response either.
             safe_api_url(response.final_url.clone(), &self.origin)?;
-            if response.final_url.path() != collection_path {
+            if response.final_url.path() != collection_path || !self_only(&response.final_url) {
                 return Err(ConnectorError::UnsafeUrl);
             }
             let page: Vec<R> = parse_list(&response.body)?;
@@ -641,7 +892,7 @@ impl<T: ConnectorTransport> CanvasClient<T> {
             }
             next = next_page(&response.headers, &response.final_url, &self.origin)?;
             if let Some(ref next_url) = next
-                && next_url.path() != collection_path
+                && (next_url.path() != collection_path || !self_only(next_url))
             {
                 return Err(ConnectorError::UnsafeUrl);
             }
@@ -1102,6 +1353,420 @@ impl<T: ConnectorTransport> CanvasClient<T> {
                     format!("announcement:{}:{}", course_id, row.id.0),
                     updated,
                     row,
+                )
+            })
+            .collect())
+    }
+
+    fn learning_url(
+        &self,
+        course_id: &str,
+        collection: &str,
+        id: &str,
+    ) -> Result<Url, ConnectorError> {
+        let _ = self.course_path(course_id, collection)?;
+        if id.is_empty() || id.len() > 32 || !id.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(ConnectorError::InvalidConfiguration("Canvas resource id"));
+        }
+        safe_api_url(
+            self.origin
+                .join(&format!("/api/v1/courses/{course_id}/{collection}/{id}"))
+                .map_err(|_| ConnectorError::UnsafeUrl)?,
+            &self.origin,
+        )
+    }
+
+    fn learning_link(&self, link: &mut Option<String>, course_id: &str) {
+        *link = link
+            .as_deref()
+            .and_then(sanitize_external_url)
+            .filter(|value| {
+                Url::parse(value).is_ok_and(|url| {
+                    url.origin() == self.origin.origin()
+                        && url.path().starts_with(&format!("/courses/{course_id}/"))
+                })
+            });
+    }
+
+    fn check_learning_course(
+        &self,
+        returned: &Option<CanvasId>,
+        course_id: &str,
+    ) -> Result<(), ConnectorError> {
+        if returned.as_ref().is_some_and(|id| id.0 != course_id) {
+            return Err(parse_error("Canvas", "learning course_id"));
+        }
+        Ok(())
+    }
+
+    fn sanitize_quiz(&self, quiz: &mut CanvasQuiz, course_id: &str) -> Result<(), ConnectorError> {
+        self.check_learning_course(&quiz.course_id, course_id)?;
+        if quiz
+            .permissions
+            .as_ref()
+            .is_some_and(|permissions| permissions.read == Some(false))
+        {
+            return Err(ConnectorError::PermissionDenied);
+        }
+        learning_text(&mut quiz.description, self.limits.max_body_bytes)?;
+        self.learning_link(&mut quiz.html_url, course_id);
+        Ok(())
+    }
+
+    /// List Classic Quizzes metadata. This never requests quiz questions or creates attempts.
+    pub async fn quizzes(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+    ) -> Result<Vec<SourceRecord<CanvasQuiz>>, ConnectorError> {
+        let mut rows: Vec<CanvasQuiz> = self
+            .list(&self.course_path(course_id, "quizzes")?, source)
+            .await?;
+        let mut seen = HashSet::new();
+        for row in &mut rows {
+            if !seen.insert(row.id.0.clone()) {
+                return Err(parse_error("Canvas", "duplicate quiz id"));
+            }
+            self.sanitize_quiz(row, course_id)?;
+        }
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                source.record(
+                    format!("quiz:{course_id}:{}", row.id.0),
+                    row.updated_at,
+                    row,
+                )
+            })
+            .collect())
+    }
+
+    pub async fn quiz(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+        quiz_id: &str,
+    ) -> Result<SourceRecord<CanvasQuiz>, ConnectorError> {
+        let mut row: CanvasQuiz = self
+            .get(self.learning_url(course_id, "quizzes", quiz_id)?, source)
+            .await?;
+        if row.id.0 != quiz_id {
+            return Err(parse_error("Canvas", "quiz id mismatch"));
+        }
+        self.sanitize_quiz(&mut row, course_id)?;
+        Ok(source.record(
+            format!("quiz:{course_id}:{}", row.id.0),
+            row.updated_at,
+            row,
+        ))
+    }
+
+    fn sanitize_topic(
+        &self,
+        topic: &mut CanvasDiscussionTopic,
+        course_id: &str,
+    ) -> Result<(), ConnectorError> {
+        self.check_learning_course(&topic.course_id, course_id)?;
+        if topic
+            .context_code
+            .as_ref()
+            .is_some_and(|code| code != &format!("course_{course_id}"))
+        {
+            return Err(parse_error("Canvas", "discussion context_code"));
+        }
+        if topic
+            .permissions
+            .as_ref()
+            .is_some_and(|permissions| permissions.read == Some(false))
+        {
+            return Err(ConnectorError::PermissionDenied);
+        }
+        if topic.attachments.len() > self.limits.max_items {
+            return Err(ConnectorError::LimitExceeded);
+        }
+        learning_text(&mut topic.message, self.limits.max_body_bytes)?;
+        self.learning_link(&mut topic.html_url, course_id);
+        Ok(())
+    }
+
+    pub async fn discussion_topics(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+    ) -> Result<Vec<SourceRecord<CanvasDiscussionTopic>>, ConnectorError> {
+        let mut rows: Vec<CanvasDiscussionTopic> = self
+            .list(&self.course_path(course_id, "discussion_topics")?, source)
+            .await?;
+        let mut seen = HashSet::new();
+        for row in &mut rows {
+            if !seen.insert(row.id.0.clone()) {
+                return Err(parse_error("Canvas", "duplicate discussion id"));
+            }
+            self.sanitize_topic(row, course_id)?;
+        }
+        // Announcements already have a dedicated service and must not be duplicated.
+        Ok(rows
+            .into_iter()
+            .filter(|row| row.is_announcement != Some(true))
+            .map(|row| {
+                let updated = row.updated_at.or(row.last_reply_at).or(row.posted_at);
+                source.record(format!("discussion:{course_id}:{}", row.id.0), updated, row)
+            })
+            .collect())
+    }
+
+    pub async fn discussion_topic(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+        topic_id: &str,
+    ) -> Result<SourceRecord<CanvasDiscussionTopic>, ConnectorError> {
+        let mut row: CanvasDiscussionTopic = self
+            .get(
+                self.learning_url(course_id, "discussion_topics", topic_id)?,
+                source,
+            )
+            .await?;
+        if row.id.0 != topic_id {
+            return Err(parse_error("Canvas", "discussion id mismatch"));
+        }
+        self.sanitize_topic(&mut row, course_id)?;
+        Ok(source.record(
+            format!("discussion:{course_id}:{}", row.id.0),
+            row.updated_at.or(row.last_reply_at).or(row.posted_at),
+            row,
+        ))
+    }
+
+    /// GET the cached authorized thread without PUT/POSTing any read-state update.
+    /// require_initial_post/locked access is preserved; never post to unlock a view.
+    pub async fn discussion_view(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+        topic_id: &str,
+    ) -> Result<SourceRecord<CanvasDiscussionView>, ConnectorError> {
+        let topic = self.discussion_topic(source, course_id, topic_id).await?;
+        if topic.payload.locked_for_user == Some(true)
+            || topic.payload.user_can_see_posts == Some(false)
+        {
+            return Err(ConnectorError::CourseAccessDenied);
+        }
+        let mut url = self.learning_url(course_id, "discussion_topics", topic_id)?;
+        url.set_path(&format!("{}/view", url.path()));
+        let mut view: CanvasDiscussionView = self.get(url, source).await?;
+        if view.participants.len() > self.limits.max_items
+            || view.unread_entries.len() > self.limits.max_items
+            || view.forced_entries.len() > self.limits.max_items
+        {
+            return Err(ConnectorError::LimitExceeded);
+        }
+        let mut participants = HashSet::new();
+        for participant in &view.participants {
+            if !participants.insert(&participant.id) {
+                return Err(parse_error("Canvas", "duplicate participant id"));
+            }
+        }
+        fn clean_entries(
+            entries: &mut [CanvasDiscussionEntry],
+            parent: Option<&CanvasId>,
+            depth: usize,
+            seen: &mut HashSet<CanvasId>,
+            limits: CanvasLimits,
+        ) -> Result<(), ConnectorError> {
+            if depth > 32 {
+                return Err(ConnectorError::LimitExceeded);
+            }
+            for entry in entries {
+                if !seen.insert(entry.id.clone()) {
+                    return Err(parse_error("Canvas", "duplicate discussion entry id"));
+                }
+                if seen.len() > limits.max_items {
+                    return Err(ConnectorError::LimitExceeded);
+                }
+                if entry
+                    .parent_id
+                    .as_ref()
+                    .is_some_and(|id| Some(id) != parent)
+                {
+                    return Err(parse_error("Canvas", "discussion parent_id"));
+                }
+                if entry.deleted == Some(true) {
+                    entry.message = None;
+                    entry.user_id = None;
+                }
+                learning_text(&mut entry.message, limits.max_body_bytes)?;
+                clean_entries(&mut entry.replies, Some(&entry.id), depth + 1, seen, limits)?;
+            }
+            Ok(())
+        }
+        clean_entries(&mut view.view, None, 0, &mut HashSet::new(), self.limits)?;
+        Ok(source.record(
+            format!("discussion-view:{course_id}:{topic_id}"),
+            topic.updated_at,
+            view,
+        ))
+    }
+
+    pub async fn assignment_groups(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+    ) -> Result<Vec<SourceRecord<CanvasAssignmentGroup>>, ConnectorError> {
+        let rows: Vec<CanvasAssignmentGroup> = self
+            .list(&self.course_path(course_id, "assignment_groups")?, source)
+            .await?;
+        let mut seen = HashSet::new();
+        for row in &rows {
+            self.check_learning_course(&row.course_id, course_id)?;
+            if !seen.insert(&row.id) {
+                return Err(parse_error("Canvas", "duplicate assignment group id"));
+            }
+            if row
+                .rules
+                .as_ref()
+                .is_some_and(|rules| rules.never_drop.len() > self.limits.max_items)
+            {
+                return Err(ConnectorError::LimitExceeded);
+            }
+        }
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                source.record(
+                    format!("assignment-group:{course_id}:{}", row.id.0),
+                    None,
+                    row,
+                )
+            })
+            .collect())
+    }
+
+    async fn current_user_id(&self, source: &SourceContext) -> Result<CanvasId, ConnectorError> {
+        #[derive(Deserialize)]
+        struct Identity {
+            id: CanvasId,
+        }
+        let identity: Identity = self
+            .get(
+                self.origin
+                    .join("/api/v1/users/self/profile")
+                    .map_err(|_| ConnectorError::UnsafeUrl)?,
+                source,
+            )
+            .await?;
+        Ok(identity.id)
+    }
+
+    /// No caller-provided student ID is accepted. Both path and returned identity
+    /// are constrained to the authenticated user; profile data is never retained.
+    pub async fn self_submission(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+        assignment_id: &str,
+    ) -> Result<SourceRecord<CanvasSelfSubmission>, ConnectorError> {
+        let mut url = self.learning_url(course_id, "assignments", assignment_id)?;
+        url.set_path(&format!("{}/submissions/self", url.path()));
+        url.set_query(Some("include[]=submission_comments&include[]=visibility"));
+        let user_id = self.current_user_id(source).await?;
+        let mut row: CanvasSelfSubmission = self.get(url, source).await?;
+        if row.user_id != user_id {
+            return Err(ConnectorError::PermissionDenied);
+        }
+        if row.assignment_id.0 != assignment_id {
+            return Err(parse_error("Canvas", "submission assignment_id"));
+        }
+        self.check_learning_course(&row.course_id, course_id)?;
+        if row.assignment_visible == Some(false) {
+            return Err(ConnectorError::CourseAccessDenied);
+        }
+        if row.attachments.len() > self.limits.max_items
+            || row.submission_comments.len() > self.limits.max_items
+        {
+            return Err(ConnectorError::LimitExceeded);
+        }
+        learning_text(&mut row.body, self.limits.max_body_bytes)?;
+        for comment in &mut row.submission_comments {
+            learning_text(&mut comment.comment, self.limits.max_body_bytes)?;
+        }
+        self.learning_link(&mut row.html_url, course_id);
+        Ok(source.record(
+            format!("submission-self:{course_id}:{assignment_id}"),
+            row.updated_at.or(row.graded_at).or(row.submitted_at),
+            row,
+        ))
+    }
+
+    /// Course-scoped self enrollments. Do not return a roster, observed students,
+    /// SIS identifiers or teacher-only unposted grades even if the server sends them.
+    pub async fn self_enrollments(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+    ) -> Result<Vec<SourceRecord<CanvasSelfEnrollment>>, ConnectorError> {
+        let _ = self.course_path(course_id, "enrollments")?;
+        let user_id = self.current_user_id(source).await?;
+        let mut rows: Vec<CanvasSelfEnrollment> = self
+            .list(
+                &format!(
+                    "/api/v1/courses/{course_id}/enrollments?user_id={}&per_page=100",
+                    user_id.0
+                ),
+                source,
+            )
+            .await?;
+        let mut seen = HashSet::new();
+        for row in &mut rows {
+            if row.user_id != user_id {
+                return Err(ConnectorError::PermissionDenied);
+            }
+            if row.course_id.0 != course_id {
+                return Err(parse_error("Canvas", "enrollment course_id"));
+            }
+            if !seen.insert(row.id.clone()) {
+                return Err(parse_error("Canvas", "duplicate enrollment id"));
+            }
+            if let Some(grades) = &mut row.grades {
+                self.learning_link(&mut grades.html_url, course_id);
+            }
+        }
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                source.record(
+                    format!("enrollment-self:{course_id}:{}", row.id.0),
+                    row.updated_at,
+                    row,
+                )
+            })
+            .collect())
+    }
+
+    /// Server-provided student grades, preserving missing/redacted values and
+    /// separate section enrollments. This performs no synthetic GPA calculation.
+    pub async fn self_grade_summary(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+    ) -> Result<Vec<SourceRecord<CanvasGradeSummary>>, ConnectorError> {
+        Ok(self
+            .self_enrollments(source, course_id)
+            .await?
+            .into_iter()
+            .filter(|record| record.payload.enrollment_type == "StudentEnrollment")
+            .map(|record| {
+                let row = record.payload;
+                source.record(
+                    format!("grade-self:{course_id}:{}", row.id.0),
+                    record.updated_at,
+                    CanvasGradeSummary {
+                        enrollment_id: row.id,
+                        course_id: row.course_id,
+                        user_id: row.user_id,
+                        enrollment_state: row.enrollment_state,
+                        grades: row.grades,
+                    },
                 )
             })
             .collect())

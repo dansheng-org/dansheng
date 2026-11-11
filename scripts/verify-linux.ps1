@@ -2,7 +2,7 @@
 <#
 Read-only host probes; optional source-only snapshot and disposable WSLC probe.
 Host probes and source-only snapshot. Native execution is opt-in and uses only
-a new owned distro. First-import automatic default is allowed by the parent
+a new or identity-verified retained owned distro. First-import automatic default is allowed by the parent
 agent's scope adjustment after confirming there were no existing distros.
 Never enables Windows features, elevates, or changes existing user distros/settings.
 #>
@@ -19,17 +19,20 @@ param(
     [string]$SnapshotDirectory,
     [string]$CachedRootfs,
     [string]$EnvironmentDirectory,
-    [string]$CleanupEnvironment
+    [string]$CleanupEnvironment,
+    [string]$RuntimeRoot
 )
 $ErrorActionPreference = 'Stop'
 if (@($ClippyOnly, $M5TargetsOnly, $HostFollowupOnly, $CoreHostFfiOnly | Where-Object { $_ }).Count -gt 1) { throw 'Choose only one focused validation mode' }
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$outputRoot = Join-Path $repo '.local/linux-validation'
+. "$PSScriptRoot/runtime-common.ps1"
+$validationRuntime = Resolve-DanshengRuntimeRoot -Root $repo -RuntimeRoot $RuntimeRoot
+$outputRoot = Get-DanshengRuntimeOutput -RuntimeRoot $validationRuntime -Path (Join-Path $validationRuntime 'linux-validation')
 
 function Assert-SafePath([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
     if ($full -ne $outputRoot -and -not $full.StartsWith($outputRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Output escapes .local/linux-validation: $full"
+        throw "Output escapes selected runtime/linux-validation: $full"
     }
     for ($part = $full; $part; $part = [IO.Path]::GetDirectoryName($part)) {
         if ((Test-Path -LiteralPath $part) -and ((Get-Item -Force -LiteralPath $part).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
@@ -108,7 +111,7 @@ function Source-Inventory {
             $p -match '^(crates/(dansheng-core|dansheng-connectors|dansheng-host|dansheng-ffi)|tools/dansheng-lab)/(Cargo\.toml|LICENSE|NOTICE\.md|README\.md)$' -or
             $p -match '^crates/dansheng-connectors/src/login-NOTICE\.md$' -or
             $p -match '^(crates/(dansheng-core|dansheng-connectors|dansheng-host|dansheng-ffi)|tools/dansheng-lab)/(src|tests)/.*\.(rs|c)$' -or
-            $p -match '^crates/dansheng-connectors/(tests/fixtures|fixtures/campus)/[^/]+\.(json|html|xml|txt|md)$' -or
+            $p -match '^crates/dansheng-connectors/(tests/fixtures|fixtures)/.+\.(json|html|xml|txt|md)$' -or
             $p -match '^include/[^/]+\.h$' -or
             $p -match '^plugins/(examples|fudan-sports|fixtures/closed-loop)/.*(\.(mjs|js|json|ts|rs|md)|/LICENSE)$' -or
             $p -match '^tools/dansheng-lab/static/[^/]+\.(html|js|css)$'
@@ -116,6 +119,36 @@ function Source-Inventory {
     })
     [Array]::Sort($selected, [StringComparer]::Ordinal)
     return $selected
+}
+
+function Verify-ProductionSnapshot([string]$Directory) {
+    $directory = Assert-SafePath $Directory
+    $metadata = Get-Content -Raw -LiteralPath (Join-Path $directory 'snapshot.json') | ConvertFrom-Json
+    $recorded = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    foreach ($line in Get-Content -LiteralPath (Join-Path $directory 'source-manifest.sha256')) {
+        if ($line -notmatch '^([a-f0-9]{64})  (.+)$') { throw 'Invalid source manifest entry' }
+        $recorded.Add($Matches[2], $Matches[1])
+    }
+    $current = @(Source-Inventory)
+    $changed = @()
+    $added = @()
+    $removed = @($recorded.Keys | Where-Object { $_ -cnotin $current })
+    $lines = foreach ($relative in $current) {
+        $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $repo $relative)).Hash.ToLowerInvariant()
+        if (-not $recorded.ContainsKey($relative)) { $added += $relative }
+        elseif ($recorded[$relative] -cne $hash) { $changed += $relative }
+        "$hash  $relative"
+    }
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($lines -join "`n") + "`n")
+    $currentHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    $proof = [ordered]@{
+        utc = [DateTime]::UtcNow.ToString('o'); files = $current.Count
+        snapshot_manifest_sha256 = $metadata.manifest_sha256; current_manifest_sha256 = $currentHash
+        changed = $changed; added = $added; removed = $removed
+        unchanged = $currentHash -ceq $metadata.manifest_sha256 -and $changed.Count -eq 0 -and $added.Count -eq 0 -and $removed.Count -eq 0
+    }
+    Write-Artifact (Join-Path $directory 'production-source-proof.json') ($proof | ConvertTo-Json -Depth 6)
+    if (-not $proof.unchanged) { throw 'Production source drift detected; this run is not accepted' }
 }
 
 function Remove-OwnedDistro([string]$Directory) {
@@ -208,7 +241,7 @@ function Invoke-NativeVerification([string]$Directory) {
         $nativePath = '/mnt/' + $directory.Substring(0, 1).ToLowerInvariant() + $directory.Substring(2).Replace('\', '/')
         Write-Host "Running native Linux validation in $name"
         $validationMode = if ($CoreHostFfiOnly) { 'core-host-ffi' } elseif ($HostFollowupOnly) { 'host-followup' } elseif ($M5TargetsOnly) { 'm5-targets' } elseif ($ClippyOnly) { 'clippy' } else { 'full' }
-        & wsl.exe --distribution $name --user root --exec /usr/bin/env DANSHENG_DISPOSABLE_LINUX=1 "DANSHENG_VALIDATION_MODE=$validationMode" /bin/bash "$nativePath/bootstrap-linux.sh" 2>&1 |
+        & wsl.exe --distribution $name --user root --exec /usr/bin/env -u BASH_ENV -u ENV DANSHENG_DISPOSABLE_LINUX=1 "DANSHENG_VALIDATION_MODE=$validationMode" /bin/bash --noprofile --norc "$nativePath/bootstrap-linux.sh" 2>&1 |
             Tee-Object -FilePath (Join-Path $directory 'native-console.log') | Out-Host
         $nativeExit = $LASTEXITCODE
         Write-Artifact (Join-Path $directory 'native-process-result.json') ([ordered]@{ exit_code = $nativeExit; utc = [DateTime]::UtcNow.ToString('o'); native_validation_attempted = $true; validation_mode = $validationMode; note = 'Inspect stage logs: a source compile/test failure is not an environment blocker.' } | ConvertTo-Json)
@@ -248,8 +281,8 @@ function Invoke-ReusedNativeVerification([string]$Directory, [string]$Environmen
     # Pass all paths as positional arguments; shell text is fixed. This only
     # creates a fresh work directory inside our verified retained distro.
     $validationMode = if ($CoreHostFfiOnly) { 'core-host-ffi' } elseif ($HostFollowupOnly) { 'host-followup' } elseif ($M5TargetsOnly) { 'm5-targets' } elseif ($ClippyOnly) { 'clippy' } else { 'full' }
-    $launch = 'set -eu; base=$1; cache=$2; runner=$3; mode=$4; test -f "$cache/ownership-marker"; test ! -e "$base"; mkdir -m 700 "$base"; printf "dansheng-linux-validation\n" > "$base/ownership-marker"; mkdir "$base/home"; exec env DANSHENG_TOOLCHAIN_BASE="$cache" DANSHENG_VALIDATION_MODE="$mode" bash "$runner" "$base"'
-    $arguments = @('--distribution', $owner.name, '--user', 'root', '--exec', '/bin/bash', '-c', $launch, 'dansheng-reuse', $guest, $toolchain, "$nativePath/native-verify.sh", $validationMode)
+    $launch = 'set -eu; base=$1; cache=$2; runner=$3; mode=$4; test -f "$cache/ownership-marker"; test ! -e "$base"; mkdir -m 700 "$base"; printf "dansheng-linux-validation\n" > "$base/ownership-marker"; exec env -u BASH_ENV -u ENV DANSHENG_TOOLCHAIN_BASE="$cache" DANSHENG_VALIDATION_MODE="$mode" bash --noprofile --norc "$runner" "$base"'
+    $arguments = @('--distribution', $owner.name, '--user', 'root', '--exec', '/usr/bin/env', '-u', 'BASH_ENV', '-u', 'ENV', '/bin/bash', '--noprofile', '--norc', '-c', $launch, 'dansheng-reuse', $guest, $toolchain, "$nativePath/native-verify.sh", $validationMode)
     & wsl.exe @arguments 2>&1 | Tee-Object -FilePath (Join-Path $directory 'native-console.log') | Out-Host
     $nativeExit = $LASTEXITCODE
     Write-Artifact (Join-Path $directory 'native-process-result.json') ([ordered]@{ exit_code = $nativeExit; utc = [DateTime]::UtcNow.ToString('o'); native_validation_attempted = $true; validation_mode = $validationMode; cache_reused = $true; environment_retained = $true } | ConvertTo-Json)
@@ -284,8 +317,12 @@ if ($SnapshotDirectory) {
         if (-not $file.StartsWith($sourceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Snapshot entry escapes source root' }
         if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) { throw "Frozen source changed: $relative" }
     }
-    if ($EnvironmentDirectory) { Invoke-ReusedNativeVerification $frozen $EnvironmentDirectory }
-    else { Invoke-NativeVerification $frozen }
+    Verify-ProductionSnapshot $frozen
+    try {
+        if ($EnvironmentDirectory) { Invoke-ReusedNativeVerification $frozen $EnvironmentDirectory }
+        else { Invoke-NativeVerification $frozen }
+    }
+    finally { Verify-ProductionSnapshot $frozen }
     return
 }
 if ($ExecuteNative) { $PrepareSnapshot = $true }
@@ -388,6 +425,9 @@ if ($PrepareSnapshot) {
         scope = 'Four core crates plus required lab workspace member, manifests/lock, headers, synthetic connector fixtures and plugin sources. No reference checkouts, .git, .local, target, dist, node_modules, real profiles/logs/vaults.'
     }
     Write-Artifact (Join-Path $run 'snapshot.json') ($metadata | ConvertTo-Json -Depth 6)
+    if ($drift.Count -ne 0 -or $metadata.inventory_changed) {
+        throw 'Source changed during capture; this snapshot will not be executed or accepted'
+    }
 
     $bootstrap = @'
 #!/usr/bin/env bash
@@ -402,8 +442,9 @@ base=${DANSHENG_LINUX_WORK:-/opt/dansheng-validation-__SUFFIX__}
 [[ $base =~ ^/opt/dansheng-validation-[a-f0-9]{8}$ && ! -e $base ]] || { echo 'Requires a fresh dedicated /opt/dansheng-validation-<8 hex> directory'; exit 2; }
 mkdir -m 700 "$base"
 printf 'dansheng-linux-validation\n' > "$base/ownership-marker"
-export HOME="$base/home" CARGO_HOME="$base/cargo" RUSTUP_HOME="$base/rustup"
-mkdir -p "$HOME" "$CARGO_HOME" "$RUSTUP_HOME" "$base/downloads"
+export CARGO_HOME="$base/cargo" RUSTUP_HOME="$base/rustup"
+export TMPDIR="$base/tmp" XDG_CONFIG_HOME="$base/config" XDG_DATA_HOME="$base/data" XDG_CACHE_HOME="$base/cache"
+mkdir -p "$CARGO_HOME" "$RUSTUP_HOME" "$TMPDIR" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$base/downloads"
 # These package operations affect only the fresh guest. Keep official image APT sources.
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential pkg-config ca-certificates curl xz-utils file binutils
@@ -427,7 +468,7 @@ base=${1:?Pass the disposable Linux work directory created by bootstrap-linux.sh
 [[ $(uname -s) == Linux ]] || exit 2
 toolchain=${DANSHENG_TOOLCHAIN_BASE:-$base}
 [[ $toolchain =~ ^/opt/dansheng-validation-[a-f0-9]{8}$ && -f $toolchain/ownership-marker ]] || exit 2
-export HOME="$base/home" CARGO_HOME="$toolchain/cargo" RUSTUP_HOME="$toolchain/rustup" CARGO_TARGET_DIR="$toolchain/target"
+export CARGO_HOME="$toolchain/cargo" RUSTUP_HOME="$toolchain/rustup" CARGO_TARGET_DIR="$toolchain/target"
 export PATH="$CARGO_HOME/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export TMPDIR="$base/tmp" XDG_CONFIG_HOME="$base/config" XDG_DATA_HOME="$base/data" XDG_CACHE_HOME="$base/cache" XDG_RUNTIME_DIR="$base/runtime" CARGO_TERM_COLOR=never
 # Resource limits apply only to this Linux validation process and its children.
@@ -435,7 +476,7 @@ export CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2
 mkdir -p "$TMPDIR" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR" "$base/results"
 chmod 700 "$XDG_RUNTIME_DIR"
 # Never connect to an inherited desktop D-Bus/keyring or log an environment dump.
-unset DBUS_SESSION_BUS_ADDRESS DBUS_STARTER_ADDRESS DBUS_STARTER_BUS_TYPE
+unset DBUS_SESSION_BUS_ADDRESS DBUS_STARTER_ADDRESS DBUS_STARTER_BUS_TYPE BASH_ENV ENV
 umask 077
 cp -a "$artifact/source" "$base/source"
 cd "$base/source"
@@ -490,7 +531,7 @@ if [[ $mode == host-followup ]]; then
     exit "$((failures > 0))"
 fi
 step fmt cargo +1.99.1 fmt --all -- --check
-crates=(dansheng-core dansheng-connectors dansheng-host dansheng-ffi)
+crates=(dansheng-core dansheng-connectors dansheng-host dansheng-ffi dansheng-lab)
 if [[ $mode == core-host-ffi ]]; then crates=(dansheng-core dansheng-host dansheng-ffi); fi
 for crate in "${crates[@]}"; do
     step "test-$crate" cargo +1.99.1 test -p "$crate" --all-features --all-targets --locked --offline
@@ -523,8 +564,12 @@ exit "$((failures > 0))"
 }
 Write-Host "Evidence: $run"
 if ($ExecuteNative) {
-    if ($EnvironmentDirectory) { Invoke-ReusedNativeVerification $run $EnvironmentDirectory }
-    else { Invoke-NativeVerification $run }
+    Verify-ProductionSnapshot $run
+    try {
+        if ($EnvironmentDirectory) { Invoke-ReusedNativeVerification $run $EnvironmentDirectory }
+        else { Invoke-NativeVerification $run }
+    }
+    finally { Verify-ProductionSnapshot $run }
 }
 else { Write-Host 'This invocation collected/prepared evidence only; it did not install a distro or run the native test suite.' }
 foreach ($blocker in $blockers) { Write-Host $blocker }

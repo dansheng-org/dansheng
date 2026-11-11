@@ -18,23 +18,28 @@ use dansheng_core::{
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+#[cfg(test)]
+#[path = "bridge_bytes_tests.rs"]
+mod bridge_bytes_tests;
+
 pub struct CampusService;
 // Canvas serves same-origin file metadata, then redirects the download to this
 // school storage origin. Network selects credentials again per origin on redirect.
+#[cfg(feature = "login")]
 const FUDAN_CANVAS_STORAGE: &str = "https://elearning.obs.fudan.edu.cn";
-struct BoundTransport<'a> {
-    network: &'a Network,
-    platform: &'a dyn PlatformPort,
-    principal: &'a Principal,
-    grant: &'a Grant,
-    account: &'a str,
-    store: &'a dansheng_core::store::Store,
-    source_capability: &'a str,
+pub(crate) struct BoundTransport<'a> {
+    pub(crate) network: &'a Network,
+    pub(crate) platform: &'a dyn PlatformPort,
+    pub(crate) principal: &'a Principal,
+    pub(crate) grant: &'a Grant,
+    pub(crate) account: &'a str,
+    pub(crate) store: &'a dansheng_core::store::Store,
+    pub(crate) source_capability: &'a str,
+    pub(crate) credential_lease: std::sync::Mutex<Option<String>>,
 }
 
-#[async_trait]
-impl ConnectorTransport for BoundTransport<'_> {
-    async fn execute(&self, input: ConnectorRequest) -> Result<ConnectorResponse, ConnectorError> {
+impl BoundTransport<'_> {
+    fn current_authority(&self) -> Result<Grant, ConnectorError> {
         let current = self
             .store
             .grant(&self.principal.id)
@@ -45,6 +50,54 @@ impl ConnectorTransport for BoundTransport<'_> {
         current
             .check_account(self.principal, Some(self.account))
             .map_err(|_| ConnectorError::PermissionDenied)?;
+        Ok(current)
+    }
+    pub(crate) fn pin_credential_identity(
+        &self,
+        identity: String,
+        challenge: &crate::AuthChallenge,
+    ) -> Result<(), ConnectorError> {
+        let mut lease = self
+            .credential_lease
+            .lock()
+            .map_err(|_| ConnectorError::TransportUnavailable)?;
+        if lease.as_ref().is_some_and(|expected| expected != &identity) {
+            return Err(ConnectorError::AuthRequired(challenge.clone()));
+        }
+        if lease.is_none() {
+            *lease = Some(identity);
+        }
+        Ok(())
+    }
+    fn check_native_lease(&self, challenge: &crate::AuthChallenge) -> Result<(), ConnectorError> {
+        let identity = self
+            .network
+            .session_fingerprint(Some(self.account))
+            .map_err(|error| {
+                if error.code == "AuthenticationRequired" {
+                    ConnectorError::AuthRequired(challenge.clone())
+                } else {
+                    transport_error(error)
+                }
+            })?;
+        self.pin_credential_identity(format!("native:{identity}"), challenge)
+    }
+}
+
+#[async_trait]
+impl ConnectorTransport for BoundTransport<'_> {
+    async fn execute(&self, input: ConnectorRequest) -> Result<ConnectorResponse, ConnectorError> {
+        let current = self.current_authority()?;
+        if match &input.auth {
+            TransportAuth::Anonymous => false,
+            TransportAuth::HostToken { account_id }
+            | TransportAuth::HostHeaders { account_id }
+            | TransportAuth::HostSession { account_id }
+            | TransportAuth::OptionalSession { account_id }
+            | TransportAuth::BrowserSession { account_id } => account_id != self.account,
+        } {
+            return Err(ConnectorError::PermissionDenied);
+        }
         let mut io_grant = self.grant.clone();
         io_grant.allow_private_network &= current.allow_private_network;
         // DanXi's room directory is an anonymous, fixed intranet HTTP service. An
@@ -73,6 +126,7 @@ impl ConnectorTransport for BoundTransport<'_> {
         io_grant.expires_at = current.expires_at.clone();
         let credential_kind = match &input.auth {
             TransportAuth::HostToken { .. } => CredentialKind::Bearer,
+            TransportAuth::HostHeaders { .. } => CredentialKind::SecretHeaders,
             TransportAuth::HostSession { .. } | TransportAuth::BrowserSession { .. } => {
                 CredentialKind::Cookie
             }
@@ -88,9 +142,9 @@ impl ConnectorTransport for BoundTransport<'_> {
             };
         let (account, browser) = match &input.auth {
             TransportAuth::Anonymous => (Some(self.account.to_owned()), false),
-            TransportAuth::HostToken { account_id } | TransportAuth::HostSession { account_id } => {
-                (Some(account_id.clone()), false)
-            }
+            TransportAuth::HostToken { account_id }
+            | TransportAuth::HostHeaders { account_id }
+            | TransportAuth::HostSession { account_id } => (Some(account_id.clone()), false),
             // Keep the account to select its gateway; an optional unauthenticated
             // logical origin must not lose the account-scoped WebVPN cookie.
             TransportAuth::OptionalSession { account_id } => (Some(account_id.clone()), false),
@@ -100,17 +154,79 @@ impl ConnectorTransport for BoundTransport<'_> {
             .check_account(self.principal, account.as_deref())
             .map_err(|_| ConnectorError::PermissionDenied)?;
         if browser {
-            // No inferred browser context: a source requiring page execution must supply
-            // a trusted session binding, not silently downgrade to native HTTP.
-            let _ = &self.platform;
-            return Err(ConnectorError::CapabilityUnavailable);
+            // The platform supplies an account/origin-bound live page handle.
+            // This branch never imports cookies or invokes the native network.
+            return crate::page_transport::execute(self, input).await;
         }
         let challenge = crate::AuthChallenge {
             connector: "official-campus".into(),
             origin: input.url.origin().ascii_serialization(),
             account_id: account.clone().unwrap_or_default(),
-            mode: crate::AuthMode::HttpSession,
+            mode: match &input.auth {
+                TransportAuth::HostToken { .. } => crate::AuthMode::Token,
+                TransportAuth::HostHeaders { .. } => crate::AuthMode::SecretHeaders,
+                _ => crate::AuthMode::HttpSession,
+            },
         };
+        let leased = credential_kind != CredentialKind::Anonymous;
+        if leased {
+            self.check_native_lease(&challenge)?;
+        }
+        // Bytes are an explicit connector contract. Proto/octet-stream requests
+        // use the bounded byte API; page transport was selected above and can
+        // never reach this native branch as a fallback.
+        let binary = input.headers.iter().any(|(name, value)| {
+            (name.eq_ignore_ascii_case("accept") || name.eq_ignore_ascii_case("content-type"))
+                && value.split([',', ';']).any(|mime| {
+                    matches!(
+                        mime.trim().to_ascii_lowercase().as_str(),
+                        "application/x-protobuf"
+                            | "application/protobuf"
+                            | "application/octet-stream"
+                    )
+                })
+        }) || input
+            .body
+            .as_ref()
+            .is_some_and(|body| std::str::from_utf8(body).is_err());
+        if binary {
+            let response = isolated
+                .as_ref()
+                .unwrap_or(self.network)
+                .request_bytes(
+                    self.principal,
+                    &io_grant,
+                    HttpRequest {
+                        url: input.url.to_string(),
+                        method: input.method.as_str().into(),
+                        headers: input.headers.into_iter().collect(),
+                        account_id: account,
+                        timeout_ms: Some(15000),
+                        follow_redirects: false,
+                        ..Default::default()
+                    },
+                    input.body,
+                    credential_kind,
+                )
+                .await
+                .map_err(|error| {
+                    if error.code == "AuthenticationRequired" {
+                        ConnectorError::AuthRequired(challenge.clone())
+                    } else {
+                        transport_error(error)
+                    }
+                })?;
+            self.current_authority()?;
+            if leased {
+                self.check_native_lease(&challenge)?;
+            }
+            return Ok(ConnectorResponse {
+                status: response.status,
+                final_url: url::Url::parse(&response.url).map_err(|_| ConnectorError::UnsafeUrl)?,
+                headers: response.headers.into_iter().collect(),
+                body: response.body,
+            });
+        }
         let canvas_course_read = matches!(
             input.auth,
             TransportAuth::HostToken { .. } | TransportAuth::HostSession { .. }
@@ -143,11 +259,15 @@ impl ConnectorTransport for BoundTransport<'_> {
             .await
             .map_err(|error| {
                 if error.code == "AuthenticationRequired" {
-                    ConnectorError::AuthRequired(challenge)
+                    ConnectorError::AuthRequired(challenge.clone())
                 } else {
                     transport_error(error)
                 }
             })?;
+        self.current_authority()?;
+        if leased {
+            self.check_native_lease(&challenge)?;
+        }
         if canvas_course_read && matches!(response.status, 401 | 403) {
             let check = self
                 .network
@@ -164,6 +284,10 @@ impl ConnectorTransport for BoundTransport<'_> {
                     credential_kind,
                 )
                 .await;
+            self.current_authority()?;
+            if leased {
+                self.check_native_lease(&challenge)?;
+            }
             if check.is_ok_and(|r| {
                 r.status == 200
                     && serde_json::from_str::<Value>(&r.body).is_ok_and(|p| !p["id"].is_null())
@@ -193,7 +317,7 @@ fn transport_error(error: CoreError) -> ConnectorError {
         _ => ConnectorError::TransportUnavailable,
     }
 }
-fn source_error(error: ConnectorError) -> CoreError {
+pub(crate) fn source_error(error: ConnectorError) -> CoreError {
     match error {
         ConnectorError::AuthRequired(_) => CoreError::new(
             "AuthenticationRequired",
@@ -224,7 +348,7 @@ fn source_error(error: ConnectorError) -> CoreError {
 #[async_trait]
 impl CoreService for CampusService {
     fn methods(&self) -> Vec<(&'static str, &'static str)> {
-        vec![
+        let mut methods = vec![
             ("fudan.semesters", "fudan.academic.read"),
             ("fudan.timetable.sync", "fudan.academic.read"),
             ("fudan.postgraduate.sync", "fudan.academic.read"),
@@ -267,6 +391,15 @@ impl CoreService for CampusService {
             ("canvas.pages.sync", "canvas.read"),
             ("canvas.page.read", "canvas.read"),
             ("canvas.announcements.sync", "canvas.read"),
+            ("canvas.quizzes.sync", "canvas.read"),
+            ("canvas.quiz.read", "canvas.read"),
+            ("canvas.discussions.sync", "canvas.read"),
+            ("canvas.discussion.read", "canvas.read"),
+            ("canvas.discussion.view", "canvas.read"),
+            ("canvas.assignment_groups.sync", "canvas.read"),
+            ("canvas.submission.self", "canvas.read"),
+            ("canvas.enrollments.self", "canvas.read"),
+            ("canvas.grades.self", "canvas.read"),
             ("community.tea.divisions", "community.read"),
             ("community.tea.login", "community.login"),
             ("community.tea.search", "community.read"),
@@ -280,7 +413,9 @@ impl CoreService for CampusService {
             ("community.danke.search", "community.read"),
             ("community.danke.group", "community.read"),
             ("community.danke.reviews", "community.read"),
-        ]
+        ];
+        methods.extend(crate::expanded_services::METHODS);
+        methods
     }
     async fn call(
         &self,
@@ -298,6 +433,10 @@ impl CoreService for CampusService {
             .1;
         grant.check(principal, capability)?;
         let account = required_string(&params, "account_id")?;
+        if crate::expanded_services::handles(method) {
+            return crate::expanded_services::call(context, principal, grant, method, &params)
+                .await;
+        }
         grant.check_account(principal, Some(account))?;
         #[cfg(feature = "login")]
         if method == "fudan.portal.bind" {
@@ -389,6 +528,7 @@ impl CoreService for CampusService {
                         account,
                         store: context.store,
                         source_capability: capability,
+                        credential_lease: Default::default(),
                     });
                 history
                     .electricity_history(
@@ -646,6 +786,7 @@ impl CoreService for CampusService {
                 account,
                 store: context.store,
                 source_capability: capability,
+                credential_lease: Default::default(),
             };
             // Return before source labels, snapshots, checkpoints or caches are touched.
             return present_qr(context, principal, grant, account, transport).await;
@@ -670,10 +811,21 @@ impl CoreService for CampusService {
             let access = params["access"].as_str().unwrap_or("host_session");
             let mode: CanvasAccess = serde_json::from_value(json!(access))?;
             if mode == CanvasAccess::BrowserSession {
-                return Err(CoreError::new(
-                    "CapabilityUnavailable",
-                    "use the browser-backed Canvas plugin for this explicit transport",
-                ));
+                crate::page_transport::verify(
+                    &BoundTransport {
+                        account,
+                        store: context.store,
+                        source_capability: capability,
+                        credential_lease: Default::default(),
+                        network: context.network,
+                        platform: context.platform,
+                        principal,
+                        grant,
+                    },
+                    &url,
+                )
+                .await
+                .map_err(source_error)?;
             }
             let mut download_origins = std::collections::BTreeSet::from([origin.to_owned()]);
             if let Some(values) = params.get("download_origins") {
@@ -756,6 +908,7 @@ impl CoreService for CampusService {
                 account,
                 store: context.store,
                 source_capability: capability,
+                credential_lease: Default::default(),
                 network: context.network,
                 platform: context.platform,
                 principal,
@@ -863,6 +1016,7 @@ impl CoreService for CampusService {
                 account,
                 store: context.store,
                 source_capability: capability,
+                credential_lease: Default::default(),
                 network: context.network,
                 platform: context.platform,
                 principal,
@@ -939,6 +1093,7 @@ impl CoreService for CampusService {
                             account,
                             store: context.store,
                             source_capability: capability,
+                            credential_lease: Default::default(),
                             network: context.network,
                             platform: context.platform,
                             principal,
@@ -1009,6 +1164,7 @@ impl CoreService for CampusService {
                 account,
                 store: context.store,
                 source_capability: capability,
+                credential_lease: Default::default(),
                 network: context.network,
                 platform: context.platform,
                 principal,
@@ -1098,6 +1254,7 @@ impl CoreService for CampusService {
                 account,
                 store: context.store,
                 source_capability: capability,
+                credential_lease: Default::default(),
                 network: context.network,
                 platform: context.platform,
                 principal,
@@ -1194,6 +1351,103 @@ impl CoreService for CampusService {
                 serde_json::to_value(
                     client
                         .announcements(&source, required_string(&params, "course_id")?)
+                        .await
+                        .map_err(source_error)?,
+                )?,
+            ),
+            "canvas.quizzes.sync" => (
+                "lms_quiz",
+                serde_json::to_value(
+                    client
+                        .quizzes(&source, required_string(&params, "course_id")?)
+                        .await
+                        .map_err(source_error)?,
+                )?,
+            ),
+            "canvas.quiz.read" => (
+                "lms_quiz",
+                serde_json::to_value(vec![
+                    client
+                        .quiz(
+                            &source,
+                            required_string(&params, "course_id")?,
+                            required_string(&params, "quiz_id")?,
+                        )
+                        .await
+                        .map_err(source_error)?,
+                ])?,
+            ),
+            "canvas.discussions.sync" => (
+                "lms_discussion_topic",
+                serde_json::to_value(
+                    client
+                        .discussion_topics(&source, required_string(&params, "course_id")?)
+                        .await
+                        .map_err(source_error)?,
+                )?,
+            ),
+            "canvas.discussion.read" => (
+                "lms_discussion_topic",
+                serde_json::to_value(vec![
+                    client
+                        .discussion_topic(
+                            &source,
+                            required_string(&params, "course_id")?,
+                            required_string(&params, "topic_id")?,
+                        )
+                        .await
+                        .map_err(source_error)?,
+                ])?,
+            ),
+            "canvas.discussion.view" => (
+                "lms_discussion_view",
+                serde_json::to_value(vec![
+                    client
+                        .discussion_view(
+                            &source,
+                            required_string(&params, "course_id")?,
+                            required_string(&params, "topic_id")?,
+                        )
+                        .await
+                        .map_err(source_error)?,
+                ])?,
+            ),
+            "canvas.assignment_groups.sync" => (
+                "lms_assignment_group",
+                serde_json::to_value(
+                    client
+                        .assignment_groups(&source, required_string(&params, "course_id")?)
+                        .await
+                        .map_err(source_error)?,
+                )?,
+            ),
+            "canvas.submission.self" => (
+                "lms_self_submission",
+                serde_json::to_value(vec![
+                    client
+                        .self_submission(
+                            &source,
+                            required_string(&params, "course_id")?,
+                            required_string(&params, "assignment_id")?,
+                        )
+                        .await
+                        .map_err(source_error)?,
+                ])?,
+            ),
+            "canvas.enrollments.self" => (
+                "lms_self_enrollment",
+                serde_json::to_value(
+                    client
+                        .self_enrollments(&source, required_string(&params, "course_id")?)
+                        .await
+                        .map_err(source_error)?,
+                )?,
+            ),
+            "canvas.grades.self" => (
+                "lms_grade_summary",
+                serde_json::to_value(
+                    client
+                        .self_grade_summary(&source, required_string(&params, "course_id")?)
                         .await
                         .map_err(source_error)?,
                 )?,
@@ -1311,7 +1565,7 @@ async fn present_qr(
     Ok(json!({"presented":presented,"kind":"qr","display_for_ms":30000}))
 }
 
-fn campus_error(error: crate::campus::CampusError) -> CoreError {
+pub(crate) fn campus_error(error: crate::campus::CampusError) -> CoreError {
     match error {
         crate::campus::CampusError::TermsNotAccepted => CoreError::new(
             "TermsNotAccepted",
@@ -1711,6 +1965,21 @@ fn source_partition(method: &str, params: &Value) -> CoreResult<String> {
             source.push(':');
             source.push_str(module);
         }
+        let detail_key = match method {
+            "canvas.quiz.read" => Some("quiz_id"),
+            "canvas.discussion.read" | "canvas.discussion.view" => Some("topic_id"),
+            "canvas.submission.self" => Some("assignment_id"),
+            _ => None,
+        };
+        if let Some(key) = detail_key {
+            let detail = required_string(params, key)?;
+            if detail.is_empty() || detail.len() > 32 || !detail.bytes().all(|b| b.is_ascii_digit())
+            {
+                return Err(CoreError::invalid("invalid Canvas resource id"));
+            }
+            source.push(':');
+            source.push_str(detail);
+        }
     }
     Ok(source)
 }
@@ -1739,17 +2008,18 @@ fn date(params: &Value, key: &str) -> CoreResult<chrono::NaiveDate> {
     chrono::NaiveDate::parse_from_str(required_string(params, key)?, "%Y-%m-%d")
         .map_err(|_| CoreError::invalid(format!("invalid {key} date")))
 }
-fn publish_value(
+pub(crate) fn publish_value(
     store: &dansheng_core::store::Store,
     owner: &str,
     source: &SourceContext,
     kind: &str,
     value: &Value,
 ) -> CoreResult<()> {
-    let records = value["records"]
+    let batch = value.get("batch").unwrap_or(value);
+    let records = batch["records"]
         .as_array()
         .cloned()
-        .unwrap_or_else(|| vec![value.clone()]);
+        .unwrap_or_else(|| vec![batch.clone()]);
     let rows = records
         .into_iter()
         .map(|row| {
@@ -1765,7 +2035,15 @@ fn publish_value(
         &source.source_id,
         kind,
         &rows,
-        &json!({"observed_at":source.observed_at,"coverage":value["coverage"]}),
+        &json!({
+            "observed_at":source.observed_at,
+            "coverage":batch.get("coverage").or_else(||batch.pointer("/payload/coverage"))
+                .or_else(||batch.pointer("/payload/text_coverage")),
+            "source_revision":batch["source_revision"],
+            "complete":value["complete"],"stop":value["stop"],
+            "protocol_live_validated":value["protocol_live_validated"],
+            "identity_state":value["identity"]
+        }),
     )
 }
 
@@ -2096,6 +2374,7 @@ mod adapter_tests {
             account: "a",
             store: &store,
             source_capability: "fudan.notices.read",
+            credential_lease: Default::default(),
         };
         let request = ConnectorRequest {
             method: crate::HttpMethod::Get,

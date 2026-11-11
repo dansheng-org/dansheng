@@ -8,7 +8,9 @@ window.fetch = function(url, options) {
   window.fixtureCalls.push({transport:'fetch',url:url+'?synthetic-waf=dynamic',method:options.method});
   if(url.includes('/hang')) return new Promise(()=>{});
   if(url.includes('/body-interrupted')) return Promise.resolve({status:200,url:String(url),text:async()=>{throw new Error('synthetic interrupted body')}});
-  return Promise.resolve({status:200,url:String(url),text:async()=>JSON.stringify(window.fixtureReply || {e:0,d:{dynamic:true,data:[{base:{id:900,name:'Synthetic court',type:1}}]}})});
+  return Promise.resolve({status:200,url:window.fixtureResponseUrl || String(url),
+    headers:{get:name=>(window.fixtureHeaders || {})[name] || null},
+    text:async()=>JSON.stringify(window.fixtureReply || {e:0,d:{dynamic:true,data:[{base:{id:900,name:'Synthetic court',type:1}}]}})});
 };
 window.XMLHttpRequest = class {
   open(method,url) { this.method=method;this.url=url+'?synthetic-waf=dynamic';this.headers={}; }

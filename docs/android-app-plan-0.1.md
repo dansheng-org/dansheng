@@ -10,7 +10,7 @@
 
 ## 项目边界与现有基础
 
-生产客户端建议单独建在 `C:/Code/dansheng-app`，首个平台为 Android，包名采用 `org.dansheng.app`；复用后的 Dart 界面可供其他平台接入。当前仓库继续维护 Rust Core、SDK、官方插件和 Android 平台适配器。按版本和源码指纹消费它们，不复制另一个 Rust 工作区，不把验证 APK 改名发布，不修改只读 DanXi 参考目录。
+生产客户端位于独立 Git 仓库 `D:/Code/dansheng-app`，Core 主库为 `D:/Code/dansheng-core`；联调显式传同一任务的 Core 工作树。首个平台为 Android，包名采用 `org.dansheng.app`；复用后的 Dart 界面可供其他平台接入。当前仓库继续维护 Rust Core、SDK、官方插件和 Android 平台适配器。按版本和源码指纹消费它们，不复制另一个 Rust 工作区，不把验证 APK 改名发布，不修改只读 DanXi 参考目录。
 
 | 层 | 已有基础 | 首版需要交付 |
 | --- | --- | --- |

@@ -514,6 +514,8 @@ impl Engine {
                 owner(principal)?;
                 let account = required_string(&params, "account_id")?;
                 let origin = required_string(&params, "origin")?;
+                let secret_headers =
+                    crate::network::secret_headers_from_value(params.get("secret_headers"))?;
                 let persist = params["persist"].as_bool().unwrap_or(true);
                 if persist
                     && !self
@@ -537,11 +539,12 @@ impl Engine {
                             .collect()
                     })
                     .unwrap_or_default();
-                self.network.set_session(
+                self.network.set_session_with_headers(
                     account,
                     origin,
                     params["bearer"].as_str().map(str::to_owned),
                     cookies,
+                    secret_headers,
                 )?;
                 if persist {
                     self.platform.call("vault.set",json!({"key":format!("http-sessions:{account}"),"value":self.network.export_sessions(account)?})).await?;

@@ -10,3 +10,18 @@
 *.db-shm
 *.db-wal
 *.log
+
+# Per-task/private configuration; keep examples and application lockfiles tracked.
+/.env
+/.env.*
+!/.env.example
+/credentials.txt
+/credentials.*.txt
+/pubspec_overrides.yaml
+/workspace.local.json
+/TASK.md
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.aar

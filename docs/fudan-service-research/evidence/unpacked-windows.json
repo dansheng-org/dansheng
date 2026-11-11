@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "source_sha256": "fdbaeab6fda9ab71025830d32de05899b1310fd589aff79efc45069da97e5945",
+  "binary_sha256": "d89acf76b8798ba9c859e7ecc3911b198675fc1b50d96d9c96b3e2b99118f901",
+  "host_checks": [
+    "native service and authenticated IPC",
+    "real MCP initialize/tools/list over stdio",
+    "new campus reads are discoverable while reader configuration is excluded",
+    "MCP reads the same profile TODO created through CLI",
+    "MCP cannot grant itself permissions",
+    "a new public Core read succeeds through granted MCP and is denied after revocation",
+    "full managed snapshot through live service",
+    "offline restore with a recoverable previous profile",
+    "restored data survives while MCP grants are reset"
+  ],
+  "shared_package_checks": [
+    "real auth broker challenge with no HTTP dispatch",
+    "real stdio MCP reads granted source and static UI descriptor; private UI and authorization remain scoped",
+    "native HTTP, QuickJS, private/canonical SQLite data and UI description survive a real Host restart"
+  ],
+  "package_sha256": "eb037c94a2bd146d0c7d50ec098597e99ba27f2c9ea7852f6bd70e1ec5b6bc1a",
+  "normalized_sha256": "556afa430353b2329b39860c1bc7495eb31e758b7dbab04ef69a0a6c8fb91193",
+  "windows_android_match": true,
+  "network": {
+    "requests": 1,
+    "accepted": 1,
+    "loopback_only": true
+  },
+  "private_data_exported": false
+}

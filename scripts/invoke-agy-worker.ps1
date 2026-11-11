@@ -4,12 +4,15 @@ param(
     [Parameter(Mandatory)][string[]]$Scope,
     [string]$ConversationId,
     [string]$AgyPath,
-    [ValidateSet('UserEnvironment','Inherit')][string]$ProxyMode = 'UserEnvironment'
+    [ValidateSet('UserEnvironment','Inherit')][string]$ProxyMode = 'UserEnvironment',
+    [string]$RuntimeRoot
 )
 $ErrorActionPreference='Stop'
 if(-not $AgyPath){$AgyPath=(Get-Command agy -CommandType Application -ErrorAction Stop).Source}
 $WorkerProjectRoot=(Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).Path
-$WorkerOutputRoot=Join-Path $WorkerProjectRoot '.local\workers'
+. "$PSScriptRoot/runtime-common.ps1"
+$WorkerRuntime=Resolve-DanshengRuntimeRoot -Root $WorkerProjectRoot -RuntimeRoot $RuntimeRoot
+$WorkerOutputRoot=Get-DanshengRuntimeOutput -RuntimeRoot $WorkerRuntime -Path (Join-Path $WorkerRuntime 'workers')
 New-Item -ItemType Directory -Force -Path $WorkerOutputRoot | Out-Null
 $WorkerPrompt=Get-Content -Raw -LiteralPath $PromptFile
 $WorkerLockName=if($ConversationId){[guid]::Parse($ConversationId).ToString()}else{$Name}

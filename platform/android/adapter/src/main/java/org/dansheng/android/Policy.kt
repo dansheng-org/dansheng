@@ -13,6 +13,32 @@ fun origin(url: String): String {
     return "https://${u.host.lowercase()}" + if (u.port == -1 || u.port == 443) "" else ":${u.port}"
 }
 
+/** Only unchanged caller query fields can survive a page response. Removed,
+ * duplicated or changed identity filters must never be reconstructed, and a
+ * redirect cannot add authentication material to the returned URL.
+ */
+internal fun safePageResponseUrl(url: String, requested: String, expectedOrigin: String): String {
+    if (origin(url.substringBefore('#')) != expectedOrigin || origin(requested) != expectedOrigin)
+        throw PortError("OriginMismatch")
+    val actual = URI(url)
+    val original = URI(requested)
+    fun fields(query: String?): Map<String, List<String>> = (query ?: "").split('&')
+        .filter { it.isNotEmpty() }.groupBy { field ->
+            java.net.URLDecoder.decode(field.substringBefore('='), "UTF-8")
+        }
+    val before = fields(original.rawQuery)
+    val safe = fields(actual.rawQuery).filter { (key, values) ->
+        val name = key.lowercase()
+        key.none { it.isISOControl() } &&
+            listOf("token", "ticket", "signature", "password", "credential", "session", "secret", "auth")
+                .none { name.contains(it) } &&
+            name !in setOf("api_key", "apikey", "sig", "verifier") &&
+            !name.startsWith("x-amz-") && !name.startsWith("x-goog-") &&
+            before[key]?.sorted() == values.sorted()
+    }.values.flatten().joinToString("&")
+    return expectedOrigin + (actual.rawPath ?: "/") + if (safe.isEmpty()) "" else "?$safe"
+}
+
 data class Authority(val principalId: String, val owner: Boolean, val capabilities: Set<String>,
     val accounts: Set<String>, val origins: Set<String>, val expiresAt: Long? = null) {
     fun check(capability: String, account: String, url: String?, now: Long) {

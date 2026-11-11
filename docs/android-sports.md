@@ -1,5 +1,20 @@
 # Android adapter and official Fudan sports plugin
 
+## Active paths after the 2026-11-10 migration
+
+Core main is `D:/Code/dansheng-core`; App main is the separate repository
+`D:/Code/dansheng-app`. Build from the registered task under `D:/Worktrees`, with
+its explicit Cargo target, dependency caches and artifacts in
+`D:/Code/dansheng-workspace/local/runtime/<task>`. `platform/android/gradlew.ps1`
+can use the pinned installation in `D:/DevCache/gradle` while keeping a task's
+project cache separate. Android SDK/NDK and installed JDK remain at their actual
+C-drive installation paths; they were not renamed with the project.
+
+The dated runs below retain their original C paths, receipt identities, emulator
+IDs and compile layouts. They are historical evidence, not commands to write
+into the preserved C project today. New builds use the explicit task environment
+and create new receipts; do not relabel the old binaries or source fingerprint.
+
 Earlier parent validation on 2026-11-06: **25/25 instrumentation tests** passed with
 the then-current x86_64 Rust/JNI library on the dedicated API 36 emulator; **5/5 JVM
 tests** passed. The ARM64 release library also cross-compiled successfully, but

@@ -30,6 +30,7 @@ pub enum AuthMode {
     Token,
     HttpSession,
     BrowserSession,
+    SecretHeaders,
 }
 
 /// Instructions to the host, never credentials. Each transport is selected
@@ -39,6 +40,11 @@ pub enum TransportAuth {
     Anonymous,
     /// Mediated native HTTP with a host-injected bearer token.
     HostToken {
+        account_id: String,
+    },
+    /// Mediated native HTTP with origin-bound nonstandard credential headers.
+    /// Names and values remain in the trusted host vault/session, never here.
+    HostHeaders {
         account_id: String,
     },
     /// Mediated native HTTP using the host's opaque Cookie/session jar.

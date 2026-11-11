@@ -14,8 +14,10 @@ android {
 }
 dependencies { implementation(project(":adapter")) }
 
-val stageSportsFixturePlugin = tasks.register<Copy>("stageSportsFixturePlugin") {
-    from("../../../plugins/fudan-sports") { include("manifest.json", "*.mjs", "platform-support.json", "NOTICE.md", "types.d.ts") }
+val stageSportsFixturePlugin = tasks.register<Sync>("stageSportsFixturePlugin") {
+    from("../../../plugins/fudan-sports") {
+        include("manifest.json", "api.mjs", "main.mjs", "policy.mjs", "platform-support.json", "NOTICE.md", "types.d.ts")
+    }
     into(layout.buildDirectory.dir("generated/sports-assets/fudan-sports"))
 }
 tasks.named("preBuild") { dependsOn(stageSportsFixturePlugin) }

@@ -1,0 +1,8 @@
+{
+  "report": "native-core-all.json",
+  "executable_sha256": "4F48F65B5355F7CC266A0021A7AF31688A7CE1E4E9523EB6EAF624E44484D8F5",
+  "probe_source_sha256": "FC549B844AB2BAFBA2304EDD8E4BE201246E52C7A83E8B122166BEFFFC948F32",
+  "tests": 6,
+  "clippy": "passed",
+  "snapshot": "native-tool-first.rs"
+}

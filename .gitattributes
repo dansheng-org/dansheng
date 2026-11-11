@@ -6,3 +6,8 @@
 *.so -text
 *.dll -text
 *.exe -text
+*.aar -text
+*.dspack -text
+*.a -text
+*.ps1 text eol=lf
+*.psm1 text eol=lf

@@ -5,11 +5,13 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import assert from 'node:assert/strict';
+import { smokeRuntime, smokeBinary, smokeOutput } from './runtime-paths.mjs';
 
 const exec = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '..');
-const binary = process.env.DANSHENG_HOST_BIN || path.join(root, 'target', 'debug', process.platform === 'win32' ? 'dansheng-host.exe' : 'dansheng-host');
-const evidence = path.join(root, '.local');
+const runtime = smokeRuntime(root);
+const binary = smokeBinary(runtime);
+const evidence = smokeOutput(runtime, 'validation');
 fs.mkdirSync(evidence, { recursive: true });
 const fixtureRoot = fs.mkdtempSync(path.join(evidence, 'host-smoke-'));
 const profile = path.join(fixtureRoot, 'profile');
@@ -80,12 +82,38 @@ try {
   await cli('permissions.set', { subject: mcpSubject, grant: { capabilities: ['todo.read', 'todo.write', 'sources.read', 'jobs.status'] } });
   const listed = await client.request('tools/list', {});
   assert.ok(listed.result.tools.some(tool => tool.name === 'core_call')); checks.push('real MCP initialize/tools/list over stdio');
+  const methods = listed.result.tools.find(tool => tool.name === 'core_call').inputSchema.properties.method.enum;
+  for (const method of ['fudan.catalog.semesters', 'fudan.programs.list', 'fudan.ehall.tasks', 'fudan.library.loans.current', 'canvas.grades.self']) {
+    assert.ok(methods.includes(method), `MCP does not advertise ${method}`);
+  }
+  for (const method of ['fudan.library.reader.observe', 'fudan.library.reader.bind', 'fudan.library.reader.clear']) {
+    assert.equal(methods.includes(method), false, `MCP advertises owner configuration ${method}`);
+  }
+  checks.push('new campus reads are discoverable while reader configuration is excluded');
   const called = await client.request('tools/call', { name: 'core_call', arguments: { method: 'todo.list', params: {} } });
   assert.notEqual(called.result.isError, true, JSON.stringify(called.result));
   const payload = JSON.parse(called.result.content.find(item => item.type === 'text').text);
   assert.ok(payload.result.items.some(item => item.id === todo.id)); checks.push('MCP reads the same profile TODO created through CLI');
   const denied = await client.request('tools/call', { name: 'core_call', arguments: { method: 'permissions.set', params: { subject: 'mcp', grant: { capabilities: ['mail.send'] } } } });
   assert.equal(denied.result.isError, true); checks.push('MCP cannot grant itself permissions');
+  const catalogArgs = { name: 'core_call', arguments: { method: 'fudan.catalog.semesters', params: { account_id: 'release-public' } } };
+  assert.equal((await client.request('tools/call', catalogArgs)).result.isError, true);
+  checks.push('new campus calls require an explicit MCP grant');
+  if (process.argv.includes('--public-catalog')) {
+    await cli('accounts.upsert', { account_id: 'release-public', label: 'Public release verification', provider: 'research' });
+    await cli('permissions.set', { subject: mcpSubject, grant: {
+      capabilities: ['todo.read', 'todo.write', 'sources.read', 'jobs.status', 'fudan.catalog.read'],
+      origins: ['https://fdjwgl.fudan.edu.cn'], account_ids: ['release-public'],
+    } });
+    const catalog = await client.request('tools/call', catalogArgs);
+    assert.notEqual(catalog.result.isError, true, 'authorized public catalog read failed');
+    const catalogResult = JSON.parse(catalog.result.content.find(item => item.type === 'text').text);
+    assert.equal(catalogResult.error, undefined);
+    assert.ok(catalogResult.result.payload);
+    await cli('permissions.set', { subject: mcpSubject, grant: { capabilities: ['todo.read', 'todo.write', 'sources.read', 'jobs.status'] } });
+    assert.equal((await client.request('tools/call', catalogArgs)).result.isError, true);
+    checks.push('a new public Core read succeeds through granted MCP and is denied after revocation');
+  }
   await stop(mcp); mcp = null;
   let publicProbe;
   if (process.argv.includes('--public-notices')) {
@@ -108,7 +136,8 @@ try {
   await startHost();
   const items = await cli('todo.list'); assert.ok(items.items.some(item => item.id === todo.id));
   const grants = await cli('permissions.get', { subject: mcpSubject }); assert.equal(grants.capabilities.length, 0); checks.push('restored data survives while MCP grants are reset');
-  const report = { success: true, profile, previous_profile: restored.previous_profile, checks, public_probe: publicProbe };
+  const report = { success: true, profile, previous_profile: restored.previous_profile, checks, public_probe: publicProbe,
+    school_requests: process.argv.includes('--public-catalog') || process.argv.includes('--public-notices') };
   fs.writeFileSync(path.join(evidence, 'host-smoke-results.json'), JSON.stringify(report, null, 2) + '\n');
   process.stdout.write(JSON.stringify({ success: true, checks, public_probe: publicProbe }, null, 2) + '\n');
 } catch (error) {

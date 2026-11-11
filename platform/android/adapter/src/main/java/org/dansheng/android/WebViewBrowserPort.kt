@@ -100,7 +100,7 @@ class WebViewBrowserPort(private val context: Context, private val login: Visibl
     private fun status(account: String): JSONObject = JSONObject().apply {
         val s = sessions.status(account)
         put("account_id", account); put("authenticated", s != null)
-        if (s != null) put("session_handle", s.handle)
+        if (s != null) { put("session_handle", s.handle); put("origin", s.origin) }
     }
 
     private fun requireLogin(authority: Authority, account: String, url: String, reply: PortReply, foreground:Boolean=false) {
@@ -254,9 +254,9 @@ class WebViewBrowserPort(private val context: Context, private val login: Visibl
                             if (result.has("error")) { fail(); return@evaluateJavascript }
                             if (result.optInt("status", 0) <= 0) { fail(); return@evaluateJavascript }
                             if (originSafe(result.optString("url")) != session.origin) { fail(); return@evaluateJavascript }
-                            // The final URL can carry WAF/SSO tokens. Expose only origin/path.
-                            val finalUri = java.net.URI(result.getString("url"))
-                            result.put("url", session.origin + (finalUri.rawPath ?: "/"))
+                            // Preserve unchanged caller query filters while removing
+                            // any new/changed WAF or authentication query material.
+                            result.put("url", safePageResponseUrl(result.getString("url"), url, session.origin))
                             finish(Result.success(result)); return@evaluateJavascript
                         }
                     } catch (_: Exception) { fail(); return@evaluateJavascript }

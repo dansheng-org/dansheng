@@ -1,0 +1,47 @@
+{
+  "generated_at_utc": "2026-11-09T20:00:15.645456300+00:00",
+  "tool": "fudan-service-research/0.1.0",
+  "transport": "current_workspace_native_core",
+  "credential_file_read": true,
+  "raw_data_exported": false,
+  "remote_business_writes": 0,
+  "automatic_password_retries": 0,
+  "campus_lan_origins": [],
+  "public_checks": [],
+  "authenticated_checks": [
+    {
+      "service": "canvas",
+      "credential_mode": "existing_bearer",
+      "state": "identity_unverified",
+      "error_code": null,
+      "progress": {},
+      "identity_matches": null,
+      "coverage": "profile_and_first_visible_course_only",
+      "checks": [
+        {
+          "case": "canvas_profile",
+          "logical_url": "https://elearning.fudan.edu.cn/api/v1/users/self/profile",
+          "method": "GET",
+          "authenticated_session": true,
+          "elapsed_ms": 245,
+          "http_status": 401,
+          "error_code": null,
+          "mime": "application/json",
+          "bytes": 48,
+          "json_kind": "object",
+          "json_keys": [
+            "errors"
+          ],
+          "item_count": null,
+          "reported_total": null,
+          "api_code": null,
+          "password_inputs": 0,
+          "script_count": 0,
+          "login_markers": false,
+          "redirect_class": null
+        }
+      ]
+    }
+  ],
+  "service_checks": []
+}

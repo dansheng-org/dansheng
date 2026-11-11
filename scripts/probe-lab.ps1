@@ -1,13 +1,16 @@
 param(
     [ValidateSet('status','core','public_notices','academic_semesters','academic_diagnostics','canvas_diagnostics','canvas_courses','canvas_content','native_job','network_routes','ecard_balance','rooms','rooms_diagnostics','library_occupancy','bus','cache')][string]$Probe='status',
     [ValidateRange(0,50000)][int]$CourseIndex=0,
-    [string]$Profile=(Join-Path $env:LOCALAPPDATA 'dansheng-lab\profiles\manual')
+    [string]$Profile,
+    [string]$RuntimeRoot
 )
 $ErrorActionPreference='Stop'
+. "$PSScriptRoot/runtime-common.ps1"
+$Profile=Resolve-DanshengLabProfile -Root (Split-Path -Parent $PSScriptRoot) -Profile $Profile -RuntimeRoot $RuntimeRoot
 $LabControl=Get-Content -Raw -LiteralPath (Join-Path $Profile 'lab-control.json') | ConvertFrom-Json
 $LabBase=[uri]$LabControl.base_url
 if($LabBase.Scheme -ne 'http' -or $LabBase.Host -ne '127.0.0.1'){throw 'Invalid local lab endpoint'}
-$LabHandler=[Net.Http.HttpClientHandler]::new();$LabHandler.UseProxy=$false
+$LabHandler=[Net.Http.HttpClientHandler]::new();$LabHandler.UseProxy=$false;$LabHandler.AllowAutoRedirect=$false
 $LabClient=[Net.Http.HttpClient]::new($LabHandler);$LabClient.Timeout=[TimeSpan]::FromSeconds(65)
 $LabMethod=if($Probe -eq 'status'){[Net.Http.HttpMethod]::Get}else{[Net.Http.HttpMethod]::Post}
 $LabEndpoint=if($Probe -eq 'status'){'status'}elseif($Probe -eq 'academic_diagnostics'){'diagnostic/academic'}elseif($Probe -eq 'rooms_diagnostics'){'diagnostic/rooms'}elseif($Probe -eq 'canvas_diagnostics'){'diagnostic/canvas'}else{'probe'}
