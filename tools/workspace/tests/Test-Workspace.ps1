@@ -237,6 +237,9 @@ Case 'existing destination is refused and preserved' {
     Throws {New-DsTask @newArgs -TaskId DS-804 -Slug existing -Scope Core -Apply} 'directory already exists'
     Assert (Test-Path -LiteralPath (Join-Path $destination 'keep.txt')) 'Destination overwritten.'
 }
+Case 'workspace lock survives slow holders and keeps bounded refusal' {
+    & (Join-Path $PSScriptRoot 'Test-WorkspaceLock.ps1') -OutputDirectory (Join-Path $fixture 'lock-fixtures') | Out-Null
+}
 Case 'concurrent task provisioning preserves both independent indexes' {
     $processes=@(foreach($spec in @(@('DS-805','parallel-a'),@('DS-806','parallel-b'))){
         $start=[Diagnostics.ProcessStartInfo]::new();$start.FileName=(Get-Process -Id $PID).Path
@@ -246,7 +249,7 @@ Case 'concurrent task provisioning preserves both independent indexes' {
         [pscustomobject]@{process=$process;stdout=$process.StandardOutput.ReadToEndAsync();stderr=$process.StandardError.ReadToEndAsync()}
     })
     foreach($entry in $processes){
-        try{Assert ($entry.process.WaitForExit(30000)) 'Concurrent creator did not finish.';$errorText=$entry.stderr.GetAwaiter().GetResult();Assert ($entry.process.ExitCode -eq 0) "Concurrent creation failed: $errorText";[void]$entry.stdout.GetAwaiter().GetResult()}
+        try{Assert ($entry.process.WaitForExit(60000)) 'Concurrent creator did not finish.';$errorText=$entry.stderr.GetAwaiter().GetResult();Assert ($entry.process.ExitCode -eq 0) "Concurrent creation failed: $errorText";[void]$entry.stdout.GetAwaiter().GetResult()}
         finally{$entry.process.Dispose()}
     }
     $a=(Get-DsTaskStatus $workspace 'DS-805-parallel-a').worktrees[0].path

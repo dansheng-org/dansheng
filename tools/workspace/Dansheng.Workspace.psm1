@@ -156,13 +156,20 @@ function Read-DsTask([string]$WorkspaceRoot,[string]$TaskKey) {
     foreach($folder in @('cargo-target','cargo-home','pub-cache','gradle-cache','npm-cache','tmp','profiles/core','browser','android-user/avds','artifacts','logs')) { [void](Get-DsPath (Join-Path $runtime $folder)) }
     $record
 }
-function Open-DsWorkspaceLock([string]$Path) {
+function Open-DsWorkspaceLock {
+    param([string]$Path,[ValidateRange(0,2147483647)][int]$TimeoutMilliseconds=30000)
     $checked=Get-DsPath $Path
-    for($attempt=0;$attempt -lt 100;$attempt++){
+    # Git validation and worktree creation can exceed five seconds on hosted
+    # Windows runners. Bound contention by elapsed time, not a retry count.
+    $timer=[Diagnostics.Stopwatch]::StartNew()
+    while($true){
         try { return [IO.File]::Open($checked,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None) }
-        catch [IO.IOException] { Start-Sleep -Milliseconds 50 }
+        catch [IO.IOException] {
+            $remaining=$TimeoutMilliseconds-$timer.ElapsedMilliseconds
+            if($remaining -le 0){throw 'Workspace is busy; no task changes were applied.'}
+            Start-Sleep -Milliseconds ([int][Math]::Min(50,$remaining))
+        }
     }
-    throw 'Workspace is busy; no task changes were applied.'
 }
 function Get-DsWorktreeState([object]$Record,[object]$Component) {
     $expected=Get-DsPath (Join-Path (Get-DsRecordedWorktreeRoot $Record) "$($Record.key)/$($Component.name)")
