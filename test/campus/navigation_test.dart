@@ -283,7 +283,13 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(SchemaScreen), findsOneWidget);
-        expect(find.descendant(of:find.byType(AppBar),matching:find.text('定时任务预约配置')),findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(AppBar),
+            matching: find.text('定时任务预约配置'),
+          ),
+          findsOneWidget,
+        );
       },
     );
   });

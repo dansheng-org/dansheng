@@ -11,10 +11,7 @@ class AgentService {
 
   /// Search local records using Rust search.query.
   Future<List<AgentHit>> search(String query, {int limit = 20}) async {
-    final res = await api.call('agent.query', {
-      'query': query,
-      'limit': limit,
-    });
+    final res = await api.call('agent.query', {'query': query, 'limit': limit});
     if (res is Map<String, dynamic> && res['hits'] is List) {
       return (res['hits'] as List)
           .whereType<Map<String, dynamic>>()

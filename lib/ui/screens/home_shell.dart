@@ -60,10 +60,13 @@ class _HomeShellState extends State<HomeShell> {
         children: List.generate(
           5,
           (i) => opened.contains(i)
-              ? TickerMode(enabled:index==i,child:KeyedSubtree(
-                  key: ValueKey('${widget.controller.activeAccountId}:$i'),
-                  child: page(i),
-                ))
+              ? TickerMode(
+                  enabled: index == i,
+                  child: KeyedSubtree(
+                    key: ValueKey('${widget.controller.activeAccountId}:$i'),
+                    child: page(i),
+                  ),
+                )
               : const SizedBox.shrink(),
         ),
       ),

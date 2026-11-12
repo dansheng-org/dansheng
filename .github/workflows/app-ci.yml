@@ -1,0 +1,52 @@
+name: App source checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: app-source-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  workspace-scripts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Core dependency path and payload fixtures
+        shell: pwsh
+        run: |
+          ./scripts/tests/core-dependency.tests.ps1
+          ./scripts/tests/core-tools.tests.ps1
+          ./scripts/tests/apk-archive.tests.ps1
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Reject local Pub overrides
+        shell: bash
+        run: test ! -e pubspec_overrides.yaml
+      - run: flutter pub get
+      - name: Check committed dependency resolution
+        run: git diff --exit-code -- pubspec.lock
+      - name: Check handwritten Dart formatting
+        shell: pwsh
+        run: ./scripts/check-format.ps1
+      - run: flutter analyze
+      - run: flutter test
+      - name: Check Pigeon generation
+        run: |
+          dart run pigeon --input pigeons/dansheng.dart
+          git diff --exit-code -- lib/bridge.g.dart android/app/src/main/kotlin/org/dansheng/app/Bridge.g.kt
+# Native Android smoke needs the real pinned Core SDK/acquisition setup.
+# This source job does not claim an APK build or a stable native release check.

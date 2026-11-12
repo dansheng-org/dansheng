@@ -68,7 +68,10 @@ void main() {
         find.textContaining('storage.read · http.request · jobs.schedule'),
         findsOneWidget,
       );
-      expect(find.textContaining('https://service.example.org'), findsOneWidget);
+      expect(
+        find.textContaining('https://service.example.org'),
+        findsOneWidget,
+      );
       expect(find.text('卸载插件'), findsOneWidget);
 
       // Tap switch - calls enablePlugin on native host

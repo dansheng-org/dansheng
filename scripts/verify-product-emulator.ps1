@@ -1,10 +1,15 @@
-param([string]$Serial='emulator-5588')
+param([Parameter(Mandatory)][string]$Serial,[Parameter(Mandatory)][string]$OwnershipFile,[string]$AppApk,[string]$TestApk,[string]$PluginPackage,[string]$RuntimeRoot,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $adb=Join-Path $env:ANDROID_HOME 'platform-tools/adb.exe'
-$name=((& $adb -s $Serial emu avd name) | Select-Object -First 1).Trim()
-if($name -notin @('dansheng-core-api36','dansheng-app-api36','dansheng-app-api28')){throw 'Select a dedicated dansheng QA AVD.'}
 $app=(Resolve-Path (Split-Path $PSScriptRoot)).Path
-$out=New-Item -ItemType Directory -Force -Path (Join-Path $app ".local/acceptance/$Serial")
+. (Join-Path $PSScriptRoot 'core-dependency.ps1')
+$owner=Assert-DanshengOwnedEmulator -Serial $Serial -OwnershipFile $OwnershipFile -Adb $adb
+$savedAdbSocket=$env:ADB_SERVER_SOCKET
+$env:ADB_SERVER_SOCKET="tcp:localhost:$($owner.adb_server_port)"
+$name=$owner.avd_name
+$artifacts=Resolve-DanshengAppArtifactRoot -AppRoot $app -OutputDirectory $OutputDirectory -RuntimeRoot $RuntimeRoot
+$runtime=Resolve-DanshengAppRuntimeRoot -AppRoot $app -RuntimeRoot $RuntimeRoot
+$out=New-Item -ItemType Directory -Force -Path (Join-Path $runtime "logs/acceptance-$Serial")
 function RunPhase([string]$phase,[string[]]$Extras) {
     $lines=& $adb -s $Serial shell am instrument -w -e phase $phase @Extras org.dansheng.app.test/org.dansheng.app.checks.ProductRunner
     $lines | Set-Content (Join-Path $out "$phase.log")
@@ -16,9 +21,9 @@ function ValueOf([string[]]$Lines,[string]$Key) {
 }
 Push-Location $app
 try {
-    $apk='dist/dansheng-android-x86_64-debug.apk'
-    $testApk='build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk'
-    $plugin='dist/official.fudan-sports-0.2.0.dspack'
+    $apk=if($AppApk){[IO.Path]::GetFullPath($AppApk)}else{Join-Path $artifacts 'dansheng-android-x86_64-debug.apk'}
+    $testApk=if($TestApk){[IO.Path]::GetFullPath($TestApk)}else{Join-Path $artifacts 'dansheng-android-x86_64-androidTest.apk'}
+    $plugin=if($PluginPackage){[IO.Path]::GetFullPath($PluginPackage)}else{Join-Path $artifacts 'official.fudan-sports-0.2.0.dspack'}
     $pluginHash=(Get-FileHash $plugin).Hash
     $zip=[IO.Compression.ZipFile]::OpenRead((Resolve-Path $testApk))
     try {
@@ -54,4 +59,4 @@ try {
           api=$api;abi=((& $adb -s $Serial shell getprop ro.product.cpu.abi)-join '').Trim();tested_utc=[DateTime]::UtcNow.ToString('o');campus_writes=0} |
           ConvertTo-Json | Set-Content (Join-Path $out 'receipt.json')
     }finally{if([int]$api -ge 31){ & $adb -s $Serial shell cmd appops set org.dansheng.app SCHEDULE_EXACT_ALARM $mode }}
-}finally{Pop-Location}
+}finally{Pop-Location;$env:ADB_SERVER_SOCKET=$savedAdbSocket}

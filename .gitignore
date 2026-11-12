@@ -54,3 +54,26 @@ app.*.map.json
 *.keystore
 dist/
 *.p12
+
+# Local repository-workflow overrides, native artifacts and private state.
+/pubspec_overrides.yaml
+/TASK.md
+/local/
+/profiles/
+/vault/
+**/local.properties
+**/build/
+# Generated Android reports (including retained historical problems-report.html)
+/android/build/
+**/.cxx/
+**/.gradle/
+**/__pycache__/
+*.db
+*.db-shm
+*.db-wal
+*.aar
+*.apk
+*.dspack
+.env
+.env.*
+!.env.example

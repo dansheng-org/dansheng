@@ -1,13 +1,20 @@
-param([string]$Serial='emulator-5592')
+param([Parameter(Mandatory)][string]$Serial,[Parameter(Mandatory)][string]$OwnershipFile,[string]$AppApk,[string]$TestApk,[string]$PluginPackage,[string]$RuntimeRoot,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Split-Path $PSScriptRoot)).Path
+. (Join-Path $PSScriptRoot 'core-dependency.ps1')
 $a=Join-Path $env:ANDROID_HOME 'platform-tools/adb.exe'
-$avd=((& $a -s $Serial emu avd name)|Select-Object -First 1).Trim()
-if($avd -notin @('dansheng-app-api28','dansheng-app-api36','dansheng-core-api36')){throw 'Dedicated dansheng QA AVD required'}
-$out=New-Item -ItemType Directory -Force (Join-Path $root ".local/workbench-acceptance/$Serial")
+$owner=Assert-DanshengOwnedEmulator -Serial $Serial -OwnershipFile $OwnershipFile -Adb $a
+$savedAdbSocket=$env:ADB_SERVER_SOCKET
+$env:ADB_SERVER_SOCKET="tcp:localhost:$($owner.adb_server_port)"
+$avd=$owner.avd_name
+$artifacts=Resolve-DanshengAppArtifactRoot -AppRoot $root -OutputDirectory $OutputDirectory -RuntimeRoot $RuntimeRoot
+$runtime=Resolve-DanshengAppRuntimeRoot -AppRoot $root -RuntimeRoot $RuntimeRoot
+$out=New-Item -ItemType Directory -Force (Join-Path $runtime "logs/workbench-$Serial")
 Push-Location $root
 try{
-    $app='dist/dansheng-android-x86_64-debug.apk';$test='build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk';$package='dist/official.fudan-sports-0.2.0.dspack'
+    $app=if($AppApk){[IO.Path]::GetFullPath($AppApk)}else{Join-Path $artifacts 'dansheng-android-x86_64-debug.apk'}
+    $test=if($TestApk){[IO.Path]::GetFullPath($TestApk)}else{Join-Path $artifacts 'dansheng-android-x86_64-androidTest.apk'}
+    $package=if($PluginPackage){[IO.Path]::GetFullPath($PluginPackage)}else{Join-Path $artifacts 'official.fudan-sports-0.2.0.dspack'}
     $appHash=(Get-FileHash $app).Hash;$testHash=(Get-FileHash $test).Hash;$pluginHash=(Get-FileHash $package).Hash
     $zip=[IO.Compression.ZipFile]::OpenRead((Resolve-Path $test))
     try{$entry=$zip.GetEntry('assets/'+[IO.Path]::GetFileName($package));if(!$entry){throw 'Test lacks external plugin'}
@@ -31,4 +38,4 @@ try{
     if($appHash -ne (Get-FileHash $app).Hash -or $testHash -ne (Get-FileHash $test).Hash -or $pluginHash -ne (Get-FileHash $package).Hash){throw 'Artifact changed during validation'}
     @{app_sha256=$appHash;test_apk_sha256=$testHash;plugin_sha256=$pluginHash;api=$api;abi=((& $a -s $Serial shell getprop ro.product.cpu.abi)-join '').Trim();avd=$avd;utc=[DateTime]::UtcNow.ToString('o');campus_writes=0} |
         ConvertTo-Json |Set-Content (Join-Path $out 'receipt.json')
-}finally{Pop-Location}
+}finally{Pop-Location;$env:ADB_SERVER_SOCKET=$savedAdbSocket}

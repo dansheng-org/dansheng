@@ -1,11 +1,17 @@
 param([Parameter(Mandatory)][ValidateSet('Permission','Reboot')][string]$Case,
       [Parameter(Mandatory)][ValidatePattern('^emulator-[0-9]+$')][string]$Serial,
+      [Parameter(Mandatory)][string]$OwnershipFile,[string]$RuntimeRoot,
       [string]$Adb=(Join-Path $env:ANDROID_HOME 'platform-tools/adb.exe'))
 $ErrorActionPreference='Stop'
 $app=(Resolve-Path (Split-Path $PSScriptRoot)).Path
-$evidence=New-Item -ItemType Directory -Force -Path (Join-Path $app ".local/wake-$Case")
-$avd=(& $Adb -s $Serial emu avd name | Select-Object -First 1).Trim()
-if($avd -notin @('dansheng-app-api28','dansheng-core-api36')) {throw "Expected a dedicated dansheng emulator"}
+. (Join-Path $PSScriptRoot 'core-dependency.ps1')
+$owner=Assert-DanshengOwnedEmulator -Serial $Serial -OwnershipFile $OwnershipFile -Adb $Adb
+$savedAdbSocket=$env:ADB_SERVER_SOCKET
+$env:ADB_SERVER_SOCKET="tcp:localhost:$($owner.adb_server_port)"
+try {
+$runtime=Resolve-DanshengAppRuntimeRoot -AppRoot $app -RuntimeRoot $RuntimeRoot
+$evidence=New-Item -ItemType Directory -Force -Path (Join-Path $runtime "logs/wake-$Case")
+$avd=$owner.avd_name
 $clockKey='qa-'+[guid]::NewGuid().ToString('N')
 $runner='org.dansheng.app.test/org.dansheng.app.checks.ProductRunner'
 function Phase([string]$Name,[string[]]$Extras) {
@@ -23,7 +29,10 @@ function BootReady {
     } while([DateTimeOffset]::UtcNow -lt $limit)
     throw 'Emulator did not complete boot'
 }
-if($Case -eq 'Reboot' -and $avd -ne 'dansheng-app-api28'){throw 'Only reboot the dedicated product API 28 AVD.'}
+if($Case -eq 'Reboot'){
+    $api=(@(& $Adb -s $Serial shell getprop ro.build.version.sdk)-join'').Trim()
+    if($LASTEXITCODE-ne0-or$api-ne'28'){throw 'Reboot recovery requires the explicitly owned disposable API 28 emulator.'}
+}
 Phase seedClock @() | Out-Null
 if($Case -eq 'Permission'){
     $old=(& $Adb -s $Serial shell cmd appops get org.dansheng.app SCHEDULE_EXACT_ALARM) -join ' '
@@ -59,3 +68,4 @@ if($Case -eq 'Permission'){
     & $Adb -s $Serial logcat -d -s ActivityManager:I |Select-String 'org.dansheng.app' |Out-File (Join-Path $evidence 'postboot-process.log')
     Phase count @('-e','clock_key',$clockKey)
 }
+}finally{$env:ADB_SERVER_SOCKET=$savedAdbSocket}

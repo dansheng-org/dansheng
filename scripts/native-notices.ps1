@@ -4,8 +4,10 @@ $target=New-Item -ItemType Directory -Path $Destination -Force
 Copy-Item -LiteralPath (Join-Path $CoreRoot 'LICENSE') -Destination (Join-Path $target.FullName 'COPYING.txt')
 Push-Location $CoreRoot
 try {
+    $noticeCargoHome=$env:CARGO_HOME
     . ./scripts/dev.ps1
-    $tree=& cargo tree -p dansheng-ffi --features card-login --target aarch64-linux-android --edges normal,build --prefix none --format '{p}' --locked --offline
+    if($noticeCargoHome){$env:CARGO_HOME=$noticeCargoHome}
+    $tree=& cargo tree -p dansheng-ffi --features campus-webvpn --target aarch64-linux-android --edges normal,build --prefix none --format '{p}' --locked --offline
     if($LASTEXITCODE -ne 0){throw 'Native dependency inventory failed'}
     $pkgs=@{}; foreach($line in $tree){ if($line -match '^([^ ]+) v([^ ]+)'){ $pkgs[$Matches[1]+' '+$Matches[2]]=$true } }
     $meta=(& cargo metadata --format-version 1 --locked --offline) | ConvertFrom-Json
