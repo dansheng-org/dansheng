@@ -41,6 +41,8 @@ jobs:
       - run: node --test scripts/tests/runtime-paths.test.mjs
   android:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: '30.0.16138531'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -48,8 +50,29 @@ jobs:
           toolchain: 1.99.1
           targets: aarch64-linux-android,x86_64-linux-android
       - uses: android-actions/setup-android@v3
-      - run: sdkmanager 'ndk;30.0.16138531'
-      - run: cargo install cargo-ndk --locked
-      - run: cargo ndk -t arm64-v8a -t x86_64 -p 24 build -p dansheng-ffi --release --locked
-        env:
-          ANDROID_NDK_VERSION: 30.0.16138531
+        with:
+          packages: platform-tools
+      - name: Install and select pinned Android NDK
+        run: |
+          sdkmanager "ndk;${ANDROID_NDK_VERSION}"
+          ndk_root="${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+          test -f "${ndk_root}/source.properties"
+          grep -F "Pkg.Revision = ${ANDROID_NDK_VERSION}" "${ndk_root}/source.properties"
+          for name in ANDROID_NDK_HOME ANDROID_NDK_ROOT ANDROID_NDK_PATH NDK_HOME; do
+            printf '%s=%s\n' "$name" "$ndk_root" >> "$GITHUB_ENV"
+          done
+      - name: Build Android core libraries
+        run: |
+          ndk_toolchain="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
+          for target in aarch64-linux-android x86_64-linux-android; do
+            target_key="${target//-/_}"
+            compiler="${ndk_toolchain}/bin/${target}24-clang"
+            test -x "$compiler"
+            export "CC_${target_key}=$compiler"
+            export "CXX_${target_key}=${compiler}++"
+            export "AR_${target_key}=${ndk_toolchain}/bin/llvm-ar"
+            export "CARGO_TARGET_${target_key^^}_LINKER=$compiler"
+            export "BINDGEN_EXTRA_CLANG_ARGS_${target_key}=--target=${target}24 --sysroot=${ndk_toolchain}/sysroot"
+            export CLANG_PATH="$compiler"
+            cargo build --package dansheng-ffi --target "$target" --release --locked
+          done
