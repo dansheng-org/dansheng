@@ -45,6 +45,40 @@ fn on() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 11, 1).unwrap()
 }
 
+#[tokio::test]
+async fn statement_loads_all_pages_and_does_not_hide_a_second_page_failure() {
+    let csrf = b"<meta name='_csrf' content='synthetic'>";
+    let page = fixture!("ecard_transactions.xml");
+    let second = String::from_utf8(page.to_vec())
+        .unwrap()
+        .replace("合成商户", "另一个合成商户");
+    let fake = Offline::new(&[csrf, page, csrf, second.as_bytes()]);
+    let result = FudanCampusClient::new(fake.clone())
+        .ecard_statement(&source(), on(), on().succ_opt().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(result.coverage, Coverage::Complete);
+    assert_eq!(result.records.len(), 4);
+    assert_eq!(
+        result
+            .records
+            .iter()
+            .map(|r| &r.external_id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        4
+    );
+    assert_eq!(result.records[2].payload.location, "另一个合成商户");
+    assert_eq!(fake.requests.lock().unwrap().len(), 4);
+    let bad = Offline::new(&[csrf, page, csrf, b"malformed"]);
+    assert!(
+        FudanCampusClient::new(bad)
+            .ecard_statement(&source(), on(), on())
+            .await
+            .is_err()
+    );
+}
+
 struct Reply {
     status: u16,
     body: Vec<u8>,
@@ -175,6 +209,27 @@ fn ecard_money_is_exact_signed_cents_and_shanghai_time_becomes_utc() {
         .replace("42.05", "42.005");
     assert!(parse_ecard_balance(bad.as_bytes()).is_err());
     assert!(parse_ecard_transactions(b"<response>not a table</response>").is_err());
+}
+
+#[test]
+fn ecard_current_seven_column_table_preserves_legacy_fields() {
+    let legacy = String::from_utf8(fixture!("ecard_transactions.xml").to_vec()).unwrap();
+    // Synthetic values only. The three new cells must never become the amount.
+    let current = legacy
+        .replace("</tr>", "<td>88.88</td><td>交易成功</td><td>详情</td></tr>")
+        .replace("span", "div")
+        .replace("12:30:01", "12:30")
+        .replace("08:00:00", "08:00");
+    let (actual, pages) = parse_ecard_transactions(current.as_bytes()).unwrap();
+    let (expected, legacy_pages) = parse_ecard_transactions(legacy.as_bytes()).unwrap();
+    assert_eq!(actual[0].amount, expected[0].amount);
+    assert_eq!(actual[0].location, expected[0].location);
+    assert_eq!(actual[0].transaction_type, expected[0].transaction_type);
+    assert_eq!(actual[0].at.to_rfc3339(), "2026-11-01T04:30:00+00:00");
+    assert_eq!(actual[1], expected[1]);
+    assert_eq!(pages, legacy_pages);
+    let unknown = legacy.replace("</tr>", "<td>unknown</td></tr>");
+    assert!(parse_ecard_transactions(unknown.as_bytes()).is_err());
 }
 
 #[test]

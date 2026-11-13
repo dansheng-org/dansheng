@@ -367,8 +367,15 @@ impl CoreService for CampusService {
             #[cfg(feature = "login")]
             ("fudan.ecard.session", "fudan.card.login"),
             ("fudan.ecard.transactions", "fudan.card.read"),
+            ("fudan.ecard.statement", "fudan.card.read"),
+            ("fudan.ecard.statistics", "fudan.card.read"),
             ("fudan.electricity", "fudan.life.read"),
             ("fudan.electricity.history", "fudan.life.read"),
+            ("fudan.electricity.statistics", "fudan.life.read"),
+            ("fudan.electricity.alert.get", "fudan.life.read"),
+            ("fudan.electricity.alert.set", "fudan.life.read"),
+            ("fudan.electricity.alert.check", "fudan.life.read"),
+            ("fudan.electricity.alert.ack", "fudan.life.read"),
             ("fudan.library.occupancy", "fudan.life.read"),
             ("fudan.dining.occupancy", "fudan.life.read"),
             ("fudan.rooms", "fudan.rooms.read"),
@@ -438,6 +445,43 @@ impl CoreService for CampusService {
                 .await;
         }
         grant.check_account(principal, Some(account))?;
+        if method.starts_with("fudan.electricity.alert.") {
+            if !principal.is_owner() {
+                return Err(CoreError::new(
+                    "PermissionDenied",
+                    "electricity reminders require the local owner",
+                ));
+            }
+            use crate::electricity_alert as alert;
+            match method {
+                "fudan.electricity.alert.get" => {
+                    return Ok(serde_json::to_value(alert::get(context.store, account)?)?);
+                }
+                "fudan.electricity.alert.set" => {
+                    let enabled = params["enabled"]
+                        .as_bool()
+                        .ok_or_else(|| CoreError::invalid("enabled must be a boolean"))?;
+                    let threshold = params["threshold_kwh"]
+                        .as_f64()
+                        .ok_or_else(|| CoreError::invalid("threshold_kwh must be a number"))?;
+                    return Ok(serde_json::to_value(alert::configure(
+                        context.store,
+                        account,
+                        enabled,
+                        threshold,
+                    )?)?);
+                }
+                "fudan.electricity.alert.ack" => {
+                    return Ok(serde_json::to_value(alert::acknowledge(
+                        context.store,
+                        account,
+                        required_string(&params, "delivery_key")?,
+                        chrono::Utc::now().timestamp_millis(),
+                    )?)?);
+                }
+                _ => {}
+            }
+        }
         #[cfg(feature = "login")]
         if method == "fudan.portal.bind" {
             if !principal.is_owner() {
@@ -1073,6 +1117,31 @@ impl CoreService for CampusService {
                 "fudan.ecard.balance" => serde_json::to_value(
                     client.ecard_balance(&source).await.map_err(campus_error)?,
                 )?,
+                "fudan.ecard.statement" => serde_json::to_value(
+                    client
+                        .ecard_statement(&source, date(&params, "from")?, date(&params, "to")?)
+                        .await
+                        .map_err(campus_error)?,
+                )?,
+                "fudan.ecard.statistics" => {
+                    let period: crate::campus_statistics::Period =
+                        serde_json::from_value(params["period"].clone())
+                            .map_err(|_| CoreError::invalid("invalid statistics period"))?;
+                    let anchor = date(&params, "date")?;
+                    let (from, to) = period.bounds(anchor).map_err(campus_error)?;
+                    let batch = client
+                        .ecard_statement(&source, from, to)
+                        .await
+                        .map_err(campus_error)?;
+                    let summary =
+                        crate::campus_statistics::card_statistics(&batch.records, period, anchor)
+                            .map_err(campus_error)?;
+                    serde_json::to_value(source.record(
+                        format!("ecard-statistics:{from}:{to}"),
+                        None,
+                        summary,
+                    ))?
+                }
                 "fudan.ecard.transactions" => serde_json::to_value(
                     client
                         .ecard_transactions(
@@ -1086,6 +1155,49 @@ impl CoreService for CampusService {
                 )?,
                 "fudan.electricity" => {
                     serde_json::to_value(client.electricity(&source).await.map_err(campus_error)?)?
+                }
+                "fudan.electricity.alert.check" => {
+                    let before = crate::electricity_alert::get(context.store, account)?;
+                    if !before.enabled {
+                        return Ok(serde_json::to_value(before)?);
+                    }
+                    let sample = client
+                        .electricity(&source)
+                        .await
+                        .map(|r| r.payload.remaining_kwh)
+                        .map_err(campus_error);
+                    return Ok(serde_json::to_value(crate::electricity_alert::observe(
+                        context.store,
+                        account,
+                        before.revision,
+                        sample,
+                        chrono::Utc::now().timestamp_millis(),
+                    )?)?);
+                }
+                "fudan.electricity.statistics" => {
+                    let period: crate::campus_statistics::Period =
+                        serde_json::from_value(params["period"].clone())
+                            .map_err(|_| CoreError::invalid("invalid statistics period"))?;
+                    let history =
+                        crate::energy_history::ElectricityHistoryClient::new(BoundTransport {
+                            account,
+                            store: context.store,
+                            source_capability: capability,
+                            credential_lease: Default::default(),
+                            network: context.network,
+                            platform: context.platform,
+                            principal,
+                            grant: &io_grant,
+                        });
+                    let summary = history
+                        .statistics(&source, period)
+                        .await
+                        .map_err(campus_error)?;
+                    serde_json::to_value(source.record(
+                        format!("electricity-statistics:{period:?}"),
+                        None,
+                        summary,
+                    ))?
                 }
                 "fudan.electricity.history" => {
                     let history_client =

@@ -4,6 +4,7 @@
 - Reference work uses the read-only `D:/Code/danxi` and the pinned checkouts under `D:/Code/dansheng-core/reference`; preserve the original `C:/Code/danxi` too. Never copy credentials, user data, or generated build files into this repository.
 - Shared core must not depend on Flutter, an embedded browser, MCP, or a school-specific service. Browser execution, credentials, wake-up and notifications are platform ports.
 - School endpoints and sports strategies belong to official connectors/plugins. Browser-backed requests must execute in the authenticated page; do not silently substitute Rust HTTP.
+- Apply the four-layer classification in docs/DEVELOPMENT_WORKFLOW.md: generic Core mechanisms, official service connectors/plugins, platform hosts, and UI. Official modules own authoritative school protocols, business constraints and reusable execution strategies; hosts execute OS/browser/device capabilities; UI collects input and presents results. UI prevalidation uses service-provided constraints and never replaces Core execution checks. Keep the matching classification rules synchronized in authorized Core/App worktrees.
 - No Node.js or Chromium runtime in released core artifacts. JS plugins run through mediated host APIs and explicit grants.
 - Treat external write timeouts as uncertain outcomes; reconcile before retrying. Do not execute live reservations, cancellations, mail sends, or other remote mutations without concrete user authorization.
 - Never expose secrets in logs, exported diagnostics, fixture data or tests.
