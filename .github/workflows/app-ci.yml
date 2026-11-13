@@ -24,6 +24,8 @@ jobs:
           ./scripts/tests/apk-archive.tests.ps1
   flutter:
     runs-on: ubuntu-latest
+    env:
+      PUB_HOSTED_URL: https://pub.flutter-io.cn
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,7 +38,7 @@ jobs:
       - name: Reject local Pub overrides
         shell: bash
         run: test ! -e pubspec_overrides.yaml
-      - run: flutter pub get
+      - run: flutter pub get --enforce-lockfile
       - name: Check committed dependency resolution
         run: git diff --exit-code -- pubspec.lock
       - name: Check handwritten Dart formatting
