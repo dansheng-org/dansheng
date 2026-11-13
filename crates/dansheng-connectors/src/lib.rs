@@ -5,11 +5,14 @@
 pub mod academic_catalog;
 pub mod academic_programs;
 pub mod campus;
+pub mod campus_statistics;
 pub mod canvas;
 pub mod community;
 #[cfg(feature = "services")]
 pub mod core_adapter;
 pub mod ehall;
+#[cfg(feature = "services")]
+pub mod electricity_alert;
 pub mod energy_history;
 #[cfg(feature = "services")]
 mod expanded_services;

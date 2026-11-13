@@ -539,7 +539,9 @@ pub fn parse_ecard_transactions(body: &[u8]) -> Result<(Vec<EcardTransaction>, u
     let mut result = Vec::new();
     for row in table.select(&selector("tr")) {
         let cells: Vec<_> = row.select(&selector("td")).collect();
-        if cells.len() != 4 {
+        // Current epay adds balance, status and operation after the four original
+        // columns. Keep the legacy layout, and reject other unknown layouts.
+        if !matches!(cells.len(), 4 | 7) {
             return Err(changed("ecard transactions", "columns"));
         }
         let children: Vec<_> = cells[0]
@@ -550,8 +552,12 @@ pub fn parse_ecard_transactions(body: &[u8]) -> Result<(Vec<EcardTransaction>, u
         if children.len() < 2 {
             return Err(changed("ecard transactions", "time"));
         }
+        // epay's current table reports minute precision; legacy rows include seconds.
+        let clock = NaiveTime::parse_from_str(&children[1], "%H:%M:%S")
+            .or_else(|_| NaiveTime::parse_from_str(&children[1], "%H:%M"))
+            .map_err(|_| changed("ecard transactions", "time"))?;
         let at = local_timestamp(
-            &format!("{} {}", children[0].replace('.', "-"), children[1]),
+            &format!("{} {}", children[0].replace('.', "-"), clock),
             "ecard transactions",
         )?;
         result.push(EcardTransaction {
