@@ -13,26 +13,40 @@ class AppTheme {
     final cardBg = dark ? const Color(0xff17221f) : const Color(0xffffffff);
     final border = dark ? const Color(0xff293833) : const Color(0xffe5e1d5);
 
-    final c = ColorScheme.fromSeed(
-      seedColor: seedColor,
-      brightness: brightness,
-    ).copyWith(
-      surface: paper,
-      onSurface: dark ? const Color(0xffe4ede8) : const Color(0xff1b2622),
-      surfaceContainerLowest: cardBg,
-      surfaceContainerLow: dark ? const Color(0xff141e1b) : const Color(0xfff2efe5),
-      surfaceContainer: dark ? const Color(0xff1c2724) : const Color(0xffeae6dc),
-      surfaceContainerHigh: dark ? const Color(0xff23302c) : const Color(0xffe3ded2),
-      primary: dark ? const Color(0xff86d3b8) : const Color(0xff135446),
-      onPrimary: dark ? const Color(0xff063428) : Colors.white,
-      primaryContainer: dark ? const Color(0xff1b473b) : const Color(0xffd7ede3),
-      onPrimaryContainer: dark ? const Color(0xffb8eedb) : const Color(0xff063327),
-      secondary: dark ? const Color(0xff9ec7b9) : const Color(0xff326659),
-      secondaryContainer: dark ? const Color(0xff233932) : const Color(0xffdbeef5),
-      tertiaryContainer: dark ? const Color(0xff3f341f) : const Color(0xfff3ebd7),
-      onTertiaryContainer: dark ? const Color(0xfffae5be) : const Color(0xff3d2e14),
-      outlineVariant: border,
-    );
+    final c = ColorScheme.fromSeed(seedColor: seedColor, brightness: brightness)
+        .copyWith(
+          surface: paper,
+          onSurface: dark ? const Color(0xffe4ede8) : const Color(0xff1b2622),
+          surfaceContainerLowest: cardBg,
+          surfaceContainerLow: dark
+              ? const Color(0xff141e1b)
+              : const Color(0xfff2efe5),
+          surfaceContainer: dark
+              ? const Color(0xff1c2724)
+              : const Color(0xffeae6dc),
+          surfaceContainerHigh: dark
+              ? const Color(0xff23302c)
+              : const Color(0xffe3ded2),
+          primary: dark ? const Color(0xff86d3b8) : const Color(0xff135446),
+          onPrimary: dark ? const Color(0xff063428) : Colors.white,
+          primaryContainer: dark
+              ? const Color(0xff1b473b)
+              : const Color(0xffd7ede3),
+          onPrimaryContainer: dark
+              ? const Color(0xffb8eedb)
+              : const Color(0xff063327),
+          secondary: dark ? const Color(0xff9ec7b9) : const Color(0xff326659),
+          secondaryContainer: dark
+              ? const Color(0xff233932)
+              : const Color(0xffdbeef5),
+          tertiaryContainer: dark
+              ? const Color(0xff3f341f)
+              : const Color(0xfff3ebd7),
+          onTertiaryContainer: dark
+              ? const Color(0xfffae5be)
+              : const Color(0xff3d2e14),
+          outlineVariant: border,
+        );
 
     final base = ThemeData(
       colorScheme: c,
@@ -79,9 +93,7 @@ class AppTheme {
         labelLarge: base.textTheme.labelLarge?.copyWith(
           fontWeight: FontWeight.w600,
         ),
-        bodyMedium: base.textTheme.bodyMedium?.copyWith(
-          height: 1.45,
-        ),
+        bodyMedium: base.textTheme.bodyMedium?.copyWith(height: 1.45),
       ),
       cardTheme: CardThemeData(
         color: cardBg,
@@ -127,7 +139,10 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: c.surfaceContainerHigh,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,

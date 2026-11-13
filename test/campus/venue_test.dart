@@ -436,92 +436,96 @@ void main() {
     expect(find.textContaining('VOUCHER-TEST-9988'), findsOneWidget);
   });
 
-  testWidgets('Offline cancellation flow invokes venues.cancel without second confirmation and supports reconcileCancel', (
-    tester,
-  ) async {
-    await controller.initialize();
-    await tester.pumpWidget(createVenueTestApp(controller: controller));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'Offline cancellation flow invokes venues.cancel without second confirmation and supports reconcileCancel',
+    (tester) async {
+      await controller.initialize();
+      await tester.pumpWidget(createVenueTestApp(controller: controller));
+      await tester.pumpAndSettle();
 
-    // Switch to appointments tab
-    await tester.tap(find.text('我的预约'));
-    await tester.pumpAndSettle();
+      // Switch to appointments tab
+      await tester.tap(find.text('我的预约'));
+      await tester.pumpAndSettle();
 
-    // Verify appointment slots are displayed
-    expect(find.textContaining('2099-01-03 10:00-11:00 1号场地'), findsOneWidget);
+      // Verify appointment slots are displayed
+      expect(
+        find.textContaining('2099-01-03 10:00-11:00 1号场地'),
+        findsOneWidget,
+      );
 
-    // Verify "取消这条预约" button is displayed (slot is eligible)
-    expect(find.text('取消这条预约'), findsOneWidget);
+      // Verify "取消这条预约" button is displayed (slot is eligible)
+      expect(find.text('取消这条预约'), findsOneWidget);
 
-    // Tap "取消这条预约"
-    await tester.tap(find.text('取消这条预约'));
-    await tester.pumpAndSettle();
+      // Tap "取消这条预约"
+      await tester.tap(find.text('取消这条预约'));
+      await tester.pumpAndSettle();
 
-    // Verify NO second Flutter confirmation dialog was displayed (handled solely by native ModernSheet)
-    expect(find.byType(AlertDialog), findsNothing);
+      // Verify NO second Flutter confirmation dialog was displayed (handled solely by native ModernSheet)
+      expect(find.byType(AlertDialog), findsNothing);
 
-    // Verify venues.cancel was dispatched with appointment_id 301
-    final cancelCall = mockBridge.calls.firstWhere(
-      (c) =>
-          c['command'] == HostCommand.campus &&
-          c['params']['method'] == 'venues.cancel',
-    );
-    expect(cancelCall['params']['params']['appointment_id'], equals(301));
+      // Verify venues.cancel was dispatched with appointment_id 301
+      final cancelCall = mockBridge.calls.firstWhere(
+        (c) =>
+            c['command'] == HostCommand.campus &&
+            c['params']['method'] == 'venues.cancel',
+      );
+      expect(cancelCall['params']['params']['appointment_id'], equals(301));
 
-    // Verify success snackbar
-    expect(find.text('预约已取消'), findsOneWidget);
+      // Verify success snackbar
+      expect(find.text('预约已取消'), findsOneWidget);
 
-    // --- Test uncertain cancellation and reconcileCancel flow ---
-    mockBridge.uncertainCancel = true;
-    mockBridge.appointmentsList = [
-      {
-        'id': 302,
-        'resource_name': '南区网球场',
-        'status': '已生效',
-        'status_name': '已生效',
-        'is_cancel': true,
-        'slots': [
-          {
-            'date': '2099-01-04',
-            'time': '14:00-15:00',
-            'resource_name': '2号场地',
-            'active': true,
-            'can_cancel': true,
-          },
-        ],
-      },
-    ];
+      // --- Test uncertain cancellation and reconcileCancel flow ---
+      mockBridge.uncertainCancel = true;
+      mockBridge.appointmentsList = [
+        {
+          'id': 302,
+          'resource_name': '南区网球场',
+          'status': '已生效',
+          'status_name': '已生效',
+          'is_cancel': true,
+          'slots': [
+            {
+              'date': '2099-01-04',
+              'time': '14:00-15:00',
+              'resource_name': '2号场地',
+              'active': true,
+              'can_cancel': true,
+            },
+          ],
+        },
+      ];
 
-    // Refresh appointments
-    await tester.tap(find.byTooltip('刷新'));
-    await tester.pumpAndSettle();
+      // Refresh appointments
+      await tester.tap(find.byTooltip('刷新'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('南区网球场'), findsWidgets);
-    expect(find.text('取消这条预约'), findsOneWidget);
+      expect(find.text('南区网球场'), findsWidgets);
+      expect(find.text('取消这条预约'), findsOneWidget);
 
-    // Tap cancel which returns needs_reconciliation
-    await tester.tap(find.text('取消这条预约'));
-    await tester.pumpAndSettle();
+      // Tap cancel which returns needs_reconciliation
+      await tester.tap(find.text('取消这条预约'));
+      await tester.pumpAndSettle();
 
-    // Verify "核对" button appears for uncertain cancellation
-    expect(find.widgetWithText(OutlinedButton, '核对'), findsWidgets);
+      // Verify "核对" button appears for uncertain cancellation
+      expect(find.widgetWithText(OutlinedButton, '核对'), findsWidgets);
 
-    // Tap "核对" button
-    await tester.tap(find.widgetWithText(OutlinedButton, '核对').first);
-    await tester.pumpAndSettle();
+      // Tap "核对" button
+      await tester.tap(find.widgetWithText(OutlinedButton, '核对').first);
+      await tester.pumpAndSettle();
 
-    // Verify venues.reconcileCancel was called with appointment_id 302
-    final reconcileCancelCall = mockBridge.calls.firstWhere(
-      (c) =>
-          c['command'] == HostCommand.campus &&
-          c['params']['method'] == 'venues.reconcileCancel',
-    );
-    expect(
-      reconcileCancelCall['params']['params']['appointment_id'],
-      equals(302),
-    );
-    expect(find.textContaining('核对完成: 预约已取消'), findsOneWidget);
-  });
+      // Verify venues.reconcileCancel was called with appointment_id 302
+      final reconcileCancelCall = mockBridge.calls.firstWhere(
+        (c) =>
+            c['command'] == HostCommand.campus &&
+            c['params']['method'] == 'venues.reconcileCancel',
+      );
+      expect(
+        reconcileCancelCall['params']['params']['appointment_id'],
+        equals(302),
+      );
+      expect(find.textContaining('核对完成: 预约已取消'), findsOneWidget);
+    },
+  );
 
   testWidgets('Visible login flow on AuthenticationRequired error', (
     tester,

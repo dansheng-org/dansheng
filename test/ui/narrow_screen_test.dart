@@ -84,7 +84,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final navigator = tester.state<NavigatorState>(find.byType(Navigator).first);
+      final navigator = tester.state<NavigatorState>(
+        find.byType(Navigator).first,
+      );
 
       // 1. Root defaults to eHall: verify rendering without overflow
       expect(find.text('校园办事'), findsOneWidget);

@@ -94,9 +94,9 @@ class AgentAnswer {
     final rawSources = json['sources'];
     final sourcesList = (rawSources is List)
         ? rawSources
-            .whereType<Map<String, dynamic>>()
-            .map(AgentSource.fromJson)
-            .toList()
+              .whereType<Map<String, dynamic>>()
+              .map(AgentSource.fromJson)
+              .toList()
         : <AgentSource>[];
 
     return AgentAnswer(
@@ -104,7 +104,8 @@ class AgentAnswer {
       accountId: json['account_id']?.toString() ?? '',
       answer: json['answer']?.toString() ?? '',
       sources: sourcesList,
-      evidenceCount: (json['evidence_count'] as num?)?.toInt() ?? sourcesList.length,
+      evidenceCount:
+          (json['evidence_count'] as num?)?.toInt() ?? sourcesList.length,
     );
   }
 }

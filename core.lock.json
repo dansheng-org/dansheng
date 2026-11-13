@@ -1,0 +1,81 @@
+{
+  "format": "dansheng-core-lock-v1",
+  "mode": "native-sdk",
+  "state": "development_snapshot",
+  "core": {
+    "version": "0.1.0",
+    "commit": "5ab13d93c39f8eb84a9208d40387b93c115fc8d9",
+    "source_sha256": "5e482d26f6519f8199fecfae9fb5531d8e5cc5e7441ec3632e25bef6394b3590",
+    "adapter_source_sha256": "77ec2d44d00fcb121d3b5b4856dcd67dc373c4f3bca004db84217faffee2c88c",
+    "api_version": 1,
+    "abi_version": 1,
+    "rust_toolchain": "1.99.1",
+    "features": [
+      "services",
+      "card-login",
+      "campus-webvpn"
+    ]
+  },
+  "binding": {
+    "kind": "pigeon-jni",
+    "generator_version": "29.1.1",
+    "pubspec_lock_sha256": "58e9ed3e697182c31b41694e5db10d7b4e95000d479a3b51ebb18e7ecae7d0f3"
+  },
+  "artifact": {
+    "name": "dansheng-android-0.1.0.aar",
+    "format": "aar",
+    "platform": "android",
+    "abis": [
+      "arm64-v8a",
+      "x86_64"
+    ],
+    "bytes": 19709144,
+    "sha256": "6c956c05167b866c48b5a8e742d8ee86ea6d74adda42955273ba3c519dae9dec",
+    "native_entries": [
+      {
+        "entry": "jni/arm64-v8a/libdansheng_ffi.so",
+        "bytes": 17284912,
+        "sha256": "d0b2db70b3ca84a18ff6d2b9cdf5b1b2f6ea2282d2a22d2fa151a36a12d3848a",
+        "staging_sha256": "f9e60f1bcc1441332a8fb37938c7570840d1b69605fdd484a43525b30c5b19b2"
+      },
+      {
+        "entry": "jni/x86_64/libdansheng_ffi.so",
+        "bytes": 40125080,
+        "sha256": "9b39dd213dc5c4009dee25db3b4a6b88bca449c9429995a8b37b3d656d96f6c3",
+        "staging_sha256": "aa3ac5fd9158bd00378480b086627d30cdec2cec1659b289966055df21ea7f30"
+      }
+    ],
+    "packaged_receipt_complete": true,
+    "acquisition_uri": null
+  },
+  "resources": [
+    {
+      "path": "plugins/builtin/fudan-venues/manifest.json",
+      "sha256": "5c2eb308d210fc58d035692390d6bfbbcb1c4cd80186df1672c922951d4ea74b"
+    },
+    {
+      "path": "plugins/builtin/fudan-venues/host-policy.json",
+      "sha256": "71dfb1acfdbe92abb11c18900ab35e683283ac704bee7cf927c33242d85cbdb7"
+    },
+    {
+      "path": "plugins/builtin/fudan-venues/main.mjs",
+      "sha256": "f227f8ef55c479002d05cda211396f2968352c2bc767aa1a840a4666ed0f80a6"
+    },
+    {
+      "path": "plugins/builtin/fudan-venues/api.mjs",
+      "sha256": "336a5187060172edb3b450b42fd585663c3149cc1a52b42ddcda034a47c0ff03"
+    },
+    {
+      "path": "plugins/builtin/fudan-venues/policy.mjs",
+      "sha256": "0f5beece527bd29cd6944d358cd192f17872dedfb02a3b70431bc410a91def59"
+    },
+    {
+      "path": "plugins/builtin/fudan-venues/NOTICE.md",
+      "sha256": "05310830c081c22c1ee36ba439befcdde0fe9b01a62db1818fd33f8aba1b0463"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    }
+  ]
+}

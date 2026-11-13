@@ -89,9 +89,8 @@ class _AgentPageState extends State<AgentPage> {
   Future<void> _toggleMcp(bool enable) async {
     final account = widget.controller.activeAccountId;
     if (account == null || account.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在账号设置中选择活动账号。')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请先在账号设置中选择活动账号。')));
       return;
     }
 
@@ -107,9 +106,8 @@ class _AgentPageState extends State<AgentPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(campusError(e))),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(campusError(e))));
       }
     } finally {
       if (mounted) {
@@ -131,16 +129,14 @@ class _AgentPageState extends State<AgentPage> {
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('服务未就绪，暂无法获取连接凭据。')),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('服务未就绪，暂无法获取连接凭据。')));
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(campusError(e))),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(campusError(e))));
       }
     } finally {
       if (mounted) {
@@ -208,10 +204,7 @@ class _AgentPageState extends State<AgentPage> {
     final account = widget.controller.activeAccountId;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('校园助手'),
-        centerTitle: false,
-      ),
+      appBar: AppBar(title: const Text('校园助手'), centerTitle: false),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         children: [
@@ -276,7 +269,11 @@ class _AgentPageState extends State<AgentPage> {
 
     return Row(
       children: [
-        Icon(Icons.verified_user_outlined, size: 18.0, color: colorScheme.primary),
+        Icon(
+          Icons.verified_user_outlined,
+          size: 18.0,
+          color: colorScheme.primary,
+        ),
         const SizedBox(width: 6.0),
         Text(
           '当前账号：$account',
@@ -330,7 +327,9 @@ class _AgentPageState extends State<AgentPage> {
               children: [
                 Icon(
                   Icons.smart_toy_outlined,
-                  color: isRunning ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                  color: isRunning
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 8.0),
                 Expanded(
@@ -359,17 +358,17 @@ class _AgentPageState extends State<AgentPage> {
                     child: CircularProgressIndicator(strokeWidth: 2.5),
                   )
                 else
-                  Switch(
-                    value: isRunning,
-                    onChanged: _toggleMcp,
-                  ),
+                  Switch(value: isRunning, onChanged: _toggleMcp),
               ],
             ),
             const SizedBox(height: 8.0),
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8.0,
+                    vertical: 2.0,
+                  ),
                   decoration: BoxDecoration(
                     color: isRunning
                         ? Colors.green.withAlpha(40)
@@ -394,7 +393,9 @@ class _AgentPageState extends State<AgentPage> {
                             : '已停止 (未监听端口)',
                         style: theme.textTheme.labelMedium?.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: isRunning ? Colors.green.shade800 : colorScheme.onSurfaceVariant,
+                          color: isRunning
+                              ? Colors.green.shade800
+                              : colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -474,7 +475,8 @@ class _AgentPageState extends State<AgentPage> {
                 children: [
                   Expanded(
                     child: SelectableText(
-                      _mcpStatus.adbCommand ?? 'adb forward tcp:${_mcpStatus.port} tcp:${_mcpStatus.port}',
+                      _mcpStatus.adbCommand ??
+                          'adb forward tcp:${_mcpStatus.port} tcp:${_mcpStatus.port}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontFamily: 'monospace',
                       ),
@@ -537,9 +539,7 @@ class _AgentPageState extends State<AgentPage> {
     return Card(
       elevation: 0,
       color: colorScheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16.0),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -588,7 +588,10 @@ class _AgentPageState extends State<AgentPage> {
                 border: const OutlineInputBorder(
                   borderRadius: BorderRadius.all(Radius.circular(12.0)),
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 12.0,
+                ),
               ),
               onChanged: (_) => setState(() {}),
               onSubmitted: (_) => _executeSearch(),
@@ -596,7 +599,9 @@ class _AgentPageState extends State<AgentPage> {
             const SizedBox(height: 12.0),
 
             FilledButton.icon(
-              onPressed: _queryController.text.trim().isEmpty ? null : _executeSearch,
+              onPressed: _queryController.text.trim().isEmpty
+                  ? null
+                  : _executeSearch,
               icon: Icon(_modeIndex == 0 ? Icons.psychology : Icons.search),
               label: Text(_modeIndex == 0 ? '向助手提问' : '开始检索'),
             ),
@@ -653,7 +658,10 @@ class _AgentPageState extends State<AgentPage> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.format_quote_outlined, color: colorScheme.primary),
+                    Icon(
+                      Icons.format_quote_outlined,
+                      color: colorScheme.primary,
+                    ),
                     const SizedBox(width: 8.0),
                     Text(
                       '本地证据回答',
@@ -664,7 +672,10 @@ class _AgentPageState extends State<AgentPage> {
                     ),
                     const Spacer(),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8.0,
+                        vertical: 2.0,
+                      ),
                       decoration: BoxDecoration(
                         color: colorScheme.primaryContainer,
                         borderRadius: BorderRadius.circular(8.0),
@@ -682,9 +693,7 @@ class _AgentPageState extends State<AgentPage> {
                 const SizedBox(height: 12.0),
                 SelectableText(
                   ans.answer,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    height: 1.5,
-                  ),
+                  style: theme.textTheme.bodyLarge?.copyWith(height: 1.5),
                 ),
               ],
             ),
@@ -730,7 +739,9 @@ class _AgentPageState extends State<AgentPage> {
       margin: const EdgeInsets.only(bottom: 8.0),
       shape: RoundedRectangleBorder(
         side: BorderSide(
-          color: isExpanded ? colorScheme.primary.withAlpha(120) : colorScheme.outlineVariant,
+          color: isExpanded
+              ? colorScheme.primary.withAlpha(120)
+              : colorScheme.outlineVariant,
         ),
         borderRadius: BorderRadius.circular(12.0),
       ),
@@ -753,7 +764,10 @@ class _AgentPageState extends State<AgentPage> {
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6.0,
+                      vertical: 2.0,
+                    ),
                     decoration: BoxDecoration(
                       color: colorScheme.secondaryContainer,
                       borderRadius: BorderRadius.circular(6.0),
@@ -777,7 +791,10 @@ class _AgentPageState extends State<AgentPage> {
                   ),
                   if (src.kind.isNotEmpty)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6.0,
+                        vertical: 2.0,
+                      ),
                       decoration: BoxDecoration(
                         color: colorScheme.surfaceContainerHigh,
                         borderRadius: BorderRadius.circular(6.0),
@@ -803,7 +820,9 @@ class _AgentPageState extends State<AgentPage> {
                   decoration: BoxDecoration(
                     color: colorScheme.surfaceContainerLow,
                     borderRadius: BorderRadius.circular(8.0),
-                    border: Border.all(color: colorScheme.outlineVariant.withAlpha(80)),
+                    border: Border.all(
+                      color: colorScheme.outlineVariant.withAlpha(80),
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -907,7 +926,10 @@ class _AgentPageState extends State<AgentPage> {
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8.0,
+                    vertical: 2.0,
+                  ),
                   decoration: BoxDecoration(
                     color: colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(6.0),
@@ -940,16 +962,17 @@ class _AgentPageState extends State<AgentPage> {
                   color: colorScheme.surfaceContainerLow,
                   borderRadius: BorderRadius.circular(8.0),
                 ),
-                child: Text(
-                  hit.snippet,
-                  style: theme.textTheme.bodyMedium,
-                ),
+                child: Text(hit.snippet, style: theme.textTheme.bodyMedium),
               ),
             ],
             const SizedBox(height: 6.0),
             Row(
               children: [
-                Icon(Icons.inventory_2_outlined, size: 14.0, color: colorScheme.outline),
+                Icon(
+                  Icons.inventory_2_outlined,
+                  size: 14.0,
+                  color: colorScheme.outline,
+                ),
                 const SizedBox(width: 4.0),
                 Expanded(
                   child: Text(

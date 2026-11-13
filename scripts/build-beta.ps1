@@ -1,24 +1,45 @@
-param([string]$CoreRoot=(Join-Path (Split-Path (Split-Path $PSScriptRoot)) 'dansheng'))
+param([string]$CoreRoot,[string]$CoreToolsRoot,[string]$ArtifactDirectory,[string]$RuntimeRoot,[string]$OutputDirectory,[string]$LockFile,[string]$SigningDirectory,[switch]$ForRelease)
 $ErrorActionPreference='Stop'
 $app=(Resolve-Path (Split-Path $PSScriptRoot)).Path
-$CoreRoot=(Resolve-Path $CoreRoot).Path
+. (Join-Path $PSScriptRoot 'core-dependency.ps1')
+$CoreRoot=Resolve-DanshengCoreRoot -AppRoot $app -CoreRoot $CoreRoot
+$RuntimeRoot=Resolve-DanshengAppRuntimeRoot -AppRoot $app -RuntimeRoot $RuntimeRoot
+$ArtifactDirectory=Resolve-DanshengCoreArtifactDirectory -AppRoot $app -ArtifactDirectory $ArtifactDirectory -RuntimeRoot $RuntimeRoot
+$OutputDirectory=Resolve-DanshengAppArtifactRoot -AppRoot $app -OutputDirectory $OutputDirectory -RuntimeRoot $RuntimeRoot
+$OutputDirectory=Get-DanshengAppRuntimeOutput -RuntimeRoot $RuntimeRoot -Path $OutputDirectory
+Assert-DanshengTaskArtifactWrite -AppRoot $app -CoreRoot $CoreRoot -ArtifactDirectory $OutputDirectory
+$dependency=Test-DanshengAppCoreDependency -AppRoot $app -CoreRoot $CoreRoot -ArtifactDirectory $ArtifactDirectory -CoreToolsRoot $CoreToolsRoot -LockFile $LockFile -ForRelease:$ForRelease
+$aar=Get-DanshengAppAarPath -AppRoot $app -ArtifactDirectory $ArtifactDirectory -LockFile $LockFile
 . (Join-Path $CoreRoot 'scripts/release-common.ps1')
 . (Join-Path $PSScriptRoot 'adapter-source.ps1')
-$receipt = Get-Content (Join-Path $app '.local/native/receipt.json') -Raw | ConvertFrom-Json
+if(-not $dependency.verified){
+$receipt = Get-Content -LiteralPath (Join-Path $ArtifactDirectory 'receipt.json') -Raw | ConvertFrom-Json
 if ($receipt.core_source_sha256 -ne (Get-DanshengBuildSource -Root $CoreRoot).sha256 -or
     $receipt.adapter_source_sha256 -ne (Get-AdapterSourceHash $CoreRoot) -or
     $receipt.features -notcontains 'card-login' -or
-    $receipt.aar_sha256 -ne (Get-FileHash (Join-Path $app '.local/native/dansheng-android-0.1.0.aar')).Hash) {
+    $receipt.aar_sha256 -ne (Get-FileHash -LiteralPath $aar).Hash) {
     throw 'Run prepare-native.ps1 with the current core source first.'
 }
-# A local internal-distribution key; never reuse a user's Play or production key.
-$keyDir=New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'dansheng-build/android-beta')
+}
+# A task-owned internal test identity. Existing C-drive signing identities are
+# preserved and never implicitly opened or replaced by a migrated task build.
+if(-not$SigningDirectory){$SigningDirectory=Join-Path $RuntimeRoot 'signing/android-beta'}
+$SigningDirectory=Get-DanshengAppRuntimeOutput -RuntimeRoot $RuntimeRoot -Path $SigningDirectory
+Assert-DanshengTaskArtifactWrite -AppRoot $app -CoreRoot $CoreRoot -ArtifactDirectory $SigningDirectory
+$keyDir=New-Item -ItemType Directory -Force -Path $SigningDirectory
 $key=Join-Path $keyDir.FullName 'internal.p12'
 $protected=Join-Path $keyDir.FullName 'password.dpapi'
 if((Test-Path $key) -ne (Test-Path $protected)){throw 'Incomplete internal signing identity; existing files retained.'}
 $savedPass=$env:DANSHENG_BETA_PASSWORD; $savedStore=$env:DANSHENG_BETA_STORE
+$savedCore=$env:DANSHENG_CORE_ROOT; $savedSdk=$env:DANSHENG_CORE_SDK_DIR
+$savedLock=$env:DANSHENG_CORE_LOCK_FILE
+$savedStable=$env:ORG_GRADLE_PROJECT_danshengStableRelease
 Push-Location $app
 try {
+    $env:DANSHENG_CORE_ROOT=$CoreRoot
+    $env:DANSHENG_CORE_SDK_DIR=$ArtifactDirectory
+    $env:DANSHENG_CORE_LOCK_FILE=Resolve-DanshengAppCoreLock -AppRoot $app -LockFile $LockFile
+    if($ForRelease){$env:ORG_GRADLE_PROJECT_danshengStableRelease='true'}
     if(!(Test-Path $key)){
         $secret=[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(36))
         $env:DANSHENG_BETA_PASSWORD=$secret
@@ -31,6 +52,6 @@ try {
     $env:DANSHENG_BETA_STORE=$key
     flutter build apk --release --target-platform android-arm64 --split-per-abi --no-pub
     if($LASTEXITCODE -ne 0){throw 'Release build failed'}
-    $out=New-Item -ItemType Directory -Force -Path (Join-Path $app 'dist')
+    $out=New-Item -ItemType Directory -Force -Path $OutputDirectory
     Copy-Item -LiteralPath 'build/app/outputs/flutter-apk/app-arm64-v8a-release.apk' -Destination (Join-Path $out.FullName 'dansheng-android-arm64-beta.apk')
-} finally { Pop-Location; $env:DANSHENG_BETA_STORE=$savedStore; $env:DANSHENG_BETA_PASSWORD=$savedPass }
+} finally { Pop-Location; $env:DANSHENG_BETA_STORE=$savedStore; $env:DANSHENG_BETA_PASSWORD=$savedPass; $env:DANSHENG_CORE_ROOT=$savedCore; $env:DANSHENG_CORE_SDK_DIR=$savedSdk; $env:DANSHENG_CORE_LOCK_FILE=$savedLock; $env:ORG_GRADLE_PROJECT_danshengStableRelease=$savedStable }

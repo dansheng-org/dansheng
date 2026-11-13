@@ -161,7 +161,9 @@ class MockForumDanshengBridge implements DanshengBridge {
 
           return jsonEncode({
             'records': records,
-            'coverage': {'Window': {'position': '2026-11-01T00:00:00Z'}},
+            'coverage': {
+              'Window': {'position': '2026-11-01T00:00:00Z'},
+            },
           });
 
         case 'community.tea.hole':
@@ -237,7 +239,9 @@ class MockForumDanshengBridge implements DanshengBridge {
                 },
               },
             ],
-            'coverage': {'Page': {'next': null, 'total': 3}},
+            'coverage': {
+              'Page': {'next': null, 'total': 3},
+            },
           });
 
         case 'forum.search':
@@ -333,7 +337,10 @@ class MockForumDanshengBridge implements DanshengBridge {
       case HostCommand.jobs:
         return jsonEncode([]);
       case HostCommand.permissions:
-        return jsonEncode({'exact_available': false, 'notifications_available': false});
+        return jsonEncode({
+          'exact_available': false,
+          'notifications_available': false,
+        });
       default:
         return jsonEncode({});
     }
@@ -341,10 +348,7 @@ class MockForumDanshengBridge implements DanshengBridge {
 }
 
 Widget _wrapTestWidget(Widget child) {
-  return MaterialApp(
-    theme: AppTheme.lightTheme,
-    home: child,
-  );
+  return MaterialApp(theme: AppTheme.lightTheme, home: child);
 }
 
 void main() {
@@ -359,321 +363,352 @@ void main() {
     await controller.initialize();
   });
 
-  testWidgets('ForumPage: loads divisions, pinned posts, holes and handles division filter', (tester) async {
-    await tester.pumpWidget(_wrapTestWidget(ForumPage(controller: controller)));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'ForumPage: loads divisions, pinned posts, holes and handles division filter',
+    (tester) async {
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
 
-    // 1. Verify title and division tabs exist
-    expect(find.text('复旦树洞'), findsOneWidget);
-    expect(find.widgetWithText(ChoiceChip, '全站'), findsOneWidget);
-    expect(find.widgetWithText(ChoiceChip, '合成分区'), findsOneWidget);
-    expect(find.widgetWithText(ChoiceChip, '校园生活'), findsOneWidget);
+      // 1. Verify title and division tabs exist
+      expect(find.text('复旦树洞'), findsOneWidget);
+      expect(find.widgetWithText(ChoiceChip, '全站'), findsOneWidget);
+      expect(find.widgetWithText(ChoiceChip, '合成分区'), findsOneWidget);
+      expect(find.widgetWithText(ChoiceChip, '校园生活'), findsOneWidget);
 
-    // 2. Verify pinned post is shown with "置顶" badge
-    expect(find.text('置顶'), findsOneWidget);
-    expect(find.textContaining('置顶公告'), findsOneWidget);
-    expect(find.text('#999'), findsOneWidget);
+      // 2. Verify pinned post is shown with "置顶" badge
+      expect(find.text('置顶'), findsOneWidget);
+      expect(find.textContaining('置顶公告'), findsOneWidget);
+      expect(find.text('#999'), findsOneWidget);
 
-    // 3. Verify normal holes are shown with tags and sanitized preview
-    expect(find.text('#101'), findsOneWidget);
-    expect(find.text('#102'), findsOneWidget);
-    expect(find.text('#日常'), findsOneWidget);
-    expect(find.text('#美食'), findsOneWidget);
-    expect(find.textContaining('[公式]'), findsOneWidget);
-    expect(find.textContaining('[图片]'), findsOneWidget);
+      // 3. Verify normal holes are shown with tags and sanitized preview
+      expect(find.text('#101'), findsOneWidget);
+      expect(find.text('#102'), findsOneWidget);
+      expect(find.text('#日常'), findsOneWidget);
+      expect(find.text('#美食'), findsOneWidget);
+      expect(find.textContaining('[公式]'), findsOneWidget);
+      expect(find.textContaining('[图片]'), findsOneWidget);
 
-    // 4. Verify anonymity: NO token or secret leaked
-    expect(find.textContaining('LEAK_TOKEN'), findsNothing);
-    expect(find.textContaining('PII'), findsNothing);
+      // 4. Verify anonymity: NO token or secret leaked
+      expect(find.textContaining('LEAK_TOKEN'), findsNothing);
+      expect(find.textContaining('PII'), findsNothing);
 
-    // 5. Switch division to "合成分区"
-    await tester.tap(find.widgetWithText(ChoiceChip, '合成分区'));
-    await tester.pumpAndSettle();
+      // 5. Switch division to "合成分区"
+      await tester.tap(find.widgetWithText(ChoiceChip, '合成分区'));
+      await tester.pumpAndSettle();
 
-    // Verify holes fetch called with division: 1
-    final lastHolesCall = mockBridge.invocationLog.lastWhere(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'community.tea.holes',
-    );
-    expect(lastHolesCall['params']['params']['division'], 1);
+      // Verify holes fetch called with division: 1
+      final lastHolesCall = mockBridge.invocationLog.lastWhere(
+        (entry) =>
+            entry['command'] == HostCommand.campus &&
+            entry['params']['method'] == 'community.tea.holes',
+      );
+      expect(lastHolesCall['params']['params']['division'], 1);
 
-    // Switch back to "全站"
-    await tester.tap(find.widgetWithText(ChoiceChip, '全站'));
-    await tester.pumpAndSettle();
+      // Switch back to "全站"
+      await tester.tap(find.widgetWithText(ChoiceChip, '全站'));
+      await tester.pumpAndSettle();
 
-    final allHolesCall = mockBridge.invocationLog.lastWhere(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'community.tea.holes',
-    );
-    expect(allHolesCall['params']['params']['division'], isNull);
-  });
+      final allHolesCall = mockBridge.invocationLog.lastWhere(
+        (entry) =>
+            entry['command'] == HostCommand.campus &&
+            entry['params']['method'] == 'community.tea.holes',
+      );
+      expect(allHolesCall['params']['params']['division'], isNull);
+    },
+  );
 
-  testWidgets('ForumPage: switches sort order between latest replied and latest created', (tester) async {
-    await tester.pumpWidget(_wrapTestWidget(ForumPage(controller: controller)));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'ForumPage: switches sort order between latest replied and latest created',
+    (tester) async {
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.textContaining('最新回复'), findsWidgets);
+      expect(find.textContaining('最新回复'), findsWidgets);
 
-    // Tap sort button in AppBar
-    await tester.tap(find.byTooltip('最新回复'));
-    await tester.pumpAndSettle();
+      // Tap sort button in AppBar
+      await tester.tap(find.byTooltip('最新回复'));
+      await tester.pumpAndSettle();
 
-    expect(find.textContaining('最新发布'), findsWidgets);
+      expect(find.textContaining('最新发布'), findsWidgets);
 
-    final sortCall = mockBridge.invocationLog.lastWhere(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'community.tea.holes',
-    );
-    expect(sortCall['params']['params']['order'], 'created');
-  });
+      final sortCall = mockBridge.invocationLog.lastWhere(
+        (entry) =>
+            entry['command'] == HostCommand.campus &&
+            entry['params']['method'] == 'community.tea.holes',
+      );
+      expect(sortCall['params']['params']['order'], 'created');
+    },
+  );
 
-  testWidgets('HoleDetailPage: displays hole, OP badge, floors and hides deleted markup', (tester) async {
-    await tester.pumpWidget(
-      _wrapTestWidget(
-        HoleDetailPage(
-          controller: controller,
-          holeId: 101,
+  testWidgets(
+    'HoleDetailPage: displays hole, OP badge, floors and hides deleted markup',
+    (tester) async {
+      await tester.pumpWidget(
+        _wrapTestWidget(HoleDetailPage(controller: controller, holeId: 101)),
+      );
+      await tester.pumpAndSettle();
+
+      // 1. Hole header
+      expect(find.text('#101 帖子详情'), findsOneWidget);
+
+      // 2. Floor 1 is OP (洞主), with pseudonym 'Synthetic'
+      expect(find.text('洞主'), findsOneWidget);
+      expect(find.text('Synthetic'), findsOneWidget);
+      expect(find.textContaining('复习微积分'), findsOneWidget);
+
+      // 3. Floor 2 is Alice
+      expect(find.text('2楼'), findsOneWidget);
+      expect(find.text('Alice'), findsOneWidget);
+      expect(find.textContaining('我也在看这门课'), findsOneWidget);
+
+      // 4. Floor 3 is deleted: markup must be suppressed, shows placeholder
+      expect(find.text('3楼'), findsOneWidget);
+      expect(find.text('该楼层已被删除'), findsOneWidget);
+      expect(find.textContaining('null'), findsNothing);
+
+      // 5. Verify floors call passes page_size and offset
+      final floorsCall = mockBridge.invocationLog.lastWhere(
+        (entry) =>
+            entry['command'] == HostCommand.campus &&
+            entry['params']['method'] == 'community.tea.floors',
+      );
+      expect(floorsCall['params']['params']['hole_id'], 101);
+      expect(floorsCall['params']['params']['page_size'], 20);
+
+      // 6. Anonymity check: verify no token leaked
+      expect(find.textContaining('LEAK_TOKEN'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'Search: ForumSearchPage queries parent forum.search and renders results with deleted check',
+    (tester) async {
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumSearchPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+
+      // Type query
+      await tester.enterText(find.byType(TextField), '微积分');
+      await tester.tap(find.byTooltip('搜索'));
+      await tester.pumpAndSettle();
+
+      // Verify search was invoked
+      final searchCall = mockBridge.invocationLog.lastWhere(
+        (entry) =>
+            entry['command'] == HostCommand.campus &&
+            entry['params']['method'] == 'forum.search',
+      );
+      expect(searchCall['params']['params']['query'], '微积分');
+      expect(searchCall['params']['params']['offset'], 0);
+
+      // Verify result card displayed
+      expect(find.textContaining('关于 微积分 的相关树洞讨论'), findsOneWidget);
+      // Verify deleted floor in search result renders cleanly as deleted placeholder
+      expect(find.text('该楼层已被删除'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Publish: writes UI fields preview, requires confirm before forum.publish',
+    (tester) async {
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+
+      // Tap "发帖" FAB
+      await tester.tap(find.text('发帖'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('发布新帖'), findsOneWidget);
+
+      // Enter tags and content
+      final textFields = find.byType(TextField);
+      await tester.enterText(textFields.at(0), '考试, 复习');
+      await tester.enterText(textFields.at(1), '大家期末一起加油！');
+      await tester.pumpAndSettle();
+
+      // Tap "预览并确认" to enter preview step
+      await tester.tap(find.text('预览并确认'));
+      await tester.pumpAndSettle();
+
+      // 1. Verify preview mode is active
+      expect(find.text('发帖确认与预览'), findsOneWidget);
+      expect(find.text('发布分区'), findsOneWidget);
+      expect(find.text('合成分区'), findsWidgets);
+      expect(find.text('#考试'), findsOneWidget);
+      expect(find.text('#复习'), findsOneWidget);
+      expect(find.textContaining('匿名保护'), findsOneWidget);
+      expect(find.text('大家期末一起加油！'), findsOneWidget);
+
+      // Ensure publish NOT yet called before confirm
+      expect(
+        mockBridge.invocationLog.any(
+          (entry) =>
+              entry['command'] == HostCommand.campus &&
+              entry['params']['method'] == 'forum.publish',
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+        isFalse,
+      );
 
-    // 1. Hole header
-    expect(find.text('#101 帖子详情'), findsOneWidget);
+      // Now tap "确认发布"
+      await tester.tap(find.text('确认发布'));
+      await tester.pumpAndSettle();
 
-    // 2. Floor 1 is OP (洞主), with pseudonym 'Synthetic'
-    expect(find.text('洞主'), findsOneWidget);
-    expect(find.text('Synthetic'), findsOneWidget);
-    expect(find.textContaining('复习微积分'), findsOneWidget);
-
-    // 3. Floor 2 is Alice
-    expect(find.text('2楼'), findsOneWidget);
-    expect(find.text('Alice'), findsOneWidget);
-    expect(find.textContaining('我也在看这门课'), findsOneWidget);
-
-    // 4. Floor 3 is deleted: markup must be suppressed, shows placeholder
-    expect(find.text('3楼'), findsOneWidget);
-    expect(find.text('该楼层已被删除'), findsOneWidget);
-    expect(find.textContaining('null'), findsNothing);
-
-    // 5. Verify floors call passes page_size and offset
-    final floorsCall = mockBridge.invocationLog.lastWhere(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'community.tea.floors',
-    );
-    expect(floorsCall['params']['params']['hole_id'], 101);
-    expect(floorsCall['params']['params']['page_size'], 20);
-
-    // 6. Anonymity check: verify no token leaked
-    expect(find.textContaining('LEAK_TOKEN'), findsNothing);
-  });
-
-  testWidgets('Search: ForumSearchPage queries parent forum.search and renders results with deleted check', (tester) async {
-    await tester.pumpWidget(
-      _wrapTestWidget(
-        ForumSearchPage(controller: controller),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    // Type query
-    await tester.enterText(find.byType(TextField), '微积分');
-    await tester.tap(find.byTooltip('搜索'));
-    await tester.pumpAndSettle();
-
-    // Verify search was invoked
-    final searchCall = mockBridge.invocationLog.lastWhere(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'forum.search',
-    );
-    expect(searchCall['params']['params']['query'], '微积分');
-    expect(searchCall['params']['params']['offset'], 0);
-
-    // Verify result card displayed
-    expect(find.textContaining('关于 微积分 的相关树洞讨论'), findsOneWidget);
-    // Verify deleted floor in search result renders cleanly as deleted placeholder
-    expect(find.text('该楼层已被删除'), findsOneWidget);
-  });
-
-  testWidgets('Publish: writes UI fields preview, requires confirm before forum.publish', (tester) async {
-    await tester.pumpWidget(_wrapTestWidget(ForumPage(controller: controller)));
-    await tester.pumpAndSettle();
-
-    // Tap "发帖" FAB
-    await tester.tap(find.text('发帖'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('发布新帖'), findsOneWidget);
-
-    // Enter tags and content
-    final textFields = find.byType(TextField);
-    await tester.enterText(textFields.at(0), '考试, 复习');
-    await tester.enterText(textFields.at(1), '大家期末一起加油！');
-    await tester.pumpAndSettle();
-
-    // Tap "预览并确认" to enter preview step
-    await tester.tap(find.text('预览并确认'));
-    await tester.pumpAndSettle();
-
-    // 1. Verify preview mode is active
-    expect(find.text('发帖确认与预览'), findsOneWidget);
-    expect(find.text('发布分区'), findsOneWidget);
-    expect(find.text('合成分区'), findsWidgets);
-    expect(find.text('#考试'), findsOneWidget);
-    expect(find.text('#复习'), findsOneWidget);
-    expect(find.textContaining('匿名保护'), findsOneWidget);
-    expect(find.text('大家期末一起加油！'), findsOneWidget);
-
-    // Ensure publish NOT yet called before confirm
-    expect(
-      mockBridge.invocationLog.any(
+      // Verify forum.publish invoked with typed parameters
+      final pubCall = mockBridge.invocationLog.lastWhere(
         (entry) =>
             entry['command'] == HostCommand.campus &&
             entry['params']['method'] == 'forum.publish',
-      ),
-      isFalse,
-    );
+      );
+      expect(pubCall['params']['params']['division_id'], 1);
+      expect(pubCall['params']['params']['content'], '大家期末一起加油！');
+      expect(pubCall['params']['params']['tags'], ['考试', '复习']);
+    },
+  );
 
-    // Now tap "确认发布"
-    await tester.tap(find.text('确认发布'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'Publish: uncertain outcome shows "核对结果", ambiguous remains pending, match authorizes published',
+    (tester) async {
+      mockBridge.simulateUncertainPublish = true;
+      mockBridge.reconcileOutcome =
+          'unresolved'; // initial reconciliation is ambiguous
 
-    // Verify forum.publish invoked with typed parameters
-    final pubCall = mockBridge.invocationLog.lastWhere(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'forum.publish',
-    );
-    expect(pubCall['params']['params']['division_id'], 1);
-    expect(pubCall['params']['params']['content'], '大家期末一起加油！');
-    expect(pubCall['params']['params']['tags'], ['考试', '复习']);
-  });
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
 
-  testWidgets('Publish: uncertain outcome shows "核对结果", ambiguous remains pending, match authorizes published', (tester) async {
-    mockBridge.simulateUncertainPublish = true;
-    mockBridge.reconcileOutcome = 'unresolved'; // initial reconciliation is ambiguous
+      await tester.tap(find.text('发帖'));
+      await tester.pumpAndSettle();
 
-    await tester.pumpWidget(_wrapTestWidget(ForumPage(controller: controller)));
-    await tester.pumpAndSettle();
+      final textFields = find.byType(TextField);
+      await tester.enterText(textFields.at(1), '可能超时的帖子');
+      await tester.tap(find.text('预览并确认'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('发帖'));
-    await tester.pumpAndSettle();
+      // Confirm publish -> throws NeedsReconciliation
+      await tester.tap(find.text('确认发布'));
+      await tester.pumpAndSettle();
 
-    final textFields = find.byType(TextField);
-    await tester.enterText(textFields.at(1), '可能超时的帖子');
-    await tester.tap(find.text('预览并确认'));
-    await tester.pumpAndSettle();
+      // Verify uncertain outcome warning and "核对结果" button
+      expect(find.textContaining('提交结果待核对，请勿重复提交'), findsOneWidget);
+      expect(find.text('核对结果'), findsOneWidget);
+      expect(find.text('先刷新'), findsOneWidget);
+      expect(
+        find.text('确认发布'),
+        findsNothing,
+      ); // Immediate blind retry disabled!
 
-    // Confirm publish -> throws NeedsReconciliation
-    await tester.tap(find.text('确认发布'));
-    await tester.pumpAndSettle();
+      // 1. User taps "核对结果" when reconciliation is ambiguous/unresolved
+      await tester.tap(find.text('核对结果'));
+      await tester.pumpAndSettle();
 
-    // Verify uncertain outcome warning and "核对结果" button
-    expect(find.textContaining('提交结果待核对，请勿重复提交'), findsOneWidget);
-    expect(find.text('核对结果'), findsOneWidget);
-    expect(find.text('先刷新'), findsOneWidget);
-    expect(find.text('确认发布'), findsNothing); // Immediate blind retry disabled!
+      // Verify reconcile was invoked with read-only contract
+      final reconcileCall = mockBridge.invocationLog.lastWhere(
+        (entry) =>
+            entry['command'] == HostCommand.campus &&
+            entry['params']['method'] == 'forum.reconcile',
+      );
+      expect(reconcileCall['params']['params']['action'], 'publish');
+      expect(reconcileCall['params']['params']['division_id'], 1);
+      expect(reconcileCall['params']['params']['content'], '可能超时的帖子');
 
-    // 1. User taps "核对结果" when reconciliation is ambiguous/unresolved
-    await tester.tap(find.text('核对结果'));
-    await tester.pumpAndSettle();
+      // Dialog must NOT be closed, still pending, never automatically re-published!
+      expect(find.text('发帖确认与预览'), findsOneWidget);
+      expect(find.textContaining('状态仍为待核对'), findsOneWidget);
 
-    // Verify reconcile was invoked with read-only contract
-    final reconcileCall = mockBridge.invocationLog.lastWhere(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'forum.reconcile',
-    );
-    expect(reconcileCall['params']['params']['action'], 'publish');
-    expect(reconcileCall['params']['params']['division_id'], 1);
-    expect(reconcileCall['params']['params']['content'], '可能超时的帖子');
+      // Ensure no automatic second forum.publish call occurred!
+      final publishCalls = mockBridge.invocationLog
+          .where(
+            (entry) =>
+                entry['command'] == HostCommand.campus &&
+                entry['params']['method'] == 'forum.publish',
+          )
+          .toList();
+      expect(publishCalls.length, 1);
 
-    // Dialog must NOT be closed, still pending, never automatically re-published!
-    expect(find.text('发帖确认与预览'), findsOneWidget);
-    expect(find.textContaining('状态仍为待核对'), findsOneWidget);
+      // 2. Now simulate reconciliation succeeding with a definitive match
+      mockBridge.reconcileOutcome = 'success';
+      await tester.tap(find.text('核对结果'));
+      await tester.pumpAndSettle();
 
-    // Ensure no automatic second forum.publish call occurred!
-    final publishCalls = mockBridge.invocationLog.where(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'forum.publish',
-    ).toList();
-    expect(publishCalls.length, 1);
+      // Authorizes showing published and closes dialog
+      expect(find.text('发帖确认与预览'), findsNothing);
+    },
+  );
 
-    // 2. Now simulate reconciliation succeeding with a definitive match
-    mockBridge.reconcileOutcome = 'success';
-    await tester.tap(find.text('核对结果'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'Reply: uncertain outcome reconciled with definitive match authorizes published',
+    (tester) async {
+      mockBridge.simulateUncertainPublish = true;
+      mockBridge.reconcileOutcome = 'success';
 
-    // Authorizes showing published and closes dialog
-    expect(find.text('发帖确认与预览'), findsNothing);
-  });
+      await tester.pumpWidget(
+        _wrapTestWidget(HoleDetailPage(controller: controller, holeId: 101)),
+      );
+      await tester.pumpAndSettle();
 
-  testWidgets('Reply: uncertain outcome reconciled with definitive match authorizes published', (tester) async {
-    mockBridge.simulateUncertainPublish = true;
-    mockBridge.reconcileOutcome = 'success';
+      // Tap "回复" FAB
+      await tester.tap(find.text('回复'));
+      await tester.pumpAndSettle();
 
-    await tester.pumpWidget(
-      _wrapTestWidget(
-        HoleDetailPage(controller: controller, holeId: 101),
-      ),
-    );
-    await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '赞同洞主的观点！');
+      await tester.tap(find.text('预览并确认'));
+      await tester.pumpAndSettle();
 
-    // Tap "回复" FAB
-    await tester.tap(find.text('回复'));
-    await tester.pumpAndSettle();
+      // Confirm reply -> throws NeedsReconciliation
+      await tester.tap(find.text('确认回复'));
+      await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField), '赞同洞主的观点！');
-    await tester.tap(find.text('预览并确认'));
-    await tester.pumpAndSettle();
+      expect(find.text('核对结果'), findsOneWidget);
 
-    // Confirm reply -> throws NeedsReconciliation
-    await tester.tap(find.text('确认回复'));
-    await tester.pumpAndSettle();
+      // Tap "核对结果"
+      await tester.tap(find.text('核对结果'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('核对结果'), findsOneWidget);
+      final reconcileCall = mockBridge.invocationLog.lastWhere(
+        (entry) =>
+            entry['command'] == HostCommand.campus &&
+            entry['params']['method'] == 'forum.reconcile',
+      );
+      expect(reconcileCall['params']['params']['action'], 'reply');
+      expect(reconcileCall['params']['params']['hole_id'], 101);
+      expect(reconcileCall['params']['params']['content'], '赞同洞主的观点！');
 
-    // Tap "核对结果"
-    await tester.tap(find.text('核对结果'));
-    await tester.pumpAndSettle();
+      // Authorizes success and closes dialog
+      expect(find.text('回复确认与预览'), findsNothing);
+    },
+  );
 
-    final reconcileCall = mockBridge.invocationLog.lastWhere(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'forum.reconcile',
-    );
-    expect(reconcileCall['params']['params']['action'], 'reply');
-    expect(reconcileCall['params']['params']['hole_id'], 101);
-    expect(reconcileCall['params']['params']['content'], '赞同洞主的观点！');
+  testWidgets(
+    'Authentication: prompts campus.login when AuthenticationRequired occurs',
+    (tester) async {
+      mockBridge.simulateAuthRequired = true;
 
-    // Authorizes success and closes dialog
-    expect(find.text('回复确认与预览'), findsNothing);
-  });
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
 
-  testWidgets('Authentication: prompts campus.login when AuthenticationRequired occurs', (tester) async {
-    mockBridge.simulateAuthRequired = true;
+      expect(find.text('需要登录论坛服务'), findsOneWidget);
+      expect(find.text('登录论坛'), findsOneWidget);
 
-    await tester.pumpWidget(_wrapTestWidget(ForumPage(controller: controller)));
-    await tester.pumpAndSettle();
+      // Tap "登录论坛"
+      await tester.tap(find.text('登录论坛'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('需要登录论坛服务'), findsOneWidget);
-    expect(find.text('登录论坛'), findsOneWidget);
-
-    // Tap "登录论坛"
-    await tester.tap(find.text('登录论坛'));
-    await tester.pumpAndSettle();
-
-    final loginCall = mockBridge.invocationLog.lastWhere(
-      (entry) =>
-          entry['command'] == HostCommand.campus &&
-          entry['params']['method'] == 'campus.login',
-    );
-    expect(loginCall['params']['params']['service'], 'forum');
-  });
+      final loginCall = mockBridge.invocationLog.lastWhere(
+        (entry) =>
+            entry['command'] == HostCommand.campus &&
+            entry['params']['method'] == 'campus.login',
+      );
+      expect(loginCall['params']['params']['service'], 'forum');
+    },
+  );
 }

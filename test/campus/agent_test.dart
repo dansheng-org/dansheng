@@ -16,7 +16,8 @@ class AgentMockBridge implements DanshengBridge {
   String? accountId = 'user_001';
   bool mcpRunning = false;
   int mcpPort = 19888;
-  String mcpToken = 'mock_crypto_token_64_bytes_hex_value_for_testing_0123456789abcdef';
+  String mcpToken =
+      'mock_crypto_token_64_bytes_hex_value_for_testing_0123456789abcdef';
   final List<Map<String, dynamic>> campusInvocations = [];
 
   @override
@@ -95,13 +96,13 @@ class AgentMockBridge implements DanshengBridge {
             'port': mcpRunning ? mcpPort : 0,
             'account_id': accountId,
             'url': mcpRunning ? 'http://127.0.0.1:$mcpPort/mcp' : '',
-            'adb_command': mcpRunning ? 'adb forward tcp:$mcpPort tcp:$mcpPort' : '',
+            'adb_command': mcpRunning
+                ? 'adb forward tcp:$mcpPort tcp:$mcpPort'
+                : '',
           });
         } else if (method == 'agent.mcp.token') {
           // Token is returned ONLY on explicit copy command
-          return jsonEncode({
-            'token': mcpToken,
-          });
+          return jsonEncode({'token': mcpToken});
         }
         return jsonEncode({'status': 'ok'});
 
@@ -122,7 +123,10 @@ class AgentMockBridge implements DanshengBridge {
         return jsonEncode([]);
 
       case HostCommand.permissions:
-        return jsonEncode({'exact_available': false, 'notifications_available': false});
+        return jsonEncode({
+          'exact_available': false,
+          'notifications_available': false,
+        });
 
       case HostCommand.balance:
         return jsonEncode({'balance': '68.50', 'currency': 'CNY'});
@@ -162,44 +166,50 @@ void main() {
       expect(lastCall['params']['limit'], 10);
     });
 
-    test('ask sends agent.ask and parses answer with evidence sources', () async {
-      final answer = await service.ask('明天有什么课');
-      expect(answer.question, '明天有什么课');
-      expect(answer.accountId, 'user_001');
-      expect(answer.evidenceCount, 1);
-      expect(answer.sources.length, 1);
-      expect(answer.sources[0].title, '计算机体系结构');
-      expect(answer.sources[0].label, contains('official.fudan-courses'));
-      expect(answer.sources[0].snippet, contains('Z2201'));
+    test(
+      'ask sends agent.ask and parses answer with evidence sources',
+      () async {
+        final answer = await service.ask('明天有什么课');
+        expect(answer.question, '明天有什么课');
+        expect(answer.accountId, 'user_001');
+        expect(answer.evidenceCount, 1);
+        expect(answer.sources.length, 1);
+        expect(answer.sources[0].title, '计算机体系结构');
+        expect(answer.sources[0].label, contains('official.fudan-courses'));
+        expect(answer.sources[0].snippet, contains('Z2201'));
 
-      final lastCall = bridge.campusInvocations.last;
-      expect(lastCall['method'], 'agent.ask');
-      expect(lastCall['params']['question'], '明天有什么课');
-    });
+        final lastCall = bridge.campusInvocations.last;
+        expect(lastCall['method'], 'agent.ask');
+        expect(lastCall['params']['question'], '明天有什么课');
+      },
+    );
 
-    test('MCP lifecycle start, status, explicit token copy, and stop', () async {
-      final initial = await service.getMcpStatus();
-      expect(initial.running, false);
-      expect(initial.token, isNull);
+    test(
+      'MCP lifecycle start, status, explicit token copy, and stop',
+      () async {
+        final initial = await service.getMcpStatus();
+        expect(initial.running, false);
+        expect(initial.token, isNull);
 
-      final started = await service.startMcp(port: 19888);
-      expect(started.running, true);
-      expect(started.port, 19888);
-      expect(started.token, isNull); // Token not returned on start
-      expect(started.url, 'http://127.0.0.1:19888/mcp');
-      expect(started.adbCommand, 'adb forward tcp:19888 tcp:19888');
+        final started = await service.startMcp(port: 19888);
+        expect(started.running, true);
+        expect(started.port, 19888);
+        expect(started.token, isNull); // Token not returned on start
+        expect(started.url, 'http://127.0.0.1:19888/mcp');
+        expect(started.adbCommand, 'adb forward tcp:19888 tcp:19888');
 
-      final current = await service.getMcpStatus();
-      expect(current.running, true);
-      expect(current.token, isNull); // Token not returned on status
+        final current = await service.getMcpStatus();
+        expect(current.running, true);
+        expect(current.token, isNull); // Token not returned on status
 
-      // Explicit copy command retrieves the token
-      final token = await service.getMcpToken();
-      expect(token, bridge.mcpToken);
+        // Explicit copy command retrieves the token
+        final token = await service.getMcpToken();
+        expect(token, bridge.mcpToken);
 
-      final stopped = await service.stopMcp();
-      expect(stopped.running, false);
-    });
+        final stopped = await service.stopMcp();
+        expect(stopped.running, false);
+      },
+    );
   });
 
   group('CampusAgent AgentPage Widget Tests', () {
@@ -214,126 +224,132 @@ void main() {
       await controller.initialize();
     });
 
-    testWidgets('Initial view renders concise UI, account bar, and MCP is OFF by default', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: AgentPage(controller: controller),
-        ),
-      );
-      await tester.pumpAndSettle();
+    testWidgets(
+      'Initial view renders concise UI, account bar, and MCP is OFF by default',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(home: AgentPage(controller: controller)),
+        );
+        await tester.pumpAndSettle();
 
-      expect(find.text('校园助手'), findsOneWidget);
-      expect(find.text('当前账号：user_001'), findsOneWidget);
-      expect(find.text('外部 AI 助手连接'), findsOneWidget);
-      expect(find.text('已停止 (未监听端口)'), findsOneWidget);
+        expect(find.text('校园助手'), findsOneWidget);
+        expect(find.text('当前账号：user_001'), findsOneWidget);
+        expect(find.text('外部 AI 助手连接'), findsOneWidget);
+        expect(find.text('已停止 (未监听端口)'), findsOneWidget);
 
-      // Verify no plain tokens exist in widget tree
-      expect(find.text(bridge.mcpToken), findsNothing);
+        // Verify no plain tokens exist in widget tree
+        expect(find.text(bridge.mcpToken), findsNothing);
 
-      // Mode segments
-      expect(find.text('智能问答'), findsOneWidget);
-      expect(find.text('数据检索'), findsOneWidget);
-    });
+        // Mode segments
+        expect(find.text('智能问答'), findsOneWidget);
+        expect(find.text('数据检索'), findsOneWidget);
+      },
+    );
 
-    testWidgets('Toggling MCP starts loopback server, masks token, and enables explicit copy', (tester) async {
-      String? copiedClipboardText;
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        (MethodCall methodCall) async {
-          if (methodCall.method == 'Clipboard.setData') {
-            copiedClipboardText = (methodCall.arguments as Map)['text']?.toString();
+    testWidgets(
+      'Toggling MCP starts loopback server, masks token, and enables explicit copy',
+      (tester) async {
+        String? copiedClipboardText;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (MethodCall methodCall) async {
+            if (methodCall.method == 'Clipboard.setData') {
+              copiedClipboardText = (methodCall.arguments as Map)['text']
+                  ?.toString();
+              return null;
+            }
             return null;
-          }
-          return null;
-        },
-      );
+          },
+        );
 
+        await tester.pumpWidget(
+          MaterialApp(home: AgentPage(controller: controller)),
+        );
+        await tester.pumpAndSettle();
+
+        // Tap Switch to enable MCP
+        final switchFinder = find.byType(Switch);
+        expect(switchFinder, findsOneWidget);
+        await tester.tap(switchFinder);
+        await tester.pumpAndSettle();
+
+        // Verify MCP running status
+        expect(find.text('服务已就绪 (端口: 19888)'), findsOneWidget);
+        expect(find.text('http://127.0.0.1:19888/mcp'), findsOneWidget);
+
+        // Verify token is masked on screen
+        expect(find.text('••••••••••••••••••••••••'), findsOneWidget);
+        expect(find.text(bridge.mcpToken), findsNothing);
+
+        // Tap copy token (triggers explicit agent.mcp.token)
+        final copyTokenBtn = find.widgetWithText(OutlinedButton, '复制连接凭据');
+        expect(copyTokenBtn, findsOneWidget);
+        await tester.tap(copyTokenBtn);
+        await tester.pumpAndSettle();
+
+        expect(copiedClipboardText, bridge.mcpToken);
+        expect(find.text('已复制连接凭据，请在电脑端外部工具中配置。'), findsOneWidget);
+
+        // Verify agent.mcp.token was explicitly called
+        final tokenCall = bridge.campusInvocations.firstWhere(
+          (c) => c['method'] == 'agent.mcp.token',
+        );
+        expect(tokenCall, isNotNull);
+
+        // Tap copy ADB command
+        final copyAdbBtn = find.widgetWithText(OutlinedButton, '复制电脑映射命令');
+        expect(copyAdbBtn, findsOneWidget);
+        await tester.tap(copyAdbBtn);
+        await tester.pumpAndSettle();
+
+        expect(copiedClipboardText, 'adb forward tcp:19888 tcp:19888');
+
+        // Tap Switch again to stop MCP
+        await tester.tap(switchFinder);
+        await tester.pumpAndSettle();
+
+        expect(find.text('已停止 (未监听端口)'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Local Ask query renders evidence-based answer with readable source excerpt',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(home: AgentPage(controller: controller)),
+        );
+        await tester.pumpAndSettle();
+
+        // Enter question
+        final inputFinder = find.byType(TextField);
+        await tester.enterText(inputFinder, '明天有什么课');
+        await tester.pumpAndSettle();
+
+        // Tap submit
+        final askButton = find.widgetWithText(FilledButton, '向助手提问');
+        await tester.tap(askButton);
+        await tester.pumpAndSettle();
+
+        // Answer view
+        expect(find.text('本地证据回答'), findsOneWidget);
+        expect(find.text('非大模型推测'), findsOneWidget);
+        expect(find.textContaining('计算机体系结构'), findsWidgets);
+
+        // Labeled source card with readable excerpt
+        expect(find.text('已引用的本地证据来源 (1)'), findsOneWidget);
+        expect(find.text('[来源 1]'), findsOneWidget);
+        expect(find.text('official.fudan-courses'), findsOneWidget);
+        expect(find.text('课程'), findsOneWidget);
+        expect(find.text('可读摘录：'), findsOneWidget);
+        expect(find.text('周一 3-5 节 Z2201 教室'), findsOneWidget);
+      },
+    );
+
+    testWidgets('Local Search mode renders typed hit cards with snippets', (
+      tester,
+    ) async {
       await tester.pumpWidget(
-        MaterialApp(
-          home: AgentPage(controller: controller),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      // Tap Switch to enable MCP
-      final switchFinder = find.byType(Switch);
-      expect(switchFinder, findsOneWidget);
-      await tester.tap(switchFinder);
-      await tester.pumpAndSettle();
-
-      // Verify MCP running status
-      expect(find.text('服务已就绪 (端口: 19888)'), findsOneWidget);
-      expect(find.text('http://127.0.0.1:19888/mcp'), findsOneWidget);
-
-      // Verify token is masked on screen
-      expect(find.text('••••••••••••••••••••••••'), findsOneWidget);
-      expect(find.text(bridge.mcpToken), findsNothing);
-
-      // Tap copy token (triggers explicit agent.mcp.token)
-      final copyTokenBtn = find.widgetWithText(OutlinedButton, '复制连接凭据');
-      expect(copyTokenBtn, findsOneWidget);
-      await tester.tap(copyTokenBtn);
-      await tester.pumpAndSettle();
-
-      expect(copiedClipboardText, bridge.mcpToken);
-      expect(find.text('已复制连接凭据，请在电脑端外部工具中配置。'), findsOneWidget);
-
-      // Verify agent.mcp.token was explicitly called
-      final tokenCall = bridge.campusInvocations.firstWhere((c) => c['method'] == 'agent.mcp.token');
-      expect(tokenCall, isNotNull);
-
-      // Tap copy ADB command
-      final copyAdbBtn = find.widgetWithText(OutlinedButton, '复制电脑映射命令');
-      expect(copyAdbBtn, findsOneWidget);
-      await tester.tap(copyAdbBtn);
-      await tester.pumpAndSettle();
-
-      expect(copiedClipboardText, 'adb forward tcp:19888 tcp:19888');
-
-      // Tap Switch again to stop MCP
-      await tester.tap(switchFinder);
-      await tester.pumpAndSettle();
-
-      expect(find.text('已停止 (未监听端口)'), findsOneWidget);
-    });
-
-    testWidgets('Local Ask query renders evidence-based answer with readable source excerpt', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: AgentPage(controller: controller),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      // Enter question
-      final inputFinder = find.byType(TextField);
-      await tester.enterText(inputFinder, '明天有什么课');
-      await tester.pumpAndSettle();
-
-      // Tap submit
-      final askButton = find.widgetWithText(FilledButton, '向助手提问');
-      await tester.tap(askButton);
-      await tester.pumpAndSettle();
-
-      // Answer view
-      expect(find.text('本地证据回答'), findsOneWidget);
-      expect(find.text('非大模型推测'), findsOneWidget);
-      expect(find.textContaining('计算机体系结构'), findsWidgets);
-
-      // Labeled source card with readable excerpt
-      expect(find.text('已引用的本地证据来源 (1)'), findsOneWidget);
-      expect(find.text('[来源 1]'), findsOneWidget);
-      expect(find.text('official.fudan-courses'), findsOneWidget);
-      expect(find.text('课程'), findsOneWidget);
-      expect(find.text('可读摘录：'), findsOneWidget);
-      expect(find.text('周一 3-5 节 Z2201 教室'), findsOneWidget);
-    });
-
-    testWidgets('Local Search mode renders typed hit cards with snippets', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: AgentPage(controller: controller),
-        ),
+        MaterialApp(home: AgentPage(controller: controller)),
       );
       await tester.pumpAndSettle();
 
