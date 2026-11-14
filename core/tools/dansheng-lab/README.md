@@ -4,8 +4,7 @@
 
 ## 启动与停止
 
-先通过工作区管理器进入已登记的 `D:\Worktrees\<任务>\core`，初始化独立依赖缓存，
-再在项目根使用 PowerShell 7：
+从 monorepo 根执行 `. ./scripts/Enter-Dansheng.ps1`，再 `Set-Location core`。使用任务独立 runtime；下面命令在 Core 模块目录执行（PowerShell 7）：
 
 ```powershell
 ./scripts/start-lab.ps1 -Port 0

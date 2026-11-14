@@ -7,7 +7,11 @@ function Get-DsPortableToolchain {
     param([Parameter(Mandatory)][string]$CoreRepository, [string]$ToolchainRoot, [switch]$Require)
     $primary = Get-DsRepository $CoreRepository
     if (-not $ToolchainRoot) { $ToolchainRoot = $env:DANSHENG_TOOLCHAIN_ROOT }
-    if (-not $ToolchainRoot) { $ToolchainRoot = Join-Path (Split-Path -Parent $primary.common_dir) '.local/toolchain' }
+    if (-not $ToolchainRoot) {
+        $primaryRoot=Split-Path -Parent $primary.common_dir
+        $moduleTools=Join-Path $primaryRoot 'core/.local/toolchain'
+        $ToolchainRoot=if((Test-Path -LiteralPath (Join-Path $primaryRoot 'core/Cargo.toml')) -and (Test-Path -LiteralPath $moduleTools -PathType Container)){$moduleTools}else{Join-Path $primaryRoot '.local/toolchain'}
+    }
     $root = Get-DsPath $ToolchainRoot
     $environment = @{}
     if (-not $IsWindows) {
@@ -53,10 +57,12 @@ function Get-DsRuntimeEnvironment {
         [switch]$RequireToolchain
     )
     $runtime = Get-DsPath $RuntimeRoot
-    $core = Get-DsRepository $CoreRoot
+    $core = Get-DsNativeRepository -Path $CoreRoot -Component core
     $primary = Get-DsRepository $CoreRepository
     if (-not $core.common_dir.Equals($primary.common_dir, [StringComparison]::OrdinalIgnoreCase)) { throw 'Task Core source belongs to another repository.' }
-    if ((Test-DsWithin $core.path $runtime) -or (Test-DsWithin (Split-Path -Parent $primary.common_dir) $runtime)) { throw 'Task runtime must stay outside source directories.' }
+    foreach($sourceBoundary in @($core.checkout_root,(Split-Path -Parent $primary.common_dir))){
+        if((Test-DsWithin $sourceBoundary $runtime) -or (Test-DsWithin $runtime $sourceBoundary)){throw 'Task runtime must stay outside source directories and cannot contain a checkout.'}
+    }
     if (-not $ArtifactDirectory) { $ArtifactDirectory = Join-Path $runtime 'native-sdk' }
     $tools = Get-DsPath $CoreToolsRoot
     if (-not (Test-Path -LiteralPath (Join-Path $tools 'Test-DanshengCoreDependency.ps1') -PathType Leaf)) { throw 'Select the authoritative Core workspace tools directory.' }

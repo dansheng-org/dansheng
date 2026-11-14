@@ -43,7 +43,10 @@ try{
     & git --no-optional-locks -C $syntheticRepo worktree add -b chore/DS-900-fixture $syntheticTask main 2>&1 | Out-Null
     if($LASTEXITCODE-ne0){throw 'Cannot register synthetic App worktree'}
     Assert-Rejected {Assert-DanshengTaskArtifactWrite -AppRoot $syntheticTask -CoreRoot (Join-Path $fixture 'dansheng') -ArtifactDirectory (Join-Path $syntheticRepo '.local/native')} 'task worktree cannot overwrite original App artifacts'
-    $defaultRuntime=Join-Path $fixture 'dansheng-workspace/local/runtime/manual-app'
+    $defaultRuntime=Resolve-DanshengAppRuntimeRoot -AppRoot $app
+    $runtimeBase=if($IsWindows){[IO.Path]::GetFullPath('D:/DevCache/dansheng/runtime')}else{Join-Path ([IO.Path]::GetTempPath()) 'dansheng-runtime'}
+    if((Split-Path -Parent $defaultRuntime)-cne$runtimeBase-or
+       (Split-Path -Leaf $defaultRuntime)-notmatch'^[0-9a-f]{12}$'){throw 'Default runtime must match the external checkout entrypoint layout.'}
     Assert-Equal (Resolve-DanshengCoreArtifactDirectory -AppRoot $app) (Join-Path $defaultRuntime 'native-sdk') 'SDK is outside the source worktree'
     $env:DANSHENG_CORE_SDK_DIR='sdk-input'
     Assert-Equal (Resolve-DanshengCoreArtifactDirectory -AppRoot $app) (Join-Path $app 'sdk-input') 'relative SDK environment'

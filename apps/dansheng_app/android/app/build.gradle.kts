@@ -18,6 +18,10 @@ fun appPath(value: String): File = File(value).let {
     (if (it.isAbsolute) it else File(danshengAppRoot, value)).canonicalFile
 }
 val danshengDefaultCoreCandidates = buildList {
+    if (danshengAppRoot.name.equals("dansheng_app", ignoreCase = true) &&
+        danshengAppRoot.parentFile.name.equals("apps", ignoreCase = true)) {
+        add(File(danshengAppRoot.parentFile.parentFile, "core"))
+    }
     if (danshengAppRoot.name.equals("app", ignoreCase = true)) add(File(danshengAppRoot.parentFile, "core"))
     add(File(danshengAppRoot.parentFile, "dansheng-core"))
     add(File(danshengAppRoot.parentFile, "dansheng"))

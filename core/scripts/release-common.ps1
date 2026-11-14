@@ -1,4 +1,5 @@
 . "$PSScriptRoot/runtime-common.ps1"
+Import-Module (Join-Path $PSScriptRoot '../tools/workspace/Dansheng.Workspace.psm1') -DisableNameChecking
 
 function Get-DanshengNativePrefixFlags {
     param([Parameter(Mandatory)][string]$TargetDirectory)
@@ -11,22 +12,28 @@ function Get-DanshengNativePrefixFlags {
 
 function Get-DanshengBuildSource {
     param([Parameter(Mandatory)][string]$Root)
-    $ReleaseNames=@(& git -C $Root -c core.quotePath=false ls-files --cached --others --exclude-standard)
-    if($LASTEXITCODE -ne 0){throw 'Cannot enumerate release source inputs'}
+    $ReleaseRepository=Get-DsNativeRepository -Path $Root -Component core
+    $Root=$ReleaseRepository.path
+    # v1 hashes raw file bytes and ordinal, Core-relative names. Relocation does
+    # not change the digest; missing/unknown versions must never change its meaning.
+    $ReleaseNames=@((Invoke-DsGit $Root @('-c','core.quotePath=false','ls-files','--cached','--others','--exclude-standard','-z','--','.')).text -split "`0" | Where-Object {$_})
     $ReleaseNames=@($ReleaseNames | Where-Object {
         $_ -in @('Cargo.toml','Cargo.lock','rust-toolchain.toml','include/dansheng.h') -or
         $_ -match '^crates/[^/]+/Cargo\.toml$' -or
         ($_ -match '^crates/[^/]+/src/.*\.rs$' -and $_ -notmatch '/test-harness/')
     } | Select-Object -Unique)
+    foreach($ReleaseRequired in @('Cargo.toml','Cargo.lock','rust-toolchain.toml','include/dansheng.h')){
+        if($ReleaseRequired -cnotin $ReleaseNames){throw "Missing Core source identity input: $ReleaseRequired"}
+    }
     [Array]::Sort($ReleaseNames,[StringComparer]::Ordinal)
     $ReleaseFiles=@(foreach($ReleaseName in $ReleaseNames){
-        $ReleaseFile=Get-Item -LiteralPath (Join-Path $Root $ReleaseName)
+        $ReleaseFile=Get-Item -LiteralPath (Get-DsPath (Join-Path $Root $ReleaseName))
         if($ReleaseFile.Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Linked release source refused: $ReleaseName"}
         [ordered]@{path=$ReleaseName;sha256=(Get-FileHash -LiteralPath $ReleaseFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
     })
     $ReleaseText=(($ReleaseFiles | ForEach-Object {"$($_.sha256)  $($_.path)"}) -join "`n")+"`n"
     $ReleaseDigest=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($ReleaseText))).ToLowerInvariant()
-    [pscustomobject]@{sha256=$ReleaseDigest;files=$ReleaseFiles;manifest=$ReleaseText}
+    [pscustomobject]@{source_hash_format='dansheng-core-source-v1';source_subdirectory=if($ReleaseRepository.module){'core'}else{'.'};sha256=$ReleaseDigest;files=$ReleaseFiles;manifest=$ReleaseText}
 }
 
 function Get-DanshengBinaryKind {
@@ -69,6 +76,7 @@ function Write-DanshengBuildReceipt {
     $ReleaseNativePrefix=if($ReleaseNativeFlags -ceq (Get-DanshengNativePrefixFlags -TargetDirectory $ReleaseTargetPath) -and $env:CC_SHELL_ESCAPED_FLAGS -ceq '1'){'/dansheng-build'}else{$null}
     $ReleaseReceipt=[ordered]@{
         format='dansheng-build-v1';target=$Target;source_sha256=$Before.sha256
+        source_hash_format=$Before.source_hash_format;source_subdirectory=$Before.source_subdirectory
         source_files=$Before.files;artifact_path=[IO.Path]::GetFullPath($Binary)
         artifact_sha256=(Get-FileHash -LiteralPath $Binary -Algorithm SHA256).Hash.ToLowerInvariant()
         artifact_bytes=(Get-Item -LiteralPath $Binary).Length;features=$Features
@@ -87,6 +95,7 @@ function Assert-DanshengBuildReceipt {
     $Receipt=Get-DanshengRuntimeOutput -RuntimeRoot $ReleaseRuntime -Path $Receipt
     $ReleaseProof=Get-Content -Raw -LiteralPath $Receipt | ConvertFrom-Json
     $ReleaseCurrent=Get-DanshengBuildSource -Root $Root
+    if((Get-DsSourceHashFormat $ReleaseProof) -cne $ReleaseCurrent.source_hash_format){throw 'Build receipt source hash format differs.'}
     if($ReleaseProof.format -cne 'dansheng-build-v1' -or $ReleaseProof.target -cne $Target -or $ReleaseProof.source_sha256 -cne $ReleaseCurrent.sha256){throw "Build receipt does not match current source or target: $Target"}
     if($ReleaseProof.rustc -notmatch '^rustc 1\.99\.1 '){throw 'Release receipt does not use the pinned Rust toolchain'}
     if($ReleaseProof.source_date_epoch -cne '0' -or $ReleaseProof.native_source_prefix -cne '/dansheng-build'){throw 'Release receipt lacks deterministic native compiler settings'}

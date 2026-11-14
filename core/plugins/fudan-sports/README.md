@@ -146,9 +146,9 @@ The plugin can be packed into an independent, deterministic `.dspack` ZIP archiv
 ### Deterministic Pack Command
 
 ```powershell
-node plugins/fudan-sports/pack.mjs [outputPath]
+node plugins/fudan-sports/pack.mjs "$env:DANSHENG_TASK_RUNTIME/artifacts/official.fudan-sports-$([guid]::NewGuid().ToString('N')).dspack"
 ```
 
-- **Default output:** `<repo-root>/.local/plugins/official.fudan-sports-0.2.0.dspack` (outside tracked files).
+- **Task output:** run from `core/` after the root Enter script, always pass a fresh explicit runtime artifact path. The historical packer fallback writes `.local/plugins` and can replace a same-name file; do not omit the output path in task work.
 - **Archive contents:** Flat manifest, three QuickJS modules, a declarative host policy, platform metadata, types, README and attribution. The Node packer and test-side reference evaluator are not shipped.
 - **Determinism:** Fixed file timestamps (2026-01-01), lexicographically sorted entries, standard deflate compression, zero external runtime or build dependencies. Repeated runs yield identical SHA-256 hashes.

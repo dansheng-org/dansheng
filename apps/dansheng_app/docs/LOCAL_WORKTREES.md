@@ -1,49 +1,15 @@
 # 本地工作树与私有文件
 
-产品源码与维护者的本机 Agent 指令、凭据分离，不需要另建 GitHub 配置仓库。
-仓库可见性由维护者另行管理；本地共享设置与自动发布流程不改变 GitHub 仓库可见性。
+Dansheng 主仓库为 D:/Code/dansheng，所有新任务使用同一个 monorepo 的 Git worktree；Orca 基目录设为 D:/worktree。既有旧布局工作树保留作历史恢复，不自动改写。
 
-## 本机布局
+公开规则在根 docs/AGENT_POLICY.md、docs/DEVELOPMENT_WORKFLOW.md 和 docs/CORE_COMPATIBILITY.md 中版本化。根 scripts/Enter-Dansheng.ps1 在缺少入口时生成简短、本地的 AGENTS.md 与 CLAUDE.md；不覆盖已有本机指令。Agent 启动时应先读这些文档并自动进入环境。
 
-主目录为 `D:/Code/dansheng-app`。Orca 的 App 仓库工作树基目录设为 `D:/worktree`，
-只影响以后由 Orca 创建的工作树；既有工作树与其他工具的默认目录不会因此迁移。
+本机 AGENTS.md、CLAUDE.md、credentials.txt 由 .gitignore 排除，不应 force-add。旧提交中可能仍存在历史指令，迁移不重写旧历史。原个人指令与凭据保留在迁移备份，不进入产品源码、CI、SDK 或 APK。
 
-Orca Repository Settings 的 Worktree Shared Paths 包含：
+新仓库不需要共享 credentials.txt。只有具体任务确有授权时才从原受保护位置访问凭据；共享路径不等于登录授权。Orca 可选共享无秘密的本机 Agent 入口，设置变更后必须检查实际链接目标，不能只凭 UI 配置宣称已生效。运行中的 Agent 不保证自动重载指令。
 
-```text
-AGENTS.md
-CLAUDE.md
-credentials.txt
-```
+Windows 符号链接需要开发人员模式或相应权限；不为普通环境准备自动开启设备门户、发现服务或提权。已经存在的本机文件不能被共享链接直接覆盖。
 
-`AGENTS.md` 是主要指令源，`CLAUDE.md` 只包含 `@AGENTS.md`。凭据不进入文档、日志、
-SDK、APK 或发布附件；共享文件不构成登录或服务操作授权。
+构建资源遵循根入口的 owner.json：当前 worktree 独占外部 runtime，不能放在任何注册的源工作树内，也不能复用其他任务的签名、profile 或数据库。Git worktree 隔离不等于运行时隔离。
 
-Git common directory 下的 `info/exclude` 使用根路径规则忽略这些文件，以及个人指令覆盖。
-该排除文件由同一仓库的 worktree 共用，不会推送到远程。仓库 `.gitignore` 则负责可公开的
-缓存、构建产物和临时状态分类。
-
-## Windows 链接权限
-
-Windows 上的文件符号链接需要开发人员模式或创建时的管理员权限。设置 Shared Paths
-不会自动授予系统权限。维护者可在 Windows 设置搜索“开发人员模式”后手动启用。
-远程设备门户和设备发现不是本地文件共享的前提。
-
-Windows/Linux 的符号链接读取相同源文件；普通编辑后的内容由各工作树共同看到。
-已运行 Agent 的上下文不保证即时更新，应新建会话或明确重新加载指令。
-
-## 现有工作树与版本接收
-
-已存在的同名文件必须先比较和备份，再从索引停止跟踪并建立链接。不要直接覆盖某个
-工作树特有的指令或凭据。`git rm --cached` 只准备停止跟踪的暂存变更，本地文件保留；
-该删除仍需通过正常提交与接收流程进入各分支。忽略规则对已跟踪文件无效。
-
-旧提交仍含有旧指令文件。基于旧提交创建工作树时，Git 可能再次检出它们，阻止共享路径
-建立；应先接收停止跟踪的变更，或在该工作树明确处理索引与备份。停止跟踪并不会删除
-远程历史，本轮不重写任何分支或历史。
-
-检查使用 `git ls-files -- AGENTS.md CLAUDE.md credentials.txt`、`git check-ignore -v -- …`
-和文件的 LinkType/Target。不能只看设置已保存就宣称实际链接成功。
-
-新克隆不会携带 `info/exclude`、Orca 设置或本机文件；需由维护者重新提供本地配置。
-Core 仓库的指令与凭据不通过 App 的共享路径配置混用。
+旧 Orca 会话/工作树登记作为历史记录保留；新功能使用新注册的 Dansheng 主目录和已合并 monorepo main。维护者尚未执行的 UI 设置或远程配置不得写成已验证事实。

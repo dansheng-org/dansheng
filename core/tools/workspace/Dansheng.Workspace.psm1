@@ -96,13 +96,62 @@ function Get-DsRepository([string]$Path) {
     $root=Get-DsPath $Path
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "Repository missing: $root" }
     $top=Get-DsPath (Invoke-DsGit $root @('rev-parse','--show-toplevel')).text
-    if (-not $top.Equals($root,(Get-DsComparison))) { throw 'Supply the actual repository/worktree root, not its parent or a subdirectory.' }
+    $module=$null
+    if (-not $top.Equals($root,(Get-DsComparison))) {
+        $relative=[IO.Path]::GetRelativePath($top,$root).Replace('\','/')
+        if ($relative -cnotin @('core','apps/dansheng_app')) { throw 'Supply the actual repository/worktree root or its exact core/ or apps/dansheng_app/ module, not an arbitrary subdirectory.' }
+        foreach($marker in @('core/Cargo.toml','apps/dansheng_app/pubspec.yaml')){
+            $markerPath=Get-DsPath (Join-Path $top $marker)
+            if(-not(Test-Path -LiteralPath $markerPath -PathType Leaf)){throw 'The checkout does not contain the complete core/ and apps/dansheng_app/ module layout.'}
+            $moduleTop=Get-DsPath (Invoke-DsGit (Split-Path -Parent $markerPath) @('rev-parse','--show-toplevel')).text
+            if(-not $moduleTop.Equals($top,(Get-DsComparison))){throw 'Both modules must belong to the same Git checkout; nested repositories are refused.'}
+        }
+        $registered=@((Invoke-DsGit $top @('worktree','list','--porcelain')).text -split "`n" | Where-Object {$_ -like 'worktree *'} | ForEach-Object {Get-DsPath $_.Substring(9).TrimEnd("`r")})
+        if(-not @($registered | Where-Object {$_.Equals($top,(Get-DsComparison))}).Count){throw 'Module root must belong to a Git-registered checkout.'}
+        $module=if($relative -ceq 'core'){'core'}else{'app'}
+    }
     $common=Get-DsPath (Invoke-DsGit $root @('rev-parse','--path-format=absolute','--git-common-dir')).text
     $head=Invoke-DsGit $root @('rev-parse','--verify','HEAD^{commit}') @(0,128)
     $branch=Invoke-DsGit $root @('symbolic-ref','--quiet','--short','HEAD') @(0,1)
-    [pscustomobject]@{path=$root;common_dir=$common;head=if ($head.exit_code -eq 0) {$head.text} else {$null};branch=if($branch.exit_code -eq 0){$branch.text}else{$null}}
+    [pscustomobject]@{path=$root;checkout_root=$top;module=$module;common_dir=$common;head=if ($head.exit_code -eq 0) {$head.text} else {$null};branch=if($branch.exit_code -eq 0){$branch.text}else{$null}}
+}
+function Get-DsNativeRepository {
+    param([string]$Path,[ValidateSet('core','app')][string]$Component)
+    $repo=Get-DsRepository $Path
+    if(($repo.module -and $repo.module -ne $Component) -or (-not $repo.module -and (Test-Path -LiteralPath (Join-Path $repo.path 'core/Cargo.toml')) -and (Test-Path -LiteralPath (Join-Path $repo.path 'apps/dansheng_app/pubspec.yaml')))){
+        throw "Select the exact $Component module directory, not another module or the monorepo root."
+    }
+    $repo
+}
+function Assert-DsNativePair {
+    param([object]$Core,[object]$App)
+    if($Core.module -or $App.module){
+        if($Core.module -ne 'core' -or $App.module -ne 'app' -or -not $Core.checkout_root.Equals($App.checkout_root,(Get-DsComparison)) -or -not $Core.common_dir.Equals($App.common_dir,(Get-DsComparison))){throw 'Native Core/App modules must belong to the same registered Git checkout, not different worktrees or repositories.'}
+    }elseif($Core.common_dir.Equals($App.common_dir,(Get-DsComparison))){throw 'Legacy Core/App must remain independent repositories.'}
+}
+function Get-DsSourceHashFormat([object]$Identity) {
+    $property=$Identity.PSObject.Properties['source_hash_format']
+    $format=if($property){$property.Value}else{'dansheng-core-source-v1'}
+    if($format -cne 'dansheng-core-source-v1'){throw 'Unsupported Core source_hash_format; use a matching producer and validator.'}
+    $format
+}
+function Assert-DsLegacyWorkspace([string]$Path) {
+    $root=Get-DsPath $Path
+    while(-not(Test-Path -LiteralPath $root -PathType Container)){
+        $root=[IO.Path]::GetDirectoryName($root)
+        if(-not $root){return}
+    }
+    if(Test-Path -LiteralPath $root -PathType Container){
+        $result=Invoke-DsGit $root @('rev-parse','--show-toplevel') @(0,128)
+        if($result.exit_code -eq 0){
+            $top=Get-DsPath $result.text
+            if((Test-Path -LiteralPath (Join-Path $top 'core/Cargo.toml')) -and (Test-Path -LiteralPath (Join-Path $top 'apps/dansheng_app/pubspec.yaml'))){throw 'The historical paired manager does not manage monorepos. Use the checkout root scripts/Enter-Dansheng.ps1.'}
+        }
+    }
 }
 function Get-DsLayout([string]$CoreRepo,[string]$AppRepo,[string]$WorkspaceRoot,[string]$WorktreeRoot) {
+    Assert-DsLegacyWorkspace $CoreRepo
+    Assert-DsLegacyWorkspace $AppRepo
     $core=Get-DsRepository $CoreRepo; $app=Get-DsRepository $AppRepo
     if ($core.common_dir.Equals($app.common_dir,(Get-DsComparison))) { throw 'Core and App must be TWO independent Git repositories.' }
     foreach($repo in @($core,$app)){
@@ -140,6 +189,7 @@ function Write-DsJson([string]$Path,[object]$Value,[switch]$ReplaceOwned) {
     [IO.File]::Move($temporary,$path,[bool]$ReplaceOwned)
 }
 function Read-DsTask([string]$WorkspaceRoot,[string]$TaskKey) {
+    Assert-DsLegacyWorkspace $WorkspaceRoot
     if ($TaskKey -cnotmatch '^DS-[0-9]{3,8}-[a-z0-9]+(?:-[a-z0-9]+)*$') { throw 'Invalid task key.' }
     $root=Get-DsPath $WorkspaceRoot
     $path=Get-DsPath (Join-Path $root "local/tasks/$TaskKey.json")
@@ -297,4 +347,4 @@ function Close-DsTask {
         throw
     } finally { $lock.Dispose() }
 }
-Export-ModuleMember -Function Get-DsPath,Test-DsWithin,Invoke-DsGit,Get-DsRepository,Get-DsLayout,Get-DsRecordedWorktreeRoot,Get-DsTaskKey,Read-DsTask,Get-DsTaskStatus,New-DsTask,Close-DsTask,Write-DsJson,Get-DsCoreResourcePaths,Get-DsAdapterSourceHash,Get-DsGitLocalEnvironmentNames,Clear-DsGitLocalEnvironment,Set-DsProcessEnvironmentValue,Invoke-DsWithCleanGitEnvironment
+Export-ModuleMember -Function Get-DsPath,Test-DsWithin,Invoke-DsGit,Get-DsRepository,Get-DsNativeRepository,Assert-DsNativePair,Get-DsSourceHashFormat,Assert-DsLegacyWorkspace,Get-DsLayout,Get-DsRecordedWorktreeRoot,Get-DsTaskKey,Read-DsTask,Get-DsTaskStatus,New-DsTask,Close-DsTask,Write-DsJson,Get-DsCoreResourcePaths,Get-DsAdapterSourceHash,Get-DsGitLocalEnvironmentNames,Clear-DsGitLocalEnvironment,Set-DsProcessEnvironmentValue,Invoke-DsWithCleanGitEnvironment

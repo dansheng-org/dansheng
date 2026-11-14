@@ -8,7 +8,8 @@ if(-not $ToolchainRoot -and -not(Test-Path -LiteralPath (Join-Path $DanshengTool
     if(Test-Path -LiteralPath $DanshengWorkspaceModule){
         Import-Module $DanshengWorkspaceModule -Force
         $DanshengPrimaryRoot=Split-Path -Parent (Get-DsRepository $DanshengRoot).common_dir
-        $DanshengTools=Join-Path $DanshengPrimaryRoot '.local/toolchain'
+        $DanshengPrimaryModuleTools=Join-Path $DanshengPrimaryRoot 'core/.local/toolchain'
+        $DanshengTools=if((Test-Path -LiteralPath (Join-Path $DanshengPrimaryRoot 'core/Cargo.toml')) -and (Test-Path -LiteralPath $DanshengPrimaryModuleTools -PathType Container)){$DanshengPrimaryModuleTools}else{Join-Path $DanshengPrimaryRoot '.local/toolchain'}
     }
 }
 if (Test-Path -LiteralPath (Join-Path $DanshengTools 'cargo\bin\cargo.exe')) {

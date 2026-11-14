@@ -4,11 +4,11 @@
 
 构建输入固定为 `Cargo.lock`、Rust 1.99.1、项目的 GNU Windows 工具链和 Android NDK 30.0.16138531。以下脚本只修改当前进程的构建环境，不改用户或系统环境变量。
 
-活动源码来自 `D:/Worktrees/<任务>/core`，主库是 `D:/Code/dansheng-core`。
+活动源码来自已分配 monorepo 工作树的 core/，主库是 D:/Code/dansheng。先从仓库根执行 scripts/Enter-Dansheng.ps1；Core/App 发布规范见 [统一兼容规则](../../docs/CORE_COMPATIBILITY.md)。
 先进入任务并初始化该任务自己的公开依赖缓存；以下所有输出位于登记的 D 盘 runtime。
 脚本使用 `DANSHENG_TASK_RUNTIME`，也支持显式 `-RuntimeRoot`；任务工作树缺少 runtime
 时会拒绝运行。目标、收据与产物必须是 runtime 的子路径，拒绝链接及链接祖先。
-没有任务环境的普通源码 checkout 默认使用自己的 `.local/runtime`，仍可显式选择外部
+monorepo 必须使用源码树外的任务 runtime，仍可显式选择外部
 独立 runtime。原 C 项目、旧收据和旧发布目录保留，不作为当前任务的默认输出。
 
 ```powershell

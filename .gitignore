@@ -99,3 +99,9 @@ CLAUDE.local.md
 .claude/worktrees/
 .codex/worktrees/
 .codex/sessions/
+
+# Local agent entrypoints are provisioned by setup, never private release payloads.
+**/AGENTS.md
+**/CLAUDE.md
+**/credentials.txt
+**/target/

@@ -20,17 +20,28 @@ function Get-DanshengAppRuntimeOutput {
     $output
 }
 
-function Get-DanshengGitCommonDirectory {
-    param([Parameter(Mandatory)][string]$Root)
+function Get-DanshengGitPath {
+    param([Parameter(Mandatory)][string]$Root,[ValidateSet('common','checkout')][string]$Kind='common')
     $names=@('GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR','GIT_INDEX_FILE','GIT_NAMESPACE')
     $saved=@{};$present=@{}
     foreach($name in $names){$path='Env:'+$name;$present[$name]=Test-Path -LiteralPath $path;$saved[$name]=[Environment]::GetEnvironmentVariable($name);Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue}
     $savedExit=$global:LASTEXITCODE
     try{
-        $value=@(& git --no-optional-locks -C $Root rev-parse --path-format=absolute --git-common-dir 2>$null)
+        $argument=if($Kind-eq'checkout'){'--show-toplevel'}else{'--git-common-dir'}
+        $value=@(& git --no-optional-locks -C $Root rev-parse --path-format=absolute $argument 2>$null)
         if($LASTEXITCODE-ne0-or$value.Count-ne1){throw 'Core tooling must belong to a registered Git checkout.'}
         [IO.Path]::GetFullPath($value[0].Trim()).TrimEnd('\','/')
     }finally{foreach($name in $names){$path='Env:'+$name;if($present[$name]){Set-Item -LiteralPath $path -Value $saved[$name]}else{Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue}};$global:LASTEXITCODE=$savedExit}
+}
+
+function Get-DanshengGitCommonDirectory {
+    param([Parameter(Mandatory)][string]$Root)
+    Get-DanshengGitPath -Root $Root -Kind common
+}
+
+function Get-DanshengGitCheckoutRoot {
+    param([Parameter(Mandatory)][string]$Root)
+    Get-DanshengGitPath -Root $Root -Kind checkout
 }
 
 function Resolve-DanshengCoreRoot {
@@ -41,6 +52,9 @@ function Resolve-DanshengCoreRoot {
         $appPath=[IO.Path]::GetFullPath($AppRoot).TrimEnd('\','/')
         $parent=Split-Path -Parent $appPath
         $candidates=@(
+            if((Split-Path -Leaf $appPath)-ieq'dansheng_app'-and(Split-Path -Leaf $parent)-ieq'apps'){
+                Join-Path (Split-Path -Parent $parent) 'core'
+            }
             if((Split-Path -Leaf $appPath)-ieq'app'){Join-Path $parent 'core'}
             Join-Path $parent 'dansheng-core'
             Join-Path $parent 'dansheng'
@@ -84,7 +98,16 @@ function Resolve-DanshengAppRuntimeRoot {
             if($component.Count-ne1-or[IO.Path]::GetFullPath($component[0].path).TrimEnd('\','/')-ine$appPath-or
                [IO.Path]::GetFullPath($task.app_common_dir).TrimEnd('\','/')-ine$common){throw 'Task runtime metadata does not describe this App worktree.'}
             $selected=[string]$task.runtime_root
-        }else{$selected=Join-Path $workspace ('local/runtime/manual-'+(Split-Path -Leaf $appPath))}
+        }else{
+            # Every linked checkout can contain the same apps/dansheng_app leaf.
+            # Key the external runtime by the complete checkout root, never the leaf alone.
+            $checkout=Get-DanshengGitCheckoutRoot -Root $appPath
+            $identity=if($IsWindows){$checkout.ToLowerInvariant()}else{$checkout}
+            $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity))).ToLowerInvariant()
+            # Match checkout scripts/Enter-Dansheng.ps1, including platform separators.
+            $base=if($IsWindows){'D:/DevCache/dansheng/runtime'}else{Join-Path ([IO.Path]::GetTempPath()) 'dansheng-runtime'}
+            $selected=Join-Path $base $hash.Substring(0,12)
+        }
     }
     if(-not[IO.Path]::IsPathRooted($selected)){$selected=Join-Path $AppRoot $selected}
     [IO.Path]::GetFullPath($selected)
@@ -106,7 +129,14 @@ function Resolve-DanshengCoreToolsRoot {
     foreach($candidate in @($CoreRoot,(Join-Path (Split-Path -Parent $AppRoot) 'core'))){$tools=Get-VerifiedToolsDirectory $candidate;if($tools){return $tools}}
     $toolDirectories=@()
     $trees=@(& git --no-optional-locks -C $CoreRoot worktree list --porcelain)
-    foreach($line in $trees){if($line-match'^worktree (.+)$'){$tools=Get-VerifiedToolsDirectory $Matches[1];if($tools){$toolDirectories+=$tools}}}
+    foreach($line in $trees){
+        if($line-match'^worktree (.+)$'){
+            foreach($candidate in @($Matches[1],(Join-Path $Matches[1] 'core'))){
+                $tools=Get-VerifiedToolsDirectory $candidate
+                if($tools){$toolDirectories+=$tools}
+            }
+        }
+    }
     $toolDirectories=@($toolDirectories|Select-Object -Unique)
     if($toolDirectories.Count-eq1){return $toolDirectories[0]}
     throw 'Set -CoreToolsRoot or DANSHENG_CORE_TOOLS_ROOT to the authoritative tools directory; SDK CoreRoot is never replaced for tool discovery.'

@@ -5,7 +5,7 @@ GitHub Release 始终标记 Pre-release，且不设为稳定 Latest。
 
 ## 自动流程
 
-1. 推送 main 后，`App source checks` 完成格式、分析、测试、Pigeon 与脚本检查。
+1. 推送 main 后，`App and Core checks` 完成格式、分析、测试、Pigeon 与脚本检查。
 2. 仅该仓库 main 的 push 检查成功才触发 `Android Pre-release`；PR 和失败的检查不发布。
 3. 按通过检查的准确 App SHA 检出，使用随 SDK 镜像提供、按 lock 的 Core SHA 导出的权威验证工具。
 4. 使用当前仓库的 `GITHUB_TOKEN` 下载 `.github/prerelease-sdk.json` 固定的 Release ZIP，支持私有仓库；先核验传输 SHA-256，再核验 Core lock、
@@ -38,7 +38,7 @@ Release/draft、目标 SHA 与附件摘要再处理，不能盲目重试。
 由 App 发布仓库镜像既存开发 SDK，不修改或发布 Core 仓库。ZIP 只包含 AAR、原始 receipt、
 7 项锁定资源、两份许可文件和两份 Core 验证工具，不包含 staging 输出、账号、配置、缓存或签名。
 验证工具由真实 Core commit 的 `git archive` 导出，文件摘要与 commit 记在下载清单中；调用前逐文件核验。
-App 与 Core 均可保持私有，不把个人 GitHub 令牌存入 CI，也不要求 App 的 `GITHUB_TOKEN` 跨仓库读取 Core。
+单仓库可保持私有；不把个人 GitHub 令牌存入 CI。旧 SDK 镜像仍按精确历史版本消费，源码位于本仓库 core/。
 
 本地生成／验证使用：
 

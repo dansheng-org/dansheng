@@ -1,4 +1,6 @@
-# Core SDK、ABI 与跨仓库版本契约
+# Core SDK、ABI 与模块版本契约
+
+> 当前统一规则见[单仓库兼容规范](../../docs/CORE_COMPATIBILITY.md)。Core 与 App 在同一 PR 内修改；下列迁移基线属于历史记录。
 
 ## 2026-11-10 Dev Drive 迁移验收基线
 
@@ -72,7 +74,7 @@ staging SO，AAR 中 packaged SO 摘要不同。锁分别记录两者；旧收�
 SDK 校验验证外层、两种实际 SO、官方资源和消费锁；SDK-only 使用者在
 `ArtifactDirectory/resources` 提供同一已发布资源树，源码联调可显式提供 Core worktree。
 
-跨仓库 API 变化优先兼容增加；Rust 公开 enum 新 variant 也会影响外部穷举 match。
+跨模块 API 变化优先兼容增加；Rust 公开 enum 新 variant 也会影响外部穷举 match。
 删除/改名/序列化改变先声明版本和迁移。先引入 Core 兼容层并测试，再配对 App PR 和
 准确两侧 SHA；Core 合入/发布后更新 App 锁，在干净环境验证后授权 App 合入。
 

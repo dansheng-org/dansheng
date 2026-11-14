@@ -34,7 +34,7 @@ MCP 的绑定地址、当前端口和复制配对信息的操作在 Agent 页提
 
 ## 构建
 
-两个产品仓库独立维护。App 通过 `core.lock.json` 精确消费 Core 原生 SDK，绑定链路为 C ABI → JNI/AAR → Kotlin → Pigeon/Dart。
+本应用位于 Dansheng 单仓库的 apps/dansheng_app。统一规范见 [根开发规范](../../docs/DEVELOPMENT_WORKFLOW.md)。App 通过 `core.lock.json` 精确消费 Core 原生 SDK，绑定链路为 C ABI → JNI/AAR → Kotlin → Pigeon/Dart。
 
 只做源码检查无需准备 Android 原生 SDK：
 
@@ -45,7 +45,7 @@ flutter analyze
 flutter test
 ```
 
-Core 源码必须检出 `core.lock.json` 中的准确提交。配对任务目录 `app` 会优先查找旁边的 `core`，普通目录会查找平级 `dansheng-core`；显式参数/环境设置优先，既存 `dansheng` 目录仍可兼容。使用 Flutter 3.47.7、Dart 3.13.5、JDK 21、Gradle 9.7.1、AGP 9.3.2、Android SDK 37 和 NDK 30.0.16138531。
+源码联调默认使用本工作树 ../../core 并重建精确 SDK 锁；SDK-only 使用已锁定的历史 Core 产物，两者不可混淆。使用 Flutter 3.47.7、Dart 3.13.5、JDK 21、Gradle 9.7.1、AGP 9.3.2、Android SDK 37 和 NDK 30.0.16138531。
 
 ```powershell
 # 在已分配的 App 工作树执行；CoreRoot 对应锁定的 Core 提交。
@@ -68,28 +68,24 @@ Gradle 将官方手动场馆适配模块装入 APK 的 `assets/builtin-venues/`�
 
 完整打包脚本是 `scripts/package-workbench.ps1`，默认使用 PowerShell APK 审计，也可通过 `-Python` 指定 Python 审计器。模拟器联调使用 `scripts/verify-workbench.ps1`；发布面板的截图来自 `scripts/verify-workbench-ui.py` 驱动的实际系统文件选择和安装流程。
 
-## 双仓库任务开发
+## 单仓库任务开发
 
-开发约定见 [开发工作流](docs/DEVELOPMENT_WORKFLOW.md) 和 [Core 兼容矩阵](docs/CORE_COMPATIBILITY.md)。已有目录和历史验收保留；DS-001 仅为历史只读准备树，当前工作流使用真实 main 提交创建的任务 worktree，未经接收不构成发布。
+开发约定见 [统一工作流](../../docs/DEVELOPMENT_WORKFLOW.md) 和 [Core 兼容规范](../../docs/CORE_COMPATIBILITY.md)。每个功能一个任务 worktree，包含 App 与 Core。DS-001 和旧双仓库工作树仅作为历史参考。
 
-本机 Agent 指令和凭据不属于公开源码。维护者可通过 Git 共用的 `info/exclude` 与 Orca 的 Worktree Shared Paths 共享本地文件；Git 本身不会复制未跟踪／被忽略文件。共享设置属于本机配置，克隆仓库后需自行准备。操作方式见 [本地工作树配置](docs/LOCAL_WORKTREES.md)。
-
-配对任务可通过 `-CoreRoot` 或 `DANSHENG_CORE_ROOT` 指向授权的 Core worktree，`DANSHENG_CORE_SDK_DIR` / `-ArtifactDirectory` 指向任务原生 SDK。未指定 Core 时按配对 `core`、平级 `dansheng-core`、既存 `dansheng` 的顺序查找；SDK 默认为记录的 task runtime 下 `native-sdk`，不把原 App 的 AAR/收据与另一份 Core 源码混用。`core.lock.json` 固定真实来源与工件；无提交的开发 snapshot 不会通过稳定发布验证。
-
-新工作流在真实 main 提交创建的任务树中运行。SDK 源码与工具位置分别使用 `-CoreRoot` 和 `-CoreToolsRoot`；主线 Core 尚未接收管理脚本时，可使用同仓库已注册任务树里的验证器，源码身份保持指向实际 SDK 生产者。
+在仓库根自动准备环境，再进入本应用目录：
 
 ```powershell
-$TaskKey = '<已创建的任务 key>'
-$AppTask = "D:/Worktrees/$TaskKey/app"
-$CoreTools = "D:/Worktrees/$TaskKey/core/tools/workspace"
-& "$CoreTools/Initialize-DanshengTask.ps1" -WorkspaceRoot D:/Code/dansheng-workspace -TaskKey $TaskKey -Owner codex-workflow -CacheRoot D:/DevCache -Apply
-. "$CoreTools/Enter-DanshengTask.ps1" -WorkspaceRoot D:/Code/dansheng-workspace -TaskKey $TaskKey -Component app
-Set-Location $AppTask
-# 只读消费已核验的主线 SDK；不在这里重编 Native 或读取签名密钥。
-./scripts/package-workbench.ps1 -CoreRoot D:/Code/dansheng-core -CoreToolsRoot $CoreTools -ArtifactDirectory D:/Code/dansheng-app/.local/native -UsePreparedNative
+. ./scripts/Enter-Dansheng.ps1
+Set-Location apps/dansheng_app
+# 已准备本工作树的 SDK，并与 core.lock.json 核验一致后：
+./scripts/package-workbench.ps1 -CoreRoot $env:DANSHENG_CORE_ROOT `
+  -CoreToolsRoot $env:DANSHENG_CORE_TOOLS_ROOT `
+  -ArtifactDirectory $env:DANSHENG_CORE_SDK_DIR -UsePreparedNative
 ```
 
-分发输出使用任务 runtime 的 `artifacts`，日志使用 `logs`，SDK 输出使用 `native-sdk`。完整 debug/独立插件/androidTest 组合默认内置 PowerShell APK 审计，不要求 Python；需要内部 beta 签名时显式加 `-IncludeBeta`。内部测试签名默认在该任务的 `signing/android-beta` 创建并复用，也可通过 `-SigningDirectory` 选择同一 runtime 内的目录；C 盘原签名身份和 DPAPI 文件保留原地。`verify-ui-runtime.ps1` 默认只展示计划，`-Apply` 才创建全新 D AVD，并通过真实设置页面验证 Dart→Pigeon→Kotlin→JNI→Rust。
+源码联调默认选择本树 core/，实际重建后更新 SDK 锁；SDK-only 审阅明确使用锁定历史 Core。分发、日志、SDK 和 review signing 均位于任务 runtime；旧身份与工件保留。模拟器验证使用任务拥有的新 AVD，真实服务和设备操作须具体授权。
+
+公开 Agent 规则版本化于根 docs/AGENT_POLICY.md；本机入口与凭据不提交。根 Enter 仅在缺失时生成无私人数据的 AGENTS.md/CLAUDE.md，不共享或复制 credentials.txt。
 
 ## 验证记录
 

@@ -1,0 +1,14 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.pdf -text
+*.zip -text
+*.aar -text
+*.apk -text
+*.dspack -text
+*.jar -text
+*.so -text
+*.dll -text
+*.exe -text

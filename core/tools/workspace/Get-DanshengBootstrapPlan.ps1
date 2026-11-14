@@ -3,8 +3,10 @@
 param([Parameter(Mandatory)][string]$SnapshotFile,[Parameter(Mandatory)][string]$WorkspaceRoot)
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'Dansheng.Workspace.psm1') -Force
+Assert-DsLegacyWorkspace $WorkspaceRoot
 $taskSnapshots=Get-Content -Raw -LiteralPath (Get-DsPath $SnapshotFile)|ConvertFrom-Json
 $taskPlans=@(foreach($taskSnapshot in $taskSnapshots){
+    Assert-DsLegacyWorkspace $taskSnapshot.original
     $taskRepo=Get-DsRepository $taskSnapshot.original
     if($taskRepo.head -or $taskRepo.branch -ne 'main'){throw 'Bootstrap plan only applies to an unchanged unborn main; no action will be taken.'}
     $taskIndex=Join-Path $taskRepo.path '.git/index'

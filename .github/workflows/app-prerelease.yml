@@ -1,7 +1,7 @@
 name: Android Pre-release
 on:
   workflow_run:
-    workflows: [App source checks]
+    workflows: [App and Core checks]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -14,14 +14,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  checks:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/app-ci.yml
   build:
+    needs: checks
     if: >-
-      (github.event_name == 'workflow_run' &&
+      always() && !cancelled() &&
+      ((github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.checks.result == 'success'))
     runs-on: windows-latest
     timeout-minutes: 60
     outputs:
@@ -33,12 +38,11 @@ jobs:
     defaults:
       run:
         shell: pwsh
-        working-directory: app
+        working-directory: apps/dansheng_app
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          path: app
           persist-credentials: false
       - name: Select exact App and Core identities
         id: identity
@@ -97,7 +101,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $sdk = Get-Content .github/prerelease-sdk.json -Raw | ConvertFrom-Json
+          . ./scripts/prerelease-common.ps1
+          $sdk = Get-Content (Resolve-DanshengPrereleaseManifest -AppRoot $PWD.Path) -Raw | ConvertFrom-Json
           $url = [Uri]$sdk.uri
           if ($url.Scheme -ne 'https' -or $url.Host -ne 'github.com' -or $url.UserInfo -or $url.Query -or $url.Fragment -or
               $url.AbsolutePath -notmatch '^/([^/]+/[^/]+)/releases/download/([^/]+)/([^/]+)$') { throw 'Expected a pinned GitHub release asset URL.' }
@@ -111,25 +116,6 @@ jobs:
           ./scripts/prerelease-sdk.ps1 -Action Install `
             -Archive (Join-Path $downloads $asset) -ArtifactDirectory $native `
             -CoreToolsRoot (Join-Path $native 'validation-tools') -Sha256 $sdk.sha256
-      - name: Source checks for a manual run
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          $env:PUB_CACHE = Join-Path $env:DANSHENG_TASK_RUNTIME 'pub-cache'
-          flutter pub get --enforce-lockfile
-          if ($LASTEXITCODE -ne 0) { throw 'Pub failed.' }
-          ./scripts/check-format.ps1
-          ./scripts/tests/core-dependency.tests.ps1
-          ./scripts/tests/core-tools.tests.ps1
-          ./scripts/tests/apk-archive.tests.ps1
-          ./scripts/tests/prerelease.tests.ps1
-          flutter analyze
-          if ($LASTEXITCODE -ne 0) { throw 'Analysis failed.' }
-          flutter test
-          if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
-          dart run pigeon --input pigeons/dansheng.dart
-          if ($LASTEXITCODE -ne 0) { throw 'Pigeon failed.' }
-          git diff --exit-code -- pubspec.lock lib/bridge.g.dart android/app/src/main/kotlin/org/dansheng/app/Bridge.g.kt
-          if ($LASTEXITCODE -ne 0) { throw 'Lock or generated bindings changed.' }
       - name: Build, sign and audit ARM64 release APK
         env:
           DANSHENG_BETA_PASSWORD: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_PASSWORD }}

@@ -21,6 +21,8 @@ def app_relative_path(app, explicit, environment, fallback):
 
 def default_core_path(app):
     candidates = []
+    if app.name.lower() == "dansheng_app" and app.parent.name.lower() == "apps":
+        candidates.append(app.parent.parent / "core")
     if app.name.lower() == "app":
         candidates.append(app.parent / "core")
     candidates.extend((app.parent / "dansheng-core", app.parent / "dansheng"))
@@ -46,7 +48,7 @@ def main():
     p.add_argument("--release", action="store_true")
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--core-root", type=Path,
-                   help="Core checkout; defaults to DANSHENG_CORE_ROOT, paired core, or sibling dansheng-core")
+                   help="Core checkout; defaults to DANSHENG_CORE_ROOT, monorepo core, paired core, or sibling dansheng-core")
     p.add_argument("--artifact-directory", type=Path,
                    help="Native SDK directory; defaults to DANSHENG_CORE_SDK_DIR or App .local/native")
     p.add_argument("--lock-file", type=Path, help="Core lock; defaults to App core.lock.json")

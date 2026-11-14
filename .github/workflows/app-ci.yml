@@ -1,9 +1,10 @@
-name: App source checks
+name: App and Core checks
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 concurrency:
@@ -12,10 +13,16 @@ concurrency:
 jobs:
   workspace-scripts:
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/dansheng_app
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - name: Core dependency path and payload fixtures
         shell: pwsh
         run: |
@@ -23,8 +30,14 @@ jobs:
           ./scripts/tests/core-tools.tests.ps1
           ./scripts/tests/apk-archive.tests.ps1
           ./scripts/tests/prerelease.tests.ps1
+          ./scripts/tests/monorepo-paths.tests.ps1
+          python ./scripts/tests/audit-paths.test.py
+          ../../scripts/tests/Enter.Tests.ps1
   flutter:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/dansheng_app
     env:
       PUB_HOSTED_URL: https://pub.flutter-io.cn
     steps:
@@ -51,5 +64,7 @@ jobs:
         run: |
           dart run pigeon --input pigeons/dansheng.dart
           git diff --exit-code -- lib/bridge.g.dart android/app/src/main/kotlin/org/dansheng/app/Bridge.g.kt
+  core:
+    uses: ./.github/workflows/core-ci.yml
 # Native Android smoke needs the real pinned Core SDK/acquisition setup.
 # This source job does not claim an APK build or a stable native release check.

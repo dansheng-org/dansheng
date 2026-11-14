@@ -1,10 +1,20 @@
 #Requires -Version 7.0
 # App release orchestration; Core's pinned tools remain the dependency authority.
+function Resolve-DanshengPrereleaseManifest {
+    param([Parameter(Mandatory)][string]$AppRoot)
+    $appPath=[IO.Path]::GetFullPath($AppRoot).TrimEnd('\','/')
+    $parent=Split-Path -Parent $appPath
+    $root=if((Split-Path -Leaf $appPath)-ieq'dansheng_app'-and(Split-Path -Leaf $parent)-ieq'apps'){
+        Split-Path -Parent $parent
+    }else{$appPath}
+    Join-Path $root '.github/prerelease-sdk.json'
+}
+
 function Test-DanshengPrereleaseSdk {
     param([string]$AppRoot, [string]$ArtifactDirectory, [string]$CoreToolsRoot)
     $lock = Get-Content -LiteralPath (Join-Path $AppRoot 'core.lock.json') -Raw | ConvertFrom-Json
     if ($lock.core.commit -notmatch '^[a-f0-9]{40}$') { throw 'Pre-release requires a real locked Core commit.' }
-    $acquisition = Get-Content -LiteralPath (Join-Path $AppRoot '.github/prerelease-sdk.json') -Raw | ConvertFrom-Json
+    $acquisition = Get-Content -LiteralPath (Resolve-DanshengPrereleaseManifest -AppRoot $AppRoot) -Raw | ConvertFrom-Json
     if ($acquisition.validator.core_commit -cne $lock.core.commit -or
         @($acquisition.validator.files).Count -ne 2 -or
         @($acquisition.validator.files.name | Sort-Object -Unique).Count -ne 2) { throw 'Validation tool provenance differs from the exact locked Core commit.' }
@@ -16,8 +26,14 @@ function Test-DanshengPrereleaseSdk {
         }
     }
     $validator = Join-Path $CoreToolsRoot 'Test-DanshengCoreDependency.ps1'
-    # SDK-only consumption: do not substitute a different source snapshot for this SDK.
-    $validation = (& $validator -LockFile (Join-Path $AppRoot 'core.lock.json') -ArtifactDirectory $ArtifactDirectory -AppRoot $AppRoot | Out-String) | ConvertFrom-Json
+    # The immutable SDK validator predates nested App roots. Perform its App lock
+    # check here, while leaving all SDK/ABI/resource checks with the pinned tool.
+    if ((Get-FileHash -LiteralPath (Join-Path $AppRoot 'pubspec.lock')).Hash -ine $lock.binding.pubspec_lock_sha256) {
+        throw 'Flutter/Pigeon dependency lock differs.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $AppRoot 'pubspec_overrides.yaml')) { throw 'Pre-release does not accept local Pub overrides.' }
+    # SDK-only consumption: never claim that the newer in-tree Core produced this SDK.
+    $validation = (& $validator -LockFile (Join-Path $AppRoot 'core.lock.json') -ArtifactDirectory $ArtifactDirectory | Out-String) | ConvertFrom-Json
     if (-not $validation.verified) { throw 'Core SDK validation failed.' }
     $receipt = Get-Content -LiteralPath (Join-Path $ArtifactDirectory 'receipt.json') -Raw | ConvertFrom-Json
     if ($receipt.aar_sha256 -ine $lock.artifact.sha256 -or

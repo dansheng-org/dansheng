@@ -13,14 +13,15 @@ param(
 )
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'Dansheng.Workspace.psm1') -Force
-$taskCore=Get-DsRepository $CoreRoot
-$taskApp=Get-DsRepository $AppRoot
-if($taskCore.common_dir -eq $taskApp.common_dir){throw 'Core/App must remain independent repositories.'}
+$taskCore=Get-DsNativeRepository -Path $CoreRoot -Component core
+$taskApp=Get-DsNativeRepository -Path $AppRoot -Component app
+Assert-DsNativePair -Core $taskCore -App $taskApp
 if(-not $taskCore.head -and -not $AllowUnversioned){throw 'NeedsInitialCommit: use -AllowUnversioned only for an explicitly labelled development snapshot.'}
 $taskAar=Get-DsPath $AarPath
 $taskDestination=Get-DsPath $Destination
 if(Test-Path -LiteralPath $taskDestination){throw 'Refusing to overwrite an existing dependency lock.'}
 $taskReceipt=Get-Content -Raw -LiteralPath (Get-DsPath $ReceiptFile)|ConvertFrom-Json
+[void](Get-DsSourceHashFormat $taskReceipt)
 foreach($taskField in @('core_source_sha256','adapter_source_sha256','aar_sha256','arm64_sha256','x86_64_sha256')){
     if($taskReceipt.$taskField -notmatch '^[a-fA-F0-9]{64}$'){throw 'Native receipt is incomplete.'}
 }
@@ -73,7 +74,7 @@ $taskLock=[pscustomobject]@{
     format='dansheng-core-lock-v1'
     mode='native-sdk'
     state=if($ForRelease){'release'}else{'development_snapshot'}
-    core=[pscustomobject]@{version=$taskVersion;commit=$taskCore.head;source_sha256=$taskSource.sha256;adapter_source_sha256=$taskReceipt.adapter_source_sha256.ToLowerInvariant();api_version=1;abi_version=1;rust_toolchain=$taskToolchain;features=@($taskReceipt.features)}
+    core=[pscustomobject]@{version=$taskVersion;commit=$taskCore.head;source_hash_format=$taskSource.source_hash_format;source_subdirectory=$taskSource.source_subdirectory;source_sha256=$taskSource.sha256;adapter_source_sha256=$taskReceipt.adapter_source_sha256.ToLowerInvariant();api_version=1;abi_version=1;rust_toolchain=$taskToolchain;features=@($taskReceipt.features)}
     binding=[pscustomobject]@{kind='pigeon-jni';generator_version=$taskPigeon;pubspec_lock_sha256=(Get-FileHash -LiteralPath $taskPubLock).Hash.ToLowerInvariant()}
     artifact=[pscustomobject]@{name=[IO.Path]::GetFileName($taskAar);format='aar';platform='android';abis=@('arm64-v8a','x86_64');bytes=(Get-Item -LiteralPath $taskAar).Length;sha256=$taskReceipt.aar_sha256.ToLowerInvariant();native_entries=@($taskNativeEntries);packaged_receipt_complete=$taskPackagingComplete;acquisition_uri=if($AcquisitionUri){$AcquisitionUri}else{$null}}
     resources=$taskResources

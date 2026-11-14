@@ -18,6 +18,8 @@ $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'Dansheng.Workspace.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Dansheng.Environment.psm1') -Force -DisableNameChecking
 $taskComparison=if($IsWindows){[StringComparison]::OrdinalIgnoreCase}else{[StringComparison]::Ordinal}
+Assert-DsLegacyWorkspace $CoreWorktree
+Assert-DsLegacyWorkspace $AppWorktree
 $taskCore=Get-DsRepository $CoreWorktree;$taskApp=Get-DsRepository $AppWorktree
 if($taskCore.common_dir -eq $taskApp.common_dir){throw 'Paired checks require independent product repositories.'}
 foreach($taskRepo in @($taskCore,$taskApp)){

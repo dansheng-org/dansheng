@@ -1,14 +1,8 @@
 # Android adapter and official Fudan sports plugin
 
-## Active paths after the 2026-11-10 migration
+## Active monorepo paths
 
-Core main is `D:/Code/dansheng-core`; App main is the separate repository
-`D:/Code/dansheng-app`. Build from the registered task under `D:/Worktrees`, with
-its explicit Cargo target, dependency caches and artifacts in
-`D:/Code/dansheng-workspace/local/runtime/<task>`. `platform/android/gradlew.ps1`
-can use the pinned installation in `D:/DevCache/gradle` while keeping a task's
-project cache separate. Android SDK/NDK and installed JDK remain at their actual
-C-drive installation paths; they were not renamed with the project.
+The repository is `D:/Code/dansheng`; modules are `core/` and `apps/dansheng_app/`. Run the root `scripts/Enter-Dansheng.ps1` in the assigned worktree, then execute Core commands from `core/`. Outputs and profiles use that worktree's external runtime. Installed SDK/NDK/JDK are read-only tools.
 
 The dated runs below retain their original C paths, receipt identities, emulator
 IDs and compile layouts. They are historical evidence, not commands to write

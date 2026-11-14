@@ -49,10 +49,7 @@ $HostBinary = Join-Path $env:CARGO_TARGET_DIR 'debug/dansheng-host.exe'
 ```
 
 `scripts/start-local.ps1` selects the actual `CARGO_TARGET_DIR` and passes the
-task profile explicitly. Cargo/Pub/Gradle preparation is provided by Core's
-`tools/workspace/Initialize-DanshengTask.ps1`. Task files and output now live
-under `D:/Worktrees` and `D:/Code/dansheng-workspace/local/runtime`; installed
-SDKs and preserved older user profiles keep their real C-drive locations.
+task profile explicitly. Enter the assigned monorepo worktree using root `scripts/Enter-Dansheng.ps1`, then run Core commands from `core/`. Each checkout owns its external runtime and caches; existing profiles are not copied.
 
 `call` emits the full core Response JSON. `call`, `mcp`, and `schema` never open the
 database. IPC disconnection after dispatch returns `OutcomeUnknown`; interrupted

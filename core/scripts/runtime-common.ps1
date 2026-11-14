@@ -28,13 +28,28 @@ function Test-DanshengPathWithin {
         $childPath.StartsWith($parentPath + [IO.Path]::DirectorySeparatorChar,$comparison)
 }
 
+function Get-DanshengSourceBoundary {
+    param([Parameter(Mandatory)][string]$Root)
+    $source=Get-DanshengCheckedPath $Root
+    for($cursor=$source;$cursor;$cursor=[IO.Path]::GetDirectoryName($cursor)){
+        if(Test-Path -LiteralPath (Join-Path $cursor '.git')){
+            Import-Module (Join-Path $PSScriptRoot '../tools/workspace/Dansheng.Workspace.psm1') -DisableNameChecking
+            $repo=Get-DsNativeRepository -Path $source -Component core
+            return [pscustomobject]@{source=$source;checkout=$repo.checkout_root;primary=(Split-Path -Parent $repo.common_dir);isolated=([bool]$repo.module -or (Test-Path -LiteralPath (Join-Path $repo.checkout_root '.git') -PathType Leaf))}
+        }
+    }
+    # Non-Git source distributions retain their explicit local runtime support.
+    [pscustomobject]@{source=$source;checkout=$source;primary=$null;isolated=$false}
+}
+
 function Resolve-DanshengRuntimeRoot {
     param([Parameter(Mandatory)][string]$Root,[string]$RuntimeRoot)
-    $sourceRoot = Get-DanshengCheckedPath $Root
+    $boundary = Get-DanshengSourceBoundary $Root
+    $sourceRoot = $boundary.checkout
     if (-not $RuntimeRoot) { $RuntimeRoot = $env:DANSHENG_TASK_RUNTIME }
-    $linkedTask = Test-Path -LiteralPath (Join-Path $sourceRoot '.git') -PathType Leaf
+    $linkedTask = $boundary.isolated
     if (-not $RuntimeRoot) {
-        if ($linkedTask) { throw 'Enter the registered task or pass its independent -RuntimeRoot' }
+        if ($linkedTask) { throw 'Enter the registered task using checkout root scripts/Enter-Dansheng.ps1 or pass its independent -RuntimeRoot' }
         $RuntimeRoot = Join-Path $sourceRoot '.local/runtime'
     }
     $runtime = Get-DanshengCheckedPath $RuntimeRoot
@@ -44,14 +59,8 @@ function Resolve-DanshengRuntimeRoot {
     if ($linkedTask -and (Test-DanshengPathWithin $sourceRoot $runtime)) {
         throw 'Task runtime data must stay outside the source checkout'
     }
-    if ($linkedTask) {
-        $gitPointer = [IO.File]::ReadAllText((Join-Path $sourceRoot '.git')).Trim()
-        if ($gitPointer -notmatch '^gitdir: (.+)$') { throw 'Invalid worktree Git pointer' }
-        $admin = [IO.Path]::GetFullPath($Matches[1],$sourceRoot)
-        $commonFile = Join-Path $admin 'commondir'
-        if (-not (Test-Path -LiteralPath $commonFile -PathType Leaf)) { throw 'Missing worktree common directory' }
-        $common = [IO.Path]::GetFullPath([IO.File]::ReadAllText($commonFile).Trim(),$admin)
-        $primary = [IO.Path]::GetDirectoryName($common)
+    if ($linkedTask -and $boundary.primary) {
+        $primary = $boundary.primary
         if ((Test-DanshengPathWithin $primary $runtime -AllowEqual) -or
             (Test-DanshengPathWithin $runtime $primary -AllowEqual)) {
             throw 'Task runtime data must stay separate from the primary repository'
@@ -84,7 +93,9 @@ function Resolve-DanshengLabProfile {
         throw 'Enter the registered task or pass an independent -RuntimeRoot or explicit -Profile'
     }
     $profilePath = Get-DanshengCheckedPath $Profile
-    if (Test-DanshengPathWithin $Root $profilePath -AllowEqual) {
+    $boundary=Get-DanshengSourceBoundary $Root
+    if ((Test-DanshengPathWithin $boundary.checkout $profilePath -AllowEqual) -or
+        ($boundary.isolated -and $boundary.primary -and (Test-DanshengPathWithin $boundary.primary $profilePath -AllowEqual))) {
         throw 'Lab profile must stay outside the source checkout'
     }
     if ($RuntimeRoot -or $env:DANSHENG_TASK_RUNTIME) {

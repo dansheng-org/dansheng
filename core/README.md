@@ -4,9 +4,9 @@
 
 本地优先、与 UI 分离的 Rust 校园数据和自动化内核。Android 内嵌同一个核心；Windows/Linux 通过本地服务供 UI、CLI 和 MCP 共用数据。项目采用 GPL-3.0-or-later。
 
-这是首个可运行的开发版本。代码实现、离线契约测试、模拟器执行和真实校园服务验证是不同的验收项；当前状态见 [验证记录](docs/validation.md)，长期阶段见 [roadmap](docs/roadmap.md)。生产 UI 不在这个仓库内。
+这是首个可运行的开发版本。代码实现、离线契约测试、模拟器执行和真实校园服务验证是不同的验收项；当前状态见 [验证记录](docs/validation.md)，长期阶段见 [roadmap](docs/roadmap.md)。生产 UI 位于同仓库 ../apps/dansheng_app。
 
-活动主库为 `D:/Code/dansheng-core`，App 为独立仓库 `D:/Code/dansheng-app`。用户或 Herdr 将新任务工作树创建到 `D:/worktree`，Agent 在指定的树里开发、测试并按要求提交和合并。此前 `D:/Worktrees` 中的任务保留现状；可选登记与运行数据位于 `D:/Code/dansheng-workspace/local`。C 盘原项目和旧验收记录保留为参考。
+活动仓库为 D:/Code/dansheng，本目录为 Rust Core 模块。统一规则见 [开发规范](../docs/DEVELOPMENT_WORKFLOW.md)。旧目录和配对任务记录仅为历史备份。
 
 本次新增复旦开课目录与大纲、公共培养方案、eHall 目录与任务、图书馆发现与借阅接口，以及 Canvas 测验、讨论和本人学习数据。接口兼容性和本次测试见 [Core 集成记录](docs/core-integration-20261111.md)，各服务的实读范围和仍未接入项目见 [研究交付矩阵](docs/fudan-service-research/delivery-matrix.md)。
 
@@ -27,7 +27,7 @@
 
 ## 构建与测试
 
-需要 Rust 1.99.1 和平台 C 工具链。Windows pinned 工具只读安装在 Core 主库的 `.local/toolchain`；任务不会复制工具到源码或修改全局 PATH。在用户或 Herdr 提供的工作树里，Agent 自动准备独立构建目录和运行资源，再执行以下检查。无需手动运行任务编号或 New/Initialize/Enter 脚本；配对工具可选，见[双仓库工作流](docs/DEVELOPMENT_WORKFLOW.md)。
+需要 Rust 1.99.1 和平台 C 工具链。Windows pinned 工具只读安装于源码外，通过 DANSHENG_TOOLCHAIN_ROOT 选择；任务不会复制工具到源码或修改全局 PATH。在用户或 Herdr 提供的工作树里，Agent 自动准备独立构建目录和运行资源，再执行以下检查。无需手动运行任务编号或 New/Initialize/Enter 脚本；配对工具可选，见[统一工作流](docs/DEVELOPMENT_WORKFLOW.md)。
 
 ```powershell
 . ./scripts/dev.ps1
@@ -55,7 +55,7 @@ cargo build -p dansheng-ffi --target x86_64-linux-android --release --locked
 
 Android 库、验证 APK、JNI 和模拟器命令见 [Android 接入说明](docs/android-sports.md)。C ABI 的唯一签名来源是 [dansheng.h](include/dansheng.h)。发布时使用 release 产物，debug `.so` 的调试信息不代表发布体积。
 
-生产 Android 工作台位于独立工程 `D:/Code/dansheng-app`。本地联调应显式选择同一任务的 Core 工作树，固定真实 SDK 身份；不要依赖旧目录名 `dansheng` 的兼容链接。eHall 的[手动场馆服务](plugins/builtin/fudan-venues/README.md)随 APK 提供；[定时抢场](plugins/fudan-sports/README.md)单独发布成 `.dspack`，导入后默认关闭。eLearning、Agent 和论坛都是内置功能。
+生产 Android 工作台位于 ../apps/dansheng_app。本地联调应显式选择同一任务的 Core 工作树，固定真实 SDK 身份；不要依赖旧目录名 `dansheng` 的兼容链接。eHall 的[手动场馆服务](plugins/builtin/fudan-venues/README.md)随 APK 提供；[定时抢场](plugins/fudan-sports/README.md)单独发布成 `.dspack`，导入后默认关闭。eLearning、Agent 和论坛都是内置功能。
 
 新产物写入当前任务 runtime 的 `dist/dansheng-core-0.1.0/`，包含 Windows x64 可执行程序、Android ARM64 核心库、对应源码、许可证和 SHA-256。使用 `./scripts/build-windows-release.ps1` 与 `./scripts/build-android-release.ps1` 生成绑定源码的 receipts，再运行 `./scripts/package.ps1` 和 `./scripts/verify-package.ps1`；所有入口支持显式 `-RuntimeRoot`，默认使用已进入的任务 runtime。脚本拒绝旧产物与当前源码混配；独立构建、确定性归档及回退说明见 [发布流程](docs/release.md)。它们是开发版核心产物，Android ZIP 不是完整 App。旧 C 盘收据和产物保持原文，不改写编译来源。
 
@@ -99,6 +99,6 @@ Windows 使用 DPAPI 加密会话文件，Linux 使用 Secret Service，Android 
 
 ## 子任务协作
 
-本项目的 worker 范围和复核规则见 [AGENTS.md](AGENTS.md)。`scripts/invoke-agy-worker.ps1` 固定 cwd、保存 conversation_id，并核对精确续接 ID。模型输出只是待复核结果，最终需要文件差异、编译和测试证据。
+本项目的 worker 范围和复核规则见 [AGENTS.md](../docs/AGENT_POLICY.md)。`scripts/invoke-agy-worker.ps1` 固定 cwd、保存 conversation_id，并核对精确续接 ID。模型输出只是待复核结果，最终需要文件差异、编译和测试证据。
 
 本机 agy 已通过新会话和精确续接验证。调度脚本默认采用 Windows 用户/机器级代理环境，避免继承 Codex 进程中不同的显式代理；可用 `-ProxyMode Inherit` 保留调用者代理。详情见 [agy 调度与网络验证](docs/agy-workers.md)。
