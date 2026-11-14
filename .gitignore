@@ -93,15 +93,11 @@ dist/
 *.pfx
 
 # Personal agent state; private shared files use the common Git info/exclude.
-AGENTS.local.md
-CLAUDE.local.md
 .claude/settings.local.json
 .claude/worktrees/
 .codex/worktrees/
 .codex/sessions/
 
-# Local agent entrypoints are provisioned by setup, never private release payloads.
-**/AGENTS.md
-**/CLAUDE.md
+# Credentials and generated artifacts; private instructions use Git info/exclude.
 **/credentials.txt
 **/target/

@@ -8,7 +8,7 @@
 `b21ba39c43038c88ecb3519a40c00997add6bcdf`，AAR SHA-256
 `4ba974f1cb2b48e60c07d837b986f592dbc20c3704e9a365b56936f8be3cd466`。
 状态为 `development_snapshot`，`acquisition_uri=null`。Pre-release 使用
-[独立下载清单](../.github/prerelease-sdk.json) 镜像这一组精确 SDK、资源与原始收据，
+[独立下载清单](../../../.github/prerelease-sdk.json) 镜像这一组精确 SDK、资源与原始收据，
 不会把它重新标记为 Core 稳定发布。首次镜像上传和签名配置见 [发布说明](PRERELEASE.md)。
 
 App 的 SDK-only 发布路径调用锁定 Core 提交的权威验证器，不传源码根目录；验证 AAR、

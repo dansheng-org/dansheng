@@ -2,7 +2,7 @@
 
 [![源码检查](https://github.com/dansheng-org/dansheng/actions/workflows/app-ci.yml/badge.svg)](https://github.com/dansheng-org/dansheng/actions/workflows/app-ci.yml)
 
-面向复旦校园生活的 Android 客户端，将校园服务、课程资料、日程和本机 Agent 入口放在同一个工作台。使用 Flutter 构建界面，通过独立的 [dansheng-core](https://github.com/dansheng-org/dansheng-core) 提供校园服务和原生能力。
+面向复旦校园生活的 Android 客户端，将校园服务、课程资料、日程和本机 Agent 入口放在同一个工作台。使用 Flutter 构建界面，通过同仓库的 [Rust Core 模块](../../core/README.md) 提供校园服务和原生能力。
 
 旦生默认打开 **eHall**。校园服务随应用提供；目前唯一的可选扩展是**定时抢场**。安装或卸载它都不影响查场地、手动预约和取消已有预约。
 
@@ -18,7 +18,7 @@
 
 最低 Android 9（API 28），手机审阅包默认 ARM64。版本声明为 **0.2.4+6**。
 
-自动发布流程生成 `dansheng-<版本>+<构建号>-arm64-prerelease.apk`，并在 [Releases](https://github.com/dansheng-org/dansheng/releases) 附上 `SHA256SUMS` 与构建信息。首次启用需要先上传锁定的 SDK 快照并配置专用签名 Secrets；配置文件本身不代表已有可下载版本。当前 Core 依赖为开发快照，自动产物均标记 **Pre-release**。触发方式、首次配置和签名说明见 [Pre-release 发布](docs/PRERELEASE.md)。
+自动发布流程生成 `dansheng-<版本>+<构建号>-arm64-prerelease.apk`，并附上 `SHA256SUMS` 与构建信息。2026-11-14 已发布 [0.2.4+6 ARM64 审阅版（c131b19）](https://github.com/dansheng-org/dansheng/releases/tag/prerelease-v0.2.4-build.6-c131b19ae64a)；其他版本以 [Releases](https://github.com/dansheng-org/dansheng/releases) 的实际附件为准。该版本使用锁定的 Core 开发快照，标记 **Pre-release**，不是稳定发布。新环境首次启用仍需准备 SDK 镜像和签名 Secrets，流程见 [发布说明](docs/PRERELEASE.md)，不能仅凭 workflow 配置推断上传成功。
 
 既有内部测试包名为 `dansheng-android-arm64-beta.apk`；`dansheng-android-x86_64-debug.apk` 用于模拟器。自动 Pre-release 使用独立且持久的签名身份；不同签名不能直接覆盖安装，首次切换前先确认设备上的数据处理方式。
 
@@ -85,7 +85,7 @@ Set-Location apps/dansheng_app
 
 源码联调默认选择本树 core/，实际重建后更新 SDK 锁；SDK-only 审阅明确使用锁定历史 Core。分发、日志、SDK 和 review signing 均位于任务 runtime；旧身份与工件保留。模拟器验证使用任务拥有的新 AVD，真实服务和设备操作须具体授权。
 
-公开 Agent 规则版本化于根 docs/AGENT_POLICY.md；本机入口与凭据不提交。根 Enter 仅在缺失时生成无私人数据的 AGENTS.md/CLAUDE.md，不共享或复制 credentials.txt。
+公开协作规则见 [贡献指南](../../docs/development/contributing.md)；本机 Agent 指令与计划独立保护，配置见 [本地共享说明](../../docs/development/local-agent-setup.md)。Enter 不会自动配置 Orca 共享，也不复制凭据。
 
 ## 验证记录
 

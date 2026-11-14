@@ -97,8 +97,6 @@ Windows 使用 DPAPI 加密会话文件，Linux 使用 Secret Service，Android 
 
 参考代码固定在 [reference/manifest.json](reference/manifest.json)：DanXi 上游、Dela 上游和本地 DanXi 抢场提交分别记录。`reference` checkout 不参与构建，原有 `C:/Code/danxi` 不被修改。移植来源见连接器和插件各自的 NOTICE。
 
-## 子任务协作
+## 开发与贡献
 
-本项目的 worker 范围和复核规则见 [AGENTS.md](../docs/AGENT_POLICY.md)。`scripts/invoke-agy-worker.ps1` 固定 cwd、保存 conversation_id，并核对精确续接 ID。模型输出只是待复核结果，最终需要文件差异、编译和测试证据。
-
-本机 agy 已通过新会话和精确续接验证。调度脚本默认采用 Windows 用户/机器级代理环境，避免继承 Codex 进程中不同的显式代理；可用 `-ProxyMode Inherit` 保留调用者代理。详情见 [agy 调度与网络验证](docs/agy-workers.md)。
+架构见 [Core 说明](../docs/architecture/core.md) 与 [插件系统](../docs/architecture/plugin-system.md)；贡献和验证见 [开发指南](../docs/development/contributing.md)、[测试规范](../docs/development/testing.md)。本机 Agent 入口与当前协作计划不属于公开 README；历史 worker 验证仍在 [原记录](docs/agy-workers.md) 中按原时间保留。
