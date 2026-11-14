@@ -1,0 +1,17 @@
+{
+  "probe_source_sha256": "244467A83485E84460ADA2EB05752909E830A31A2F32129B69FC39DC378E4685",
+  "executable_sha256": "11120F2C383A3F30764109C5CB0542E5F617571C95997C1B9A632FA85616DFDC",
+  "offline_tests": 10,
+  "clippy": "passed",
+  "format": "passed",
+  "native_platform": "Windows GNU x86_64",
+  "public_entry_checks": 23,
+  "focused_discovery_checks": 9,
+  "raw_data_exported": false,
+  "remote_business_writes": 0,
+  "current_binary_reports": [
+    "native-core-discovery.json",
+    "native-core-canvas.json"
+  ],
+  "first_batch_receipt": "native-core-all.receipt.json"
+}

@@ -1,0 +1,3 @@
+[
+  {"id": 83001, "folder_id": 84001, "display_name": "Synthetic lecture.pdf", "filename": "lecture.pdf", "content-type": "application/pdf", "size": 1024, "updated_at": "2026-11-01T00:00:00Z", "locked_for_user": false, "hidden_for_user": false, "url": "https://storage.example.invalid/file?verifier=SYNTHETIC-NON-CREDENTIAL", "preview_url": "https://canvas.example.invalid/preview?token=SYNTHETIC-NON-CREDENTIAL"}
+]

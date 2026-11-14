@@ -1,0 +1,27 @@
+{
+  "source_sha256": "fdbaeab6fda9ab71025830d32de05899b1310fd589aff79efc45069da97e5945",
+  "platform_source_sha256": "61f674ba7b22b61af0143c1ce127c38cbb71ec5878a345edbb7328f78933cbfc",
+  "platform_source_files": 34,
+  "serial": "emulator-5594",
+  "api": 36,
+  "abi": "x86_64",
+  "tests_passed": 31,
+  "tests_failed": 0,
+  "jvm_tests_passed": 6,
+  "elapsed_seconds": 105.813,
+  "rust_binary_sha256": "591d9881459d15771c24602e16911e8d4ee391149caaea663ee8292b34ae8568",
+  "apk_sha256": "b941d0c502926f4a1d1acad1a1c781b0f9d872751393ef0f9c4118bf07c99daf",
+  "test_apk_sha256": "cae4adfe57d3de2811016db2195a818f7a646d0d9f563f47cd614c69f2956b88",
+  "sports_package_sha256": "98545163241a0a31c7d53c3e26a9a35696cc2df65ea3d01ced7f1b4e73649547",
+  "closed_loop_package_sha256": "eb037c94a2bd146d0c7d50ec098597e99ba27f2c9ea7852f6bd70e1ec5b6bc1a",
+  "closed_loop_normalized_sha256": "556afa430353b2329b39860c1bc7495eb31e758b7dbab04ef69a0a6c8fb91193",
+  "keystore_processes": [
+    "7890",
+    "7922"
+  ],
+  "keystore_restart_passed": true,
+  "source_unchanged": true,
+  "platform_source_unchanged": true,
+  "synthetic_only": true,
+  "real_school_login": false
+}

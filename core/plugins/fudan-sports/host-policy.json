@@ -1,0 +1,111 @@
+{
+  "binding_v1": {
+    "binding_version": 1,
+    "plugin_id": "official.fudan-sports",
+    "identity_probe": {
+      "url": "https://booking.fudan.edu.cn/reservation/site/user/detail",
+      "method": "GET",
+      "top_level_origin": "https://booking.fudan.edu.cn",
+      "headers": { "sign-key": "/reservation/site/user/detailget", "Accept": "application/json" },
+      "success_pointer": "/e",
+      "success_value": "OK",
+      "json_pointer": "/d/number"
+    },
+    "consent_scopes": {
+      "schedule": {"key":"/task_id","release":"/release_at","window_ms":"/options/windowMs","default_window_ms":300000},
+      "cancelAppointment": {"key":"/appointment_id"}
+    },
+    "rules": [
+      {
+        "action": "schedule",
+        "url": "https://booking.fudan.edu.cn/reservation/site/resource/launch",
+        "transport": "xhr",
+        "headers": {
+          "Accept": "application/json, text/plain, */*",
+          "sign-key": "/reservation/site/resource/launchpost"
+        },
+        "key": [
+          "task",
+          { "$input": "account_id" },
+          { "$input": "task_id" },
+          { "$positiveInteger": true },
+          { "$row": "period_id" },
+          { "$choice": true }
+        ],
+        "rows": "plans",
+        "choices": "courts",
+        "form": {
+          "data": {
+            "$json": [
+              {
+                "resource_ids": [{ "$choice": true }],
+                "group_id": { "$input": "venue_id" },
+                "period": [
+                  {
+                    "date": { "$input": "target_date" },
+                    "period_id": { "$row": "period_id" }
+                  }
+                ],
+                "number": 1
+              }
+            ]
+          },
+          "data_colle": "[]",
+          "collective": "0",
+          "captcha": {
+            "$json": {
+              "token": "",
+              "pointJson": ""
+            }
+          }
+        }
+      },
+      {
+        "action": "cancelAppointment",
+        "url": "https://booking.fudan.edu.cn/reservation/site/appointment/appointment-cancel",
+        "transport": "xhr",
+        "headers": {
+          "Accept": "application/json, text/plain, */*",
+          "sign-key": "/reservation/site/appointment/appointment-cancelpost"
+        },
+        "key": [
+          "cancel",
+          { "$input": "account_id" },
+          { "$input": "appointment_id" }
+        ],
+        "form": {
+          "appointment_id": { "$text": {"$input": "appointment_id"} },
+          "appointment_detail_id": {
+            "$json": { "$input": "appointment_detail_id" }
+          },
+          "appointment_data_ids": {
+            "$json": { "$input": "appointment_data_ids" }
+          }
+        }
+      },
+      {
+        "action": "cancelAppointment",
+        "url": "https://booking.fudan.edu.cn/reservation/site/third-party/cancel-appointment",
+        "transport": "xhr",
+        "headers": {
+          "Accept": "application/json, text/plain, */*",
+          "sign-key": "/reservation/site/third-party/cancel-appointmentpost"
+        },
+        "key": [
+          "cancel",
+          { "$input": "account_id" },
+          { "$input": "appointment_id" }
+        ],
+        "form": {
+          "appointment_id": { "$text": {"$input": "appointment_id"} }
+        }
+      }
+    ]
+  },
+  "documentation": {
+    "summary": "Host Policy Binding v1 descriptor for official.fudan-sports",
+    "identity_probe_status": "public_client_contract",
+    "identity_probe_notes": "The public booking frontend maps its personal profile to this read-only endpoint. Accept only a successful response with the active account's exact student/staff number. A real authenticated campus response has not been verified.",
+    "permitted_writes_summary": "Strict declarative projections for reservation launch and cancellations. Keys bind task and cancellation IDs atomically. Write timeouts preserve external write uncertainty."
+  }
+}

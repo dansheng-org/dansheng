@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dansheng 本地实验台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f172a'/%3E%3Cpath d='M8 16l6 6L24 10' stroke='%2306b6d4' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <!-- 顶部系统导航栏 -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="8" fill="#0f172a"/>
+            <path d="M16 6L6 12L16 18L26 12L16 6Z" stroke="#0ea5e9" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M6 18L16 24L26 18" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-title">Dansheng 本地实验台</h1>
+          <p class="brand-subtitle">本地安全测试与只读接口验证</p>
+        </div>
+      </div>
+      <div class="runtime-tags">
+        <span class="tag tag-blue" id="tag-runtime-mode">模式: 本地实验台</span>
+        <span class="tag tag-slate" id="tag-runtime-version">v0.1.0</span>
+        <span class="tag tag-green" id="tag-core-status">Core 就绪</span>
+        <span class="tag tag-neutral">默认仅限本机 (127.0.0.1)</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 全局警示条（例如 401 或异常状态） -->
+  <div id="global-banner" class="banner banner-warning hidden" role="alert">
+    <div class="banner-content">
+      <span class="banner-icon" aria-hidden="true">⚠️</span>
+      <span id="global-banner-text" class="banner-message"></span>
+    </div>
+  </div>
+
+  <main class="app-container">
+    <!-- 安全声明横幅 -->
+    <aside class="notice-card">
+      <div class="notice-icon" aria-hidden="true">🛡️</div>
+      <div class="notice-body">
+        <strong>安全声明：</strong>
+        凭据在本机加密保存，不写入聊天或诊断日志。仅在您点击登录时用于学校认证；测试台开放预设的只读查询，不提供预约、取消、付款或发邮件操作。
+      </div>
+    </aside>
+
+    <!-- 流程状态区分条：清楚区分 已保存 -> 会话已导入 -> 业务读取通过 -->
+    <section class="flow-pipeline" aria-label="认证与验证流程阶段">
+      <div class="pipeline-step" id="step-cred">
+        <div class="step-num">1</div>
+        <div class="step-info">
+          <span class="step-title">账号凭据</span>
+          <span class="step-state" id="pipeline-cred-state">未保存</span>
+        </div>
+      </div>
+      <div class="pipeline-arrow" aria-hidden="true">→</div>
+      <div class="pipeline-step" id="step-session">
+        <div class="step-num">2</div>
+        <div class="step-info">
+          <span class="step-title">来源登录</span>
+          <span class="step-state" id="pipeline-session-state">未导入</span>
+        </div>
+      </div>
+      <div class="pipeline-arrow" aria-hidden="true">→</div>
+      <div class="pipeline-step" id="step-probe">
+        <div class="step-num">3</div>
+        <div class="step-info">
+          <span class="step-title">业务只读验证</span>
+          <span class="step-state" id="pipeline-probe-state">未测试</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 第一区：账号凭据 -->
+    <section class="card zone-card" id="zone-credentials">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="zone-badge">第一区</span>
+          <h2 class="card-title">账号凭据</h2>
+        </div>
+        <div class="status-indicator">
+          <span class="status-dot dot-neutral" id="cred-status-dot"></span>
+          <span class="status-label" id="cred-status-text">未保存凭据</span>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="field-info" id="cred-hint-box">
+          <span class="info-label">当前已存账号掩码：</span>
+          <span class="info-value font-mono" id="cred-hint-value">未设定</span>
+        </div>
+
+        <form id="form-credentials" class="form-grid" method="post" action="/api/credentials" novalidate>
+          <div class="form-group">
+            <label for="input-student-id">学号 / 工号</label>
+            <input
+              type="text"
+              id="input-student-id"
+              name="student_id"
+              autocomplete="off"
+              placeholder="请输入学号或工号（例如：21307130001）"
+              required
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="input-password">统一身份认证密码</label>
+            <input
+              type="password"
+              id="input-password"
+              name="password"
+              autocomplete="new-password"
+              placeholder="学校统一身份认证密码"
+              required
+            >
+            <small class="field-hint">凭据仅在当前机器本地加密保存，不会明文存储或回显，保存动作不发起登录。</small>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" id="btn-save-credentials" class="btn btn-primary">
+              <span class="btn-icon">💾</span> 加密保存凭据
+            </button>
+            <button type="button" id="btn-delete-credentials" class="btn btn-danger-outline hidden">
+              <span class="btn-icon">🗑️</span> 清除凭据与会话
+            </button>
+          </div>
+        </form>
+
+        <div id="cred-feedback" class="feedback-msg hidden" role="status"></div>
+      </div>
+    </section>
+
+    <!-- 第二区：来源登录 -->
+    <section class="card zone-card" id="zone-login">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="zone-badge">第二区</span>
+          <h2 class="card-title">来源登录</h2>
+        </div>
+        <div class="status-indicator">
+          <span class="status-dot dot-neutral" id="session-status-dot"></span>
+          <span class="status-label" id="session-status-text">会话未导入</span>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="distinction-banner">
+          <span class="distinction-tag">重要提示</span>
+          <p>
+            <strong>保存凭据不等于登录成功。</strong> 请选择目标系统并点击“验证登录并导入会话”，核心服务将验证凭据并导入对应会话。导入成功后，请继续在第三区执行只读测试以验证可用性。
+          </p>
+        </div>
+
+        <div class="target-selection-group">
+          <label class="group-label">选择目标业务系统：</label>
+          <div class="target-grid" role="radiogroup" aria-label="目标业务系统">
+            <label class="target-card active" id="target-label-academic">
+              <input type="radio" name="login_target" value="academic" checked>
+              <div class="target-card-content">
+                <span class="target-title">学术教务系统</span>
+                <span class="target-desc">用于排课、学期与选课数据只读接入</span>
+              </div>
+            </label>
+
+            <label class="target-card" id="target-label-canvas">
+              <input type="radio" name="login_target" value="canvas">
+              <div class="target-card-content">
+                <span class="target-title">Canvas 在线学习平台</span>
+                <span class="target-desc">用于课程列表、教学公告与资料只读读取</span>
+              </div>
+            </label>
+
+            <label class="target-card" id="target-label-ecard">
+              <input type="radio" name="login_target" value="ecard">
+              <div class="target-card-content">
+                <span class="target-title">校园一卡通系统</span>
+                <span class="target-desc">用于卡片状态、余额与流水只读检查</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="session-meta-panel" id="session-meta-panel">
+          <div class="meta-row">
+            <span class="meta-label">会话状态：</span>
+            <span class="meta-value" id="meta-session-auth">未导入</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">上次登录来源：</span>
+            <span class="meta-value font-mono" id="meta-last-target">无</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">安全验证模式：</span>
+            <span class="meta-value" id="meta-session-verification">标准</span>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" id="btn-login-target" class="btn btn-secondary">
+            <span class="btn-icon">🔑</span> 验证登录并导入会话
+          </button>
+        </div>
+
+        <!-- 交互式二次认证提示 -->
+        <div id="login-interactive-alert" class="alert-box alert-interactive hidden" role="alert">
+          <div class="alert-title">⚠️ 需要交互式验证 (InteractiveLoginRequired)</div>
+          <div class="alert-body">该来源需要验证码或二次认证，当前测试台还不能承接这一步。凭据可继续保留；浏览器中的登录状态不会自动转移到测试台。</div>
+        </div>
+
+        <div id="login-feedback" class="feedback-msg hidden" role="status"></div>
+      </div>
+    </section>
+
+    <!-- 第三区：只读测试与验证 -->
+    <section class="card zone-card" id="zone-probes">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="zone-badge">第三区</span>
+          <h2 class="card-title">只读测试与验证</h2>
+        </div>
+        <div class="status-indicator">
+          <span class="status-dot dot-neutral" id="probe-status-dot"></span>
+          <span class="status-label" id="probe-status-text">未测试</span>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <p class="section-intro">
+          执行纯只读功能探测，验证 Core 内核能力及各业务系统会话的数据读取可用性。本实验台严格禁止任何预约、取消、支付或发信操作。
+        </p>
+
+        <div class="probe-selection-group">
+          <label class="group-label">选择只读测试项目：</label>
+          <div class="probe-grid" role="radiogroup" aria-label="只读测试项目">
+            <label class="probe-card active" id="probe-label-core">
+              <input type="radio" name="probe_type" value="core" checked>
+              <div class="probe-card-content">
+                <span class="probe-title">Core 核心状态</span>
+                <span class="probe-desc">检查本地 Core 运行时、版本与基础组件就绪</span>
+              </div>
+            </label>
+
+            <label class="probe-card" id="probe-label-public_notices">
+              <input type="radio" name="probe_type" value="public_notices">
+              <div class="probe-card-content">
+                <span class="probe-title">公共通知</span>
+                <span class="probe-desc">免登录抓取校级公共通告列表</span>
+              </div>
+            </label>
+
+            <label class="probe-card" id="probe-label-academic_semesters">
+              <input type="radio" name="probe_type" value="academic_semesters">
+              <div class="probe-card-content">
+                <span class="probe-title">教务学期列表</span>
+                <span class="probe-desc">使用已导入教务会话拉取学期列表</span>
+              </div>
+            </label>
+
+            <label class="probe-card" id="probe-label-canvas_courses">
+              <input type="radio" name="probe_type" value="canvas_courses">
+              <div class="probe-card-content">
+                <span class="probe-title">Canvas 课程列表</span>
+                <span class="probe-desc">使用已导入 Canvas 会话获取在读课程</span>
+              </div>
+            </label>
+
+            <label class="probe-card" id="probe-label-cache">
+              <input type="radio" name="probe_type" value="cache">
+              <div class="probe-card-content">
+                <span class="probe-title">缓存状态</span>
+                <span class="probe-desc">读取本地只读缓存条目与命中统计</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" id="btn-run-probe" class="btn btn-primary">
+            <span class="btn-icon">⚡</span> 执行只读测试
+          </button>
+        </div>
+
+        <!-- 长请求进度提示 -->
+        <div id="probe-loading-indicator" class="loading-indicator hidden" aria-live="polite">
+          <div class="spinner"></div>
+          <span class="loading-text">正在向校园服务发起只读探测，部分校内系统响应较慢，可能耗时多达 60 秒，请耐心等待...</span>
+        </div>
+
+        <!-- 探测结果面板 -->
+        <div id="probe-result-box" class="result-box hidden">
+          <div class="result-header">
+            <div class="result-title-group">
+              <span class="result-badge badge-neutral" id="probe-result-badge">测试完成</span>
+              <span class="result-target-label" id="probe-result-name">Core 核心状态</span>
+            </div>
+            <div class="result-timing">
+              <span class="timing-label">耗时：</span>
+              <span class="timing-value font-mono" id="probe-result-elapsed">-- ms</span>
+            </div>
+          </div>
+
+          <div class="result-summary-box">
+            <div class="summary-message-row">
+              <span class="summary-label">结果摘要：</span>
+              <span class="summary-text" id="probe-result-message">--</span>
+            </div>
+            <div class="summary-count-row hidden" id="probe-result-count-row">
+              <span class="summary-label">数据项数量：</span>
+              <span class="summary-count-badge font-mono" id="probe-result-count">0</span>
+            </div>
+          </div>
+
+          <details class="result-details" id="probe-details-toggle">
+            <summary class="details-summary">查看原始返回数据 (JSON)</summary>
+            <div class="details-code-wrapper">
+              <pre><code id="probe-result-json"></code></pre>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 页面内凭据删除确认对话框（非浏览器 confirm） -->
+  <div id="modal-delete" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-delete-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modal-delete-title" class="modal-title">确认清除凭据与会话？</h3>
+      </div>
+      <div class="modal-body">
+        <p>此操作将从本机安全存储中彻底清除加密保存的学号与统一身份认证密码，并同时清除当前账号的所有导入会话。</p>
+        <p class="modal-subtext">清除后，您需要重新录入凭据才能进行后续的会话导入与只读测试验证。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="modal-delete-cancel" class="btn btn-secondary-outline">取消</button>
+        <button type="button" id="modal-delete-confirm" class="btn btn-danger">确认清除</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    <div class="footer-inner">
+      <p>Dansheng Local Lab · 纯本地只读实验台 · 密码不会发送至任何未授权服务或存入聊天</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

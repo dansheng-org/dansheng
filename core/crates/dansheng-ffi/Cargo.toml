@@ -1,0 +1,28 @@
+[package]
+name = "dansheng-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["services"]
+services = ["dep:dansheng-connectors", "dep:log"]
+card-login = ["services", "dansheng-connectors/login"]
+campus-webvpn = ["card-login", "dansheng-connectors/webvpn"]
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+dansheng-core = { path = "../dansheng-core" }
+dansheng-connectors = { path = "../dansheng-connectors", features = ["services"], optional = true }
+log = { version = "0.4", features = ["max_level_info"], optional = true }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+futures-util = "0.3"
+
+[dev-dependencies]
+tempfile.workspace = true

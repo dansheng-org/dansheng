@@ -1,0 +1,4 @@
+[
+  {"id": 82001, "course_id": 81001, "name": "Synthetic essay", "due_at": "2026-11-08T23:59:00+08:00", "unlock_at": null, "lock_at": null, "updated_at": "2026-11-01T00:00:00Z", "points_possible": 12.5, "submission_types": ["online_upload"], "published": true, "locked_for_user": false},
+  {"id": 82002, "course_id": "81001", "name": "Synthetic undated task", "due_at": null, "points_possible": null, "submission_types": []}
+]

@@ -1,0 +1,14 @@
+{
+  "id": "official.http-monitor",
+  "version": "0.1.0",
+  "api_version": 1,
+  "entry": "main.mjs",
+  "name": "HTTP status monitor",
+  "capabilities": ["http.request", "storage.read", "storage.write", "ui.publish", "jobs.schedule"],
+  "network": ["https://example.com"],
+  "actions": {
+    "check": {"description": "Read the allowed URL and save/publish only its status", "mutating": false},
+    "schedule": {"description": "Schedule one host-managed HTTP check", "mutating": false, "input_schema": {"type": "object", "required": ["run_at"], "properties": {"run_at": {"type": "string"}}, "additionalProperties": false}}
+  },
+  "ui": [{"id": "monitor", "type": "card", "title": "HTTP monitor"}]
+}

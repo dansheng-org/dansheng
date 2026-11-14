@@ -1,0 +1,25 @@
+{
+  "source_sha256": "fdbaeab6fda9ab71025830d32de05899b1310fd589aff79efc45069da97e5945",
+  "prototype_files": [
+    {
+      "path": "Cargo.toml",
+      "sha256": "fb787f4c2ead1d8182d9d61c6cdca3894a56f05e891f9cd7b731afa17502e962"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "0e5a5c7bb291b9b2933d0d5bdbefe379925994b4b1998c1cd4e00f936b57ee57"
+    },
+    {
+      "path": "src/main.rs",
+      "sha256": "9168b504f5da26b3b54bc5416ece436079cfe8164eba20fed4cc7b71450c2e66"
+    },
+    {
+      "path": "src/login_prototype.rs",
+      "sha256": "4695098603a62d27a89ab27e1afcf24852433e64587d79fc0f13a8a03e8f5a92"
+    }
+  ],
+  "artifact_sha256": "1695ce9ad467aa50c0ea6da0585c5fcff2406d408d565c6c9ad7cad795ed29ab",
+  "report": "native-ehall-self.json",
+  "production_source_unchanged": true,
+  "finished_utc": "2026-11-09T20:51:52.2671273Z"
+}

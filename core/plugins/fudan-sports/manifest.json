@@ -1,0 +1,249 @@
+{
+  "id": "official.fudan-sports",
+  "version": "0.2.0",
+  "api_version": 1,
+  "entry": "main.mjs",
+  "name": "Fudan sports (Android page session)",
+  "capabilities": [
+    "browser.request",
+    "browser.write",
+    "browser.evaluate",
+    "browser.login",
+    "storage.read",
+    "storage.write",
+    "sources.write",
+    "jobs.schedule",
+    "jobs.cancel",
+    "jobs.status",
+    "ui.publish"
+  ],
+  "network": [
+    "https://booking.fudan.edu.cn",
+    "https://id.fudan.edu.cn",
+    "https://uis.fudan.edu.cn"
+  ],
+  "actions": {
+    "visibleLogin": {"description": "Hand off to trusted visible Android login; never accepts credentials", "mutating": false},
+    "venues": {"description": "Read sports venues in the authenticated page", "mutating": false},
+    "venueOptions": {"description": "Read venue option pairs for generic UI select", "mutating": false},
+    "calendar": {"description": "Read the venue calendar", "mutating": false},
+    "slotOptions": {"description": "Read available slot option pairs for venue and date", "mutating": false},
+    "taskOptions": {"description": "Read task option pairs for current account", "mutating": false},
+    "appointments": {"description": "Read appointment history", "mutating": false},
+    "appointmentOptions": {"description": "Read appointment option pairs for current account", "mutating": false},
+    "cancellableAppointmentOptions": {"description": "Read cancellable appointment option pairs for current account", "mutating": false},
+    "appointmentDetail": {"description": "Read an appointment voucher", "mutating": false},
+    "prepareCancelAppointment": {"description": "Read-only preparation to re-read chosen appointment and return canonical cancellation projection", "mutating": false},
+    "cancelAppointment": {"description": "Cancel explicitly selected appointment after host authorization with fresh state comparison", "mutating": true},
+    "prepareSchedule": {"description": "Normalize UI form selection into canonical SportsPlan input", "mutating": false},
+    "schedule": {"description": "Persist and schedule an explicitly authorized sports plan", "mutating": true},
+    "tick": {"description": "Execute one bounded stage of an authorized sports plan", "mutating": true},
+    "stop": {"description": "Stop local retries; already submitted writes need reconciliation", "mutating": false},
+    "reconcile": {"description": "Read history to reconcile a previously uncertain reservation", "mutating": false},
+    "listTasks": {"description": "Read-only list of sports task summaries scoped to current account", "mutating": false}
+  },
+  "ui": [
+    {
+      "id": "sports",
+      "type": "card",
+      "title": "Sports task"
+    },
+    {
+      "id": "visible_login",
+      "type": "action",
+      "title": "系统登录",
+      "ui_version": 1,
+      "fields": [],
+      "buttons": [
+        {
+          "label": "统一身份认证登录",
+          "action": "visibleLogin"
+        }
+      ]
+    },
+    {
+      "id": "venue_calendar",
+      "type": "form",
+      "title": "场馆日历",
+      "ui_version": 1,
+      "fields": [
+        {
+          "id": "venue_id",
+          "label": "场馆",
+          "type": "select",
+          "source": {
+            "action": "venueOptions"
+          },
+          "clearOnChange": ["target_date"]
+        },
+        {
+          "id": "target_date",
+          "label": "预约日期",
+          "type": "date"
+        }
+      ],
+      "buttons": [
+        {
+          "label": "查询场次与日历",
+          "action": "calendar",
+          "fields": ["venue_id", "target_date"]
+        }
+      ]
+    },
+    {
+      "id": "sports_schedule",
+      "type": "form",
+      "title": "场地预约与定时",
+      "ui_version": 1,
+      "time_zone": "Asia/Shanghai",
+      "fields": [
+        {
+          "id": "task_id",
+          "label": "任务 ID",
+          "type": "identifier"
+        },
+        {
+          "id": "venue_id",
+          "label": "场馆",
+          "type": "select",
+          "source": {
+            "action": "venueOptions"
+          },
+          "clearOnChange": ["selected_slots"]
+        },
+        {
+          "id": "target_date",
+          "label": "预约日期",
+          "type": "date",
+          "clearOnChange": ["selected_slots"]
+        },
+        {
+          "id": "release_at",
+          "label": "开抢时间",
+          "type": "datetime"
+        },
+        {
+          "id": "selected_slots",
+          "label": "预约时段与场地",
+          "type": "multiselect",
+          "source": {
+            "action": "slotOptions",
+            "dependsOn": ["venue_id", "target_date"]
+          }
+        }
+      ],
+      "buttons": [
+        {
+          "label": "预约定时",
+          "action": "schedule",
+          "prepare": "prepareSchedule",
+          "fields": ["task_id", "venue_id", "target_date", "release_at", "selected_slots"],
+          "confirm": true
+        }
+      ]
+    },
+    {
+      "id": "task_list",
+      "type": "list",
+      "title": "任务中心",
+      "ui_version": 1,
+      "fields": [],
+      "buttons": [
+        {
+          "label": "查看任务列表",
+          "action": "listTasks"
+        }
+      ]
+    },
+    {
+      "id": "task_management",
+      "type": "form",
+      "title": "任务控制与对账",
+      "ui_version": 1,
+      "fields": [
+        {
+          "id": "task_id",
+          "label": "选择任务",
+          "type": "select",
+          "source": {
+            "action": "taskOptions"
+          }
+        }
+      ],
+      "buttons": [
+        {
+          "label": "停止任务",
+          "action": "stop",
+          "fields": ["task_id"],
+          "confirm": true
+        },
+        {
+          "label": "核对状态",
+          "action": "reconcile",
+          "fields": ["task_id"]
+        }
+      ]
+    },
+    {
+      "id": "appointment_history",
+      "type": "list",
+      "title": "预约记录查询",
+      "ui_version": 1,
+      "fields": [],
+      "buttons": [
+        {
+          "label": "查询预约记录",
+          "action": "appointments"
+        }
+      ]
+    },
+    {
+      "id": "appointment_detail",
+      "type": "detail",
+      "title": "预约凭证详情",
+      "ui_version": 1,
+      "fields": [
+        {
+          "id": "appointment_id",
+          "label": "选择预约",
+          "type": "select",
+          "source": {
+            "action": "appointmentOptions"
+          }
+        }
+      ],
+      "buttons": [
+        {
+          "label": "查看详情",
+          "action": "appointmentDetail",
+          "fields": ["appointment_id"]
+        }
+      ]
+    },
+    {
+      "id": "cancel_appointment",
+      "type": "form",
+      "title": "取消预约",
+      "ui_version": 1,
+      "fields": [
+        {
+          "id": "appointment_id",
+          "label": "选择可取消预约",
+          "type": "select",
+          "source": {
+            "action": "cancellableAppointmentOptions"
+          }
+        }
+      ],
+      "buttons": [
+        {
+          "label": "取消此预约",
+          "action": "cancelAppointment",
+          "prepare": "prepareCancelAppointment",
+          "fields": ["appointment_id"],
+          "confirm": true
+        }
+      ]
+    }
+  ]
+}

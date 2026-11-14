@@ -1,0 +1,57 @@
+{
+  "authentication_transport": "fixed_target_native_prototype",
+  "automatic_password_retries": 0,
+  "credential_file_read": true,
+  "credential_flow_account_bound": true,
+  "elapsed_ms": 1195,
+  "error_code": null,
+  "fresh_password_submitted": true,
+  "generated_at_utc": "2026-11-09T20:51:49.428343700+00:00",
+  "identity_matches": null,
+  "origin": "https://ehall.fudan.edu.cn",
+  "profile": {
+    "envelope_code": 0,
+    "http_status": 200,
+    "identity_matches": null,
+    "info_object": true,
+    "known_info_keys": [
+      "uid",
+      "name"
+    ]
+  },
+  "progress": {
+    "requests_started": 10,
+    "stage": "session_ready"
+  },
+  "raw_data_exported": false,
+  "remote_business_writes": 0,
+  "service_checks": [
+    {
+      "coverage": "page",
+      "elapsed_ms": 435,
+      "kind": "todo",
+      "method": "fudan.ehall.tasks",
+      "outcome": "typed_read_succeeded",
+      "record_count": 0
+    },
+    {
+      "coverage": "page",
+      "elapsed_ms": 88,
+      "kind": "done",
+      "method": "fudan.ehall.tasks",
+      "outcome": "typed_read_succeeded",
+      "record_count": 1
+    },
+    {
+      "elapsed_ms": 78,
+      "error_code": "SourceSchemaChanged",
+      "http_status": null,
+      "kind": "application",
+      "method": "fudan.ehall.tasks",
+      "outcome": "read_blocked"
+    }
+  ],
+  "service_transport": "current_workspace_native_core",
+  "state": "authenticated_self_profile",
+  "tool": "fudan-ehall-auth-prototype/0.1.0"
+}

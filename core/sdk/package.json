@@ -1,0 +1,30 @@
+{
+  "name": "@dansheng/plugin-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Type declarations for dansheng-core JavaScript plugin manifest v1",
+  "type": "module",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts"
+    },
+    "./campus-services": {
+      "types": "./campus-services.d.ts"
+    }
+  },
+  "files": [
+    "index.d.ts",
+    "campus-services.d.ts",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "audit:facade": "node scripts/check-runtime-facade.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "npm run audit:facade && npm run typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

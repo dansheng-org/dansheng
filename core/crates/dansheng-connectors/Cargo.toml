@@ -1,0 +1,45 @@
+[package]
+name = "dansheng-connectors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Transport-independent official Fudan timetable and Canvas connectors"
+
+[features]
+default = []
+login = ["services", "dep:reqwest", "dep:rsa", "dep:base64", "dep:cookie_store"]
+webvpn = ["login", "dep:aes", "dep:cfb-mode"]
+services = ["dep:dansheng-core", "dep:tokio", "dep:async-imap", "dep:tokio-rustls", "dep:rustls", "dep:webpki-roots", "dep:lettre", "dep:mail-parser", "dep:futures-util", "dep:uuid", "dep:base64"]
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+url.workspace = true
+regex = "1"
+scraper = "0.24"
+reqwest = { workspace = true, optional = true }
+rsa = { version = "0.9", optional = true }
+base64 = { version = "0.22", optional = true }
+cookie_store = { version = "0.22", optional = true }
+aes = { version = "0.8", optional = true }
+cfb-mode = { version = "0.8", optional = true }
+dansheng-core = { path = "../dansheng-core", optional = true }
+tokio = { workspace = true, optional = true }
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"], optional = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+webpki-roots = { version = "1", optional = true }
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"], optional = true }
+mail-parser = { version = "1", features = ["full_encoding"], optional = true }
+futures-util = { version = "0.3", optional = true }
+uuid = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio.workspace = true
+tempfile.workspace = true
+rcgen = "0.14"

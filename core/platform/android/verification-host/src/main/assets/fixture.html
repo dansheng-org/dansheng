@@ -1,0 +1,29 @@
+<!doctype html><html><meta charset="utf-8"><title>Synthetic page fixture</title>
+<body><h2>Offline identity: fixture-a</h2><p>This is synthetic verification, not campus login.</p>
+<script>
+window.fixtureIdentity = 'fixture-a';
+window.fixtureCalls = [];
+// Synthetic WAF wrapper: prove adapter uses this document's CURRENT APIs.
+window.fetch = function(url, options) {
+  window.fixtureCalls.push({transport:'fetch',url:url+'?synthetic-waf=dynamic',method:options.method});
+  if(url.includes('/hang')) return new Promise(()=>{});
+  if(url.includes('/body-interrupted')) return Promise.resolve({status:200,url:String(url),text:async()=>{throw new Error('synthetic interrupted body')}});
+  return Promise.resolve({status:200,url:window.fixtureResponseUrl || String(url),
+    headers:{get:name=>(window.fixtureHeaders || {})[name] || null},
+    text:async()=>JSON.stringify(window.fixtureReply || {e:0,d:{dynamic:true,data:[{base:{id:900,name:'Synthetic court',type:1}}]}})});
+};
+window.XMLHttpRequest = class {
+  open(method,url) { this.method=method;this.url=url+'?synthetic-waf=dynamic';this.headers={}; }
+  setRequestHeader(k,v) { this.headers[k]=v; }
+  send(form) {
+    window.fixtureCalls.push({transport:'xhr',url:this.url,method:this.method,sign:this.headers['sign-key'],form:form instanceof FormData});
+    if(window.fixtureNextWriteError) { window.fixtureNextWriteError=false;setTimeout(()=>this.onerror(),10);return; }
+    if(this.url.includes('/hang')) return;
+    if(this.url.includes('/status-zero')) { this.status=0;this.responseText='';setTimeout(()=>this.onload(),10);return; }
+    if(this.url.includes('/network-loss')) { setTimeout(()=>this.onerror(),10);return; }
+    this.status=200;this.responseURL=this.url;this.responseText=JSON.stringify({e:0,d:{dynamic:true}});
+    setTimeout(()=>this.onload(),10);
+  }
+  abort() { if(this.onabort)this.onabort(); }
+};
+</script></body></html>

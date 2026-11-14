@@ -1,0 +1,12 @@
+{
+  "stamp": "20261109T195920Z",
+  "source_sha256": "fdbaeab6fda9ab71025830d32de05899b1310fd589aff79efc45069da97e5945",
+  "tool_artifact_sha256": "64776fce889eaf0ee0945f4b6422db992478a37c3ab4705ea66f64810d488065",
+  "tool_main_sha256": "422bf1ef3ca030033204c8dfc3fc2e6bcd1de02343c7c62fd5f340c8052915a4",
+  "tool_lock_sha256": "3da5bea217448dcdfcc3d246d19c04cb9ea407b07411ac02c8e40140dcdc2912",
+  "reports": [
+    "final-public-services",
+    "final-canvas-session",
+    "final-canvas-bearer"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+ "model":{"id":"9007199254740993123456789","bizType":{"id":2,"nameZh":"公开本科及本研融通"},"nameZh":"合成公开培养方案","nameEn":"Synthetic public program","grade":"2031","type":"CUSTOM_SOURCE_PROGRAM","education":{"id":3,"nameZh":"合成未知教育类别","code":"SOURCE_UNKNOWN"},"major":{"id":71,"nameZh":"合成专业","code":"SYN71"},"department":{"id":81,"nameZh":"合成学院"},"credits":"128.50","duration":4,"termsCount":8,"effectiveOn":"2031-09-01","invalidOn":null,"auditState":"ACCEPTED","currentNode":{"token":"SYNTHETIC_EXCLUDED"}},
+ "paragraphMode":{"section-a":"NORMAL","section-b":"COURSE_MODULE_SETTING","section-c":"FUTURE_DYNAMIC_MODE"},
+ "programContent":{"id":91,"paragraphs":[{"id":"section-a","indexNo":1,"level":1,"titleZh":"培养目标","titleEn":"Learning goals","contentZh":"<p>完成公共要求。<a href=\"https://files.example.invalid/file?X-Amz-Signature=SYNTHETIC_EXCLUDED\">查看说明</a></p><script>SYNTHETIC_EXCLUDED</script>","contentEn":"<p>Public requirements.</p>"},{"id":"section-b","indexNo":2,"level":1,"titleZh":"课程要求","contentZh":null},{"id":"section-c","indexNo":3,"level":1,"titleZh":"未来动态区域","contentZh":"<style>SYNTHETIC_EXCLUDED</style><p>可见公共文本</p>"}]},
+ "courseModules":[
+  {"id":101,"nameZh":"公共课程","nameEn":"Public courses","parentAssoc":null,"requireInfo":{"requiredCredits":"12.50","requiredCourseNum":2,"requiredSubModuleNum":1,"requireAll":true},"limitInfo":{"creditsUpperLimit":20,"courseNumUpperLimit":4},"planCourses":[{"id":"9007199254740993123456001","compulsory":true,"termsText":"第一学期","course":{"id":201,"code":"SYN101","nameZh":"合成逻辑","credits":"2.50","claim":{"token":"SYNTHETIC_EXCLUDED"}}}],"children":[{"id":102,"nameZh":"专业基础","nameEn":null,"parentAssoc":101,"requireInfo":{"requiredCredits":3},"limitInfo":null,"planCourses":[],"children":[]}]},
+  {"id":102,"nameZh":"专业基础","nameEn":null,"parentAssoc":101,"requireInfo":{"requiredCredits":3},"limitInfo":null,"planCourses":[],"children":[]},
+  {"id":"SOURCE_SPECIAL_GROUP","nameZh":"特殊动态分组","children":[],"planCourses":[],"token":"SYNTHETIC_EXCLUDED"}
+ ],
+ "document":{"url":"https://files.example.invalid/word?verifier=SYNTHETIC_EXCLUDED"},
+ "studyRequire":{"undergraduateGrantTotalCredits":128.5,"private":"SYNTHETIC_EXCLUDED"},
+ "futureRegion":{"secret":"SYNTHETIC_EXCLUDED"}
+}

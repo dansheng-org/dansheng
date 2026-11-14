@@ -1,0 +1,7 @@
+[{"id":12,"course_id":81001,"user_id":"9007199254740993","course_section_id":21,
+  "type":"StudentEnrollment","enrollment_state":"active","role":"StudentEnrollment",
+  "grades":{"current_grade":"B+","final_grade":null,"current_score":88.0,"final_score":null,
+    "html_url":"https://canvas.example.invalid/courses/81001/grades/9007199254740993",
+    "unposted_current_grade":"SYNTHETIC_DO_NOT_PERSIST","unposted_current_score":100},
+  "sis_user_id":"SYNTHETIC_DO_NOT_PERSIST","user":{"login_id":"SYNTHETIC_DO_NOT_PERSIST"},
+  "observed_users":[{"id":99,"token":"SYNTHETIC_DO_NOT_PERSIST"}]}]

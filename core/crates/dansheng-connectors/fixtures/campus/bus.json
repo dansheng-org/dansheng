@@ -1,0 +1,1 @@
+{"d":{"data":[{"lists":[{"id":"synthetic-bus-1","start":"合成校区甲","end":"合成校区乙","stime":"08.30","etime":"09:15","arrow":"3","holiday":"0"},{"id":"synthetic-bus-2","start":"合成校区甲","end":"合成校区乙","stime":"","etime":"10:00","arrow":"2","holiday":"1"},{"id":"synthetic-bus-unscheduled","start":"甲","end":"乙","stime":"","etime":"","arrow":"0","holiday":"0"}]}]}}

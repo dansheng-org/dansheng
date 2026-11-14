@@ -1,0 +1,31 @@
+# Coordination artifact for main, NOT a crate manifest. Main owns the connector
+# Cargo.toml/lib.rs; merge these optional dependencies and feature entries there.
+# Existing async-trait/chrono/serde/serde_json/sha2/url dependencies are reused.
+[features]
+services = ["dep:dansheng-core", "dep:tokio", "dep:async-imap", "dep:tokio-rustls", "dep:rustls", "dep:webpki-roots", "dep:lettre", "dep:mail-parser", "dep:futures-util", "dep:uuid", "dep:log", "dep:base64"]
+
+[dependencies]
+dansheng-core = { path = "../dansheng-core", optional = true }
+tokio = { workspace = true, optional = true }
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"], optional = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+webpki-roots = { version = "1", optional = true }
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"], optional = true }
+mail-parser = { version = "1", features = ["full_encoding"], optional = true }
+futures-util = { version = "0.3", optional = true }
+uuid = { workspace = true, optional = true }
+base64 = { version = "0.22", optional = true }
+# async-imap emits credentials/bodies in TRACE. Host/FFI already apply this cap;
+# also include it in services so independent connector embeddings are safe.
+log = { version = "0.4", features = ["max_level_info"], optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rcgen = "0.14"
+
+# Add to connector lib.rs:
+# #[cfg(feature = "services")]
+# pub mod mail;
+# Registration: engine.register_service(Arc::new(dansheng_connectors::mail::MailService::default()))?;
+# mail-parser 1.0.1 requires Rust >= 1.98 (current toolchain 1.99.1 is compatible).
