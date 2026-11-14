@@ -2,13 +2,22 @@
 import 'package:flutter/material.dart';
 
 import '../learning_controller.dart';
+import '../models/timetable_models.dart';
+import 'week_timetable.dart';
 
-/// Compact browsable calendar widget supporting week/month toggle,
-/// month paging, jumping to today, and day selection with course/assignment dots.
+/// Browsable schedule card: the week timetable grid or a month calendar,
+/// with period paging, jumping to today and day selection.
 class CalendarHeader extends StatelessWidget {
   final LearningController controller;
 
-  const CalendarHeader({super.key, required this.controller});
+  /// Called when a course block of the week grid is tapped.
+  final void Function(List<TimetableCourse> courses)? onOpenCourses;
+
+  const CalendarHeader({
+    super.key,
+    required this.controller,
+    this.onOpenCourses,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -26,14 +35,20 @@ class CalendarHeader extends StatelessWidget {
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildNavigationRow(context, colorScheme),
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: _buildNavigationRow(context, colorScheme),
+            ),
             const SizedBox(height: 8),
             if (controller.calendarViewMode == 'week')
-              _buildWeekView(context, colorScheme)
+              WeekTimetable(
+                controller: controller,
+                onOpenCourses: onOpenCourses,
+              )
             else
               _buildMonthView(context, colorScheme),
           ],
@@ -43,18 +58,43 @@ class CalendarHeader extends StatelessWidget {
   }
 
   Widget _buildNavigationRow(BuildContext context, ColorScheme colorScheme) {
-    final monthDate = controller.calendarViewMode == 'week'
+    final isWeek = controller.calendarViewMode == 'week';
+    final monthDate = isWeek
         ? controller.selectedDate
         : controller.calendarMonth;
     final title = '${monthDate.year}年${monthDate.month}月';
+    final week = isWeek ? controller.weekOf(controller.selectedDate) : null;
 
-    final heading = Text(
-      title,
-      style: TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-        color: colorScheme.onSurface,
-      ),
+    final heading = Wrap(
+      spacing: 8,
+      runSpacing: 2,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: colorScheme.onSurface,
+          ),
+        ),
+        if (week != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '第$week周',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onPrimaryContainer,
+              ),
+            ),
+          ),
+      ],
     );
     final toggle = SegmentedButton<String>(
       showSelectedIcon: false,
@@ -70,13 +110,13 @@ class CalendarHeader extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
-          tooltip: '上一${controller.calendarViewMode == 'week' ? '周' : '月'}',
+          tooltip: '上一${isWeek ? '周' : '月'}',
           icon: const Icon(Icons.chevron_left_rounded),
           onPressed: controller.prevCalendarPeriod,
         ),
         TextButton(onPressed: controller.jumpToToday, child: const Text('今天')),
         IconButton(
-          tooltip: '下一${controller.calendarViewMode == 'week' ? '周' : '月'}',
+          tooltip: '下一${isWeek ? '周' : '月'}',
           icon: const Icon(Icons.chevron_right_rounded),
           onPressed: controller.nextCalendarPeriod,
         ),
@@ -111,42 +151,6 @@ class CalendarHeader extends StatelessWidget {
     );
   }
 
-  Widget _buildWeekView(BuildContext context, ColorScheme colorScheme) {
-    // Find Monday of the current selectedDate week
-    final sel = controller.selectedDate;
-    final monday = sel.subtract(Duration(days: sel.weekday - 1));
-
-    final weekDays = List.generate(7, (i) => monday.add(Duration(days: i)));
-    const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日'];
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
-      children: List.generate(7, (i) {
-        final day = weekDays[i];
-        final isSelected =
-            day.year == sel.year &&
-            day.month == sel.month &&
-            day.day == sel.day;
-        final isToday = _isToday(day);
-        final hasCourse = controller.hasCoursesOn(day);
-        final hasAssign = controller.hasAssignmentsOn(day);
-
-        return Expanded(
-          child: _DayItem(
-            weekdayLabel: weekdayLabels[i],
-            dayNumber: day.day,
-            isSelected: isSelected,
-            isToday: isToday,
-            hasCourse: hasCourse,
-            hasAssign: hasAssign,
-            colorScheme: colorScheme,
-            onTap: () => controller.selectDate(day),
-          ),
-        );
-      }),
-    );
-  }
-
   /// Month calendar grid with weekday headers.
   Widget _buildMonthView(BuildContext context, ColorScheme colorScheme) {
     final firstDayOfMonth = controller.calendarMonth;
@@ -163,6 +167,7 @@ class CalendarHeader extends StatelessWidget {
 
     const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日'];
     final sel = controller.selectedDate;
+    final today = controller.today;
 
     return Column(
       children: [
@@ -202,22 +207,19 @@ class CalendarHeader extends StatelessWidget {
                 firstDayOfMonth.month,
                 dayNum,
               );
-              final isSelected =
-                  day.year == sel.year &&
-                  day.month == sel.month &&
-                  day.day == sel.day;
-              final isToday = _isToday(day);
-              final hasCourse = controller.hasCoursesOn(day);
-              final hasAssign = controller.hasAssignmentsOn(day);
-
               return Expanded(
                 child: _DayItem(
-                  weekdayLabel: null,
                   dayNumber: dayNum,
-                  isSelected: isSelected,
-                  isToday: isToday,
-                  hasCourse: hasCourse,
-                  hasAssign: hasAssign,
+                  isSelected:
+                      day.year == sel.year &&
+                      day.month == sel.month &&
+                      day.day == sel.day,
+                  isToday:
+                      day.year == today.year &&
+                      day.month == today.month &&
+                      day.day == today.day,
+                  hasCourse: controller.hasCoursesOn(day),
+                  hasAssign: controller.hasAssignmentsOn(day),
                   colorScheme: colorScheme,
                   onTap: () => controller.selectDate(day),
                 ),
@@ -225,20 +227,39 @@ class CalendarHeader extends StatelessWidget {
             }),
           );
         }),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 14,
+          alignment: WrapAlignment.center,
+          children: [
+            _legend(colorScheme.primary, '有课', colorScheme),
+            _legend(Colors.amber.shade700, '作业截止', colorScheme),
+          ],
+        ),
       ],
     );
   }
 
-  bool _isToday(DateTime date) {
-    final now = DateTime.now().toUtc().add(const Duration(hours: 8));
-    return date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day;
+  Widget _legend(Color dot, String label, ColorScheme colorScheme) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
   }
 }
 
 class _DayItem extends StatelessWidget {
-  final String? weekdayLabel;
   final int dayNumber;
   final bool isSelected;
   final bool isToday;
@@ -248,7 +269,6 @@ class _DayItem extends StatelessWidget {
   final VoidCallback onTap;
 
   const _DayItem({
-    this.weekdayLabel,
     required this.dayNumber,
     required this.isSelected,
     required this.isToday,
@@ -271,7 +291,8 @@ class _DayItem extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        constraints: BoxConstraints(minHeight: weekdayLabel != null ? 54 : 42),
+        constraints: const BoxConstraints(minHeight: 42),
+        margin: const EdgeInsets.all(1),
         padding: const EdgeInsets.symmetric(vertical: 2),
         decoration: BoxDecoration(
           color: bgColor,
@@ -287,19 +308,6 @@ class _DayItem extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (weekdayLabel != null) ...[
-              Text(
-                weekdayLabel!,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: isSelected
-                      ? colorScheme.onPrimaryContainer
-                      : colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 2),
-            ],
             Text(
               '$dayNumber',
               style: TextStyle(

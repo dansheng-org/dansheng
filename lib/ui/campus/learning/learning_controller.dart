@@ -117,7 +117,119 @@ class LearningController extends ChangeNotifier {
   final Set<String> _downloadedFileIds = {};
   Set<String> get downloadedFileIds => _downloadedFileIds;
 
+  final Set<String> _loadingCourseIds = {};
+
+  /// Whether the details of a Canvas course are being fetched right now.
+  bool isCourseLoading(String courseId) => _loadingCourseIds.contains(courseId);
+
   // --- Computed Queries ---
+
+  /// Today's date in campus time (UTC+8).
+  DateTime get today {
+    final now = currentTime().toUtc().add(const Duration(hours: 8));
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  /// Monday of the week that contains the selected date.
+  DateTime get weekStart => DateTime(
+    _selectedDate.year,
+    _selectedDate.month,
+    _selectedDate.day - (_selectedDate.weekday - 1),
+  );
+
+  /// Teaching week of a date in the shown semester, or null outside of it.
+  int? weekOf(DateTime date) {
+    final semester = _timetableData?.semester ?? _selectedSemester;
+    if (semester == null) return null;
+    final start = DateTime.utc(
+      semester.startsOn.year,
+      semester.startsOn.month,
+      semester.startsOn.day,
+    );
+    final days = DateTime.utc(
+      date.year,
+      date.month,
+      date.day,
+    ).difference(start).inDays;
+    final week = (days / 7).floor() + 1;
+    return week >= 1 && week <= 30 ? week : null;
+  }
+
+  /// Timetable courses on any date, ordered by their first unit.
+  List<TimetableCourse> coursesOn(DateTime date) =>
+      _timetableData?.coursesOn(date) ?? const [];
+
+  /// Number of teaching units the week grid has to show.
+  int get visibleUnits {
+    var last = 8;
+    for (final course in _timetableData?.courses ?? const <TimetableCourse>[]) {
+      if (course.endUnit > last) last = course.endUnit;
+    }
+    return last.clamp(8, TeachingUnit.all.length);
+  }
+
+  CanvasCourse? courseById(String? id) {
+    if (id == null) return null;
+    for (final course in _courses) {
+      if (course.id == id) return course;
+    }
+    return null;
+  }
+
+  static final RegExp _noise = RegExp(r'[\s()（）\[\]【】·\-_.:：,，]');
+  static String _fold(String? raw) =>
+      (raw ?? '').toLowerCase().replaceAll(_noise, '');
+
+  /// The eLearning course that belongs to a timetable course, matched by
+  /// course code first and by name second.
+  CanvasCourse? canvasCourseFor(TimetableCourse course) {
+    final name = _fold(course.name);
+    final code = _fold(course.courseCode);
+    CanvasCourse? partial;
+    for (final candidate in _courses) {
+      final otherName = _fold(candidate.name);
+      final otherCode = _fold(candidate.courseCode);
+      if (code.length >= 4 &&
+          (otherCode == code ||
+              otherCode.contains(code) ||
+              otherName.contains(code) ||
+              (otherCode.length >= 6 && code.startsWith(otherCode)))) {
+        return candidate;
+      }
+      if (name.isNotEmpty && otherName == name) return candidate;
+      if (partial == null &&
+          name.length >= 2 &&
+          otherName.length >= 2 &&
+          (otherName.contains(name) || name.contains(otherName))) {
+        partial = candidate;
+      }
+    }
+    return partial;
+  }
+
+  /// Every weekly session of the timetable course with this name.
+  List<TimetableCourse> sessionsNamed(String name) {
+    final list = [
+      for (final course in _timetableData?.courses ?? const <TimetableCourse>[])
+        if (course.name == name) course,
+    ];
+    list.sort(
+      (a, b) => a.weekday != b.weekday
+          ? a.weekday.compareTo(b.weekday)
+          : a.startUnit.compareTo(b.startUnit),
+    );
+    return list;
+  }
+
+  /// Weekly sessions of the timetable course matched to an eLearning course.
+  List<TimetableCourse> sessionsFor(CanvasCourse course) {
+    for (final item in _timetableData?.courses ?? const <TimetableCourse>[]) {
+      if (canvasCourseFor(item)?.id == course.id) {
+        return sessionsNamed(item.name);
+      }
+    }
+    return const [];
+  }
 
   /// Courses occurring on the currently selected date.
   List<TimetableCourse> get coursesOnSelectedDate {
@@ -187,6 +299,7 @@ class LearningController extends ChangeNotifier {
     _folders.clear();
     _materials.clear();
     _modules.clear();
+    _loadingCourseIds.clear();
     _downloadingFileIds.clear();
     _downloadedFileIds.clear();
   }
@@ -422,9 +535,6 @@ class LearningController extends ChangeNotifier {
       }
 
       _courses = courseList;
-      if (_courses.isNotEmpty && _selectedCourseId == null) {
-        _selectedCourseId = _courses.first.id;
-      }
 
       // Load assignments and details for enrolled courses
       final enrolled = List<CanvasCourse>.of(_courses);
@@ -458,6 +568,18 @@ class LearningController extends ChangeNotifier {
   /// Load assignments, folders, materials, announcements for a specific course.
   Future<void> loadCourseDetails(String courseId, {int? token}) async {
     final curToken = token ?? _requestToken;
+    _loadingCourseIds.add(courseId);
+    try {
+      await _loadCourseDetails(courseId, curToken);
+    } finally {
+      if (curToken == _requestToken) {
+        _loadingCourseIds.remove(courseId);
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> _loadCourseDetails(String courseId, int curToken) async {
     final course = _courses.firstWhere(
       (c) => c.id == courseId,
       orElse: () => CanvasCourse(id: courseId, name: ''),

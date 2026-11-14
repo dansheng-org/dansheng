@@ -343,7 +343,6 @@ void main() {
         expect(calledMethods, contains('fudan.semesters'));
         expect(calledMethods, contains('fudan.timetable.sync'));
         expect(calledMethods, contains('canvas.courses.sync'));
-        expect(calledMethods, contains('canvas.modules.sync'));
 
         // Check header title
         expect(find.text('课程学习'), findsOneWidget);
@@ -368,10 +367,21 @@ void main() {
         expect(find.textContaining('截止'), findsWidgets);
         expect(find.text('待提交'), findsOneWidget);
 
+        // Week grid shows the teaching week and the course block
+        expect(find.text('第1周'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('timetable-block-7-1')),
+          findsOneWidget,
+        );
+
         // Canvas Enrolled Courses section
-        expect(find.text('已选课程与资料'), findsOneWidget);
+        expect(find.text('全部 eLearning'), findsOneWidget);
         expect(find.text('计算机系统导论'), findsWidgets);
-        // Modules displayed
+        // Course files load only once the course page is opened
+        expect(calledMethods, isNot(contains('canvas.modules.sync')));
+        await tester.tap(find.text('计算机系统导论').last);
+        await tester.pumpAndSettle();
+        expect(calledMethods, contains('canvas.modules.sync'));
         expect(find.text('第1模块：计算机系统概览'), findsOneWidget);
       },
     );
@@ -540,6 +550,10 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        // Open the course page from the eLearning list
+        await tester.tap(find.text('计算机系统导论').last);
+        await tester.pumpAndSettle();
+
         // Root file "课程指引.pdf" should be visible
         expect(find.text('课程指引.pdf'), findsOneWidget);
 
@@ -618,7 +632,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Tap '公告' sub-tab
+      // Open the course page, then its '公告' sub-tab
+      await tester.tap(find.text('计算机系统导论').last);
+      await tester.pumpAndSettle();
       await tester.tap(find.textContaining('公告').first);
       await tester.pumpAndSettle();
 
@@ -841,14 +857,15 @@ void main() {
       // Calls are now triggered
       expect(callCount, greaterThan(0));
 
-      // Test tapping course card to view course details modal
+      // Tapping a course card opens its course page
       await tester.tap(find.text('高等数学'));
       await tester.pumpAndSettle();
-      expect(find.text('课程代码: SYNTH101.01'), findsOneWidget);
-      expect(find.text('第 1, 2, 3, 4 周'), findsOneWidget);
+      expect(find.text('SYNTH101.01'), findsOneWidget);
+      expect(find.textContaining('第 1-4 周'), findsOneWidget);
+      expect(find.text('eLearning 中暂未找到与这门课对应的课程'), findsOneWidget);
 
-      // Close bottom sheet
-      await tester.tapAt(const Offset(20, 20));
+      // Back to the schedule
+      await tester.pageBack();
       await tester.pumpAndSettle();
 
       // Test tapping assignment card to view assignment details modal
@@ -857,5 +874,68 @@ void main() {
       expect(find.text('100.0 分'), findsOneWidget);
       expect(find.textContaining('完成实验一的全部要求'), findsOneWidget);
     });
+
+    testWidgets(
+      '11. Week grid pages between weeks and a course block opens the matched eLearning course',
+      (tester) async {
+        final List<Map<String, dynamic>> materialCalls = [];
+        _TestBridge.handler = (method, params) async {
+          switch (method) {
+            case 'fudan.semesters':
+              return semestersFixture;
+            case 'fudan.timetable.sync':
+              return ugTimetableFixture;
+            case 'canvas.courses.sync':
+              return [
+                ...canvasCoursesFixture,
+                {
+                  'id': '81003',
+                  'name': '高等数学 2026秋',
+                  'course_code': 'SYNTH101.01',
+                },
+              ];
+            case 'canvas.materials.sync':
+              materialCalls.add(params);
+              return params['course_id'] == '81003'
+                  ? canvasMaterialsFixture
+                  : [];
+            default:
+              return [];
+          }
+        };
+
+        final client = DanshengClient(bridge: _TestBridge());
+        final controller = DanshengController(client: client);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: LearningPage(
+              controller: controller,
+              now: () => DateTime.utc(2026, 11, 8, 4),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // The week before teaching week 1 holds the week-zero Sunday course
+        await tester.tap(find.byTooltip('上一周'));
+        await tester.pumpAndSettle();
+        expect(find.text('第1周'), findsNothing);
+        expect(find.textContaining('入学前导论课'), findsWidgets);
+
+        await tester.tap(find.text('今天'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('入学前导论课'), findsNothing);
+
+        // Tapping the block enters the course page of the matched course
+        await tester.tap(find.byKey(const ValueKey('timetable-block-7-1')));
+        await tester.pumpAndSettle();
+        expect(materialCalls.single['course_id'], equals('81003'));
+        expect(find.text('高等数学 2026秋'), findsOneWidget);
+        expect(find.textContaining('光华楼西主楼101'), findsOneWidget);
+        expect(find.text('课程指引.pdf'), findsOneWidget);
+        expect(find.text('eLearning 中暂未找到与这门课对应的课程'), findsNothing);
+      },
+    );
   });
 }
