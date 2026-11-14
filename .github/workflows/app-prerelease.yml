@@ -132,6 +132,9 @@ jobs:
 
   publish:
     needs: build
+    # Automatic runs skip the manual checks job. Override inherited skip status,
+    # while still requiring a successful audited build and a non-cancelled run.
+    if: always() && !cancelled() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
