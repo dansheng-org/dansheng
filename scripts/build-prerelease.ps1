@@ -71,6 +71,7 @@ try {
     $suffix = if ($IsWindows) { '.exe' } else { '' }
     & (Join-Path $buildTools "zipalign$suffix") -c -P 16 4 $apk 2>&1 | Tee-Object -FilePath (Join-Path $out 'zipalign.txt')
     if ($LASTEXITCODE -ne 0) { throw 'APK ZIP alignment validation failed.' }
+    Add-Content -LiteralPath (Join-Path $out 'zipalign.txt') -Value 'zipalign -c -P 16 4: passed (exit 0).'
     $signer = Join-Path $buildTools $(if ($IsWindows) { 'apksigner.bat' } else { 'apksigner' })
     & $signer verify --verbose --print-certs $apk 2>&1 | Tee-Object -FilePath (Join-Path $out 'signature.txt')
     if ($LASTEXITCODE -ne 0) { throw 'APK signature validation failed.' }
@@ -99,6 +100,9 @@ Core dependency: **$($validation.state)**; this is a development review build.
 Download the APK and SHA256SUMS below. The signing identity is dedicated to Pre-release builds; switching from another identity requires a separate install/migration decision.
 "@
     [IO.File]::WriteAllText((Join-Path $out 'release-notes.md'), $body.Replace("`r`n","`n")+"`n")
+    foreach ($name in @($identity.apk_name,'SHA256SUMS','build-info.json','apk-audit.json','signature.txt','zipalign.txt','release-notes.md')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $out $name)) -or (Get-Item -LiteralPath (Join-Path $out $name)).Length -eq 0) { throw "Missing or empty release asset: $name" }
+    }
     [pscustomobject]@{ apk=$apk; version=$identity.version; abi='arm64-v8a'; sha256=$sha; tag=$identity.tag } | ConvertTo-Json
 } finally {
     foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }

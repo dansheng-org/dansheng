@@ -167,6 +167,7 @@ jobs:
           set -euo pipefail
           cd release
           sha256sum --check SHA256SUMS
+          for asset in ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt release-notes.md; do test -s "$asset"; done
           gh api "repos/$GH_REPO/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$APP_COMMIT" >/dev/null
           gh release create "$RELEASE_TAG" ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt \
             --verify-tag --title "Android $APP_VERSION Pre-release (${APP_COMMIT:0:12})" \
