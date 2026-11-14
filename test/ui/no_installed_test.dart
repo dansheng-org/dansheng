@@ -25,8 +25,8 @@ void main() {
       await tester.pumpAndSettle();
 
       // 1. Root defaults to eHall
-      expect(find.text('校园办事'), findsOneWidget);
-      expect(find.text('设置账号'), findsWidgets);
+      expect(find.text('eHall').first, findsOneWidget);
+      expect(find.byTooltip('账号与校园卡'), findsOneWidget);
       expect(find.text('场馆预约'), findsOneWidget);
 
       // Verify five bottom navigation labels

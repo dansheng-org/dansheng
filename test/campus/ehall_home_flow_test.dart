@@ -10,7 +10,6 @@ import 'package:dansheng_app/ui/core/dansheng_client.dart';
 import 'package:dansheng_app/ui/core/dansheng_state.dart';
 import 'package:dansheng_app/ui/campus/ehall/ehall_page.dart';
 import 'package:dansheng_app/ui/campus/ehall/life_page.dart';
-import 'package:dansheng_app/ui/screens/account_balance_screen.dart';
 import 'package:dansheng_app/ui/theme/app_theme.dart';
 
 class MockHomeFlowBridge implements DanshengBridge {
@@ -200,396 +199,71 @@ Widget buildTestApp({required Widget home}) {
 }
 
 void main() {
-  group('eHall Home Interaction & Metric Flows', () {
-    late MockHomeFlowBridge mockBridge;
-    late DanshengClient client;
-    late DanshengController controller;
-
-    setUp(() async {
-      mockBridge = MockHomeFlowBridge();
-      client = DanshengClient(bridge: mockBridge);
-      controller = DanshengController(client: client);
-      await controller.initialize();
-      await controller.refreshBalance();
-    });
-
-    testWidgets(
-      '1. Tapping top balance card opens LifePage.transactions directly; refresh icon reads balance',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // Standalone 校园卡明细 entry must not appear in the service list
-        expect(find.widgetWithText(ListTile, '校园卡明细'), findsNothing);
-
-        // Tap the refresh icon: reads balance without navigating
-        mockBridge.balanceData = {
-          'balance': '366.80',
-          'holder_name': '复旦同学',
-          'currency': 'CNY',
-          'updated_at': '2026-11-08T09:00:00Z',
-        };
-        await tester.tap(find.byTooltip('刷新余额'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('¥ 366.80'), findsOneWidget);
-        expect(find.byType(LifePage), findsNothing);
-        expect(find.byType(AccountBalanceScreen), findsNothing);
-
-        // Tap the card body: navigates directly to LifePage.transactions without trip to account settings
-        await tester.tap(find.text('¥ 366.80'));
-        await tester.pumpAndSettle();
-
-        expect(find.byType(LifePage), findsOneWidget);
-        expect(find.text('校园卡明细'), findsOneWidget);
-        expect(find.byType(AccountBalanceScreen), findsNothing);
-
-        // Verifies transactions endpoint was queried
-        final calls = mockBridge.campusCalls.map((c) => c['method']).toList();
-        expect(calls, contains('fudan.ecard.transactions'));
-      },
+  late MockHomeFlowBridge bridge;
+  late DanshengController controller;
+  setUp(() async {
+    bridge = MockHomeFlowBridge();
+    controller = DanshengController(client: DanshengClient(bridge: bridge));
+    await controller.initialize();
+  });
+  testWidgets('home entries have one title and make no campus reads', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildTestApp(home: EHallPage(controller: controller)),
     );
-
-    testWidgets(
-      '2. Dorm power: cached on open, first tap fetches live metric, second tap opens LifePage.power',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // Zero hidden live network calls on open
-        var livePowerCalls = mockBridge.campusCalls
-            .where((c) => c['method'] == 'fudan.electricity')
-            .toList();
-        expect(livePowerCalls, isEmpty);
-
-        // Cached value is shown
-        expect(find.text('45.2 kWh'), findsOneWidget);
-
-        // First tap: cache is not treated as successful user tap; triggers live fetch
-        await tester.tap(find.text('寝室电量'));
-        await tester.pumpAndSettle();
-
-        // Verified live network call happened
-        livePowerCalls = mockBridge.campusCalls
-            .where((c) => c['method'] == 'fudan.electricity')
-            .toList();
-        expect(livePowerCalls, hasLength(1));
-
-        // Real live metric updated on card
-        expect(find.text('42.0 kWh'), findsOneWidget);
-        expect(find.byType(LifePage), findsNothing);
-
-        // Second tap: opens detail LifePage.power
-        await tester.tap(find.text('寝室电量'));
-        await tester.pumpAndSettle();
-
-        expect(find.byType(LifePage), findsOneWidget);
-        expect(find.byType(PowerDetailPage), findsOneWidget);
-        expect(find.text('42.0'), findsOneWidget);
-        expect(find.text('kWh'), findsWidgets);
-        expect(find.textContaining('剩余：42.0 kWh'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '3. Library: first tap fetches live metric and shows real numbers, second tap opens LifePage.library',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // Initial state: no network call, placeholder subtitle
-        var libCalls = mockBridge.campusCalls
-            .where((c) => c['method'] == 'fudan.library.occupancy')
-            .toList();
-        expect(libCalls, isEmpty);
-        expect(find.text('各馆舍在馆人数与实时负载'), findsOneWidget);
-
-        // First tap: fetches live occupancy
-        await tester.scrollUntilVisible(find.text('图书馆客流'), 200);
-        await tester.tap(find.text('图书馆客流'));
-        await tester.pumpAndSettle();
-
-        libCalls = mockBridge.campusCalls
-            .where((c) => c['method'] == 'fudan.library.occupancy')
-            .toList();
-        expect(libCalls, hasLength(1));
-
-        // Inline metric displays real numbers without faking
-        expect(find.textContaining('142人'), findsOneWidget);
-        expect(find.textContaining('328人'), findsOneWidget);
-        expect(find.byType(LifePage), findsNothing);
-
-        // Second tap: opens LifePage.library
-        await tester.tap(find.text('图书馆客流'));
-        await tester.pumpAndSettle();
-
-        expect(find.byType(LifePage), findsOneWidget);
-        expect(find.text('当前在馆 142 人 / 容量 500'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '4. Dining: first tap fetches live metric and shows real numbers, second tap opens LifePage.dining',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        var diningCalls = mockBridge.campusCalls
-            .where((c) => c['method'] == 'fudan.dining.occupancy')
-            .toList();
-        expect(diningCalls, isEmpty);
-
-        // First tap: fetches live dining occupancy
-        await tester.scrollUntilVisible(find.text('食堂实时客流'), 200);
-        await tester.tap(find.text('食堂实时客流'));
-        await tester.pumpAndSettle();
-
-        diningCalls = mockBridge.campusCalls
-            .where((c) => c['method'] == 'fudan.dining.occupancy')
-            .toList();
-        expect(diningCalls, hasLength(1));
-
-        // Inline metric displays real numbers
-        expect(find.textContaining('210人'), findsOneWidget);
-        expect(find.textContaining('380人'), findsOneWidget);
-        expect(find.byType(LifePage), findsNothing);
-
-        // Second tap: opens LifePage.dining
-        await tester.tap(find.text('食堂实时客流'));
-        await tester.pumpAndSettle();
-
-        expect(find.byType(LifePage), findsOneWidget);
-        expect(find.text('当前就餐 210 人 / 餐厅容量 600'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '5. Direct detail navigation for selectors (rooms), route tools (bus), and announcements',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // 1. Bus: route tool navigates directly on single tap
-        await tester.scrollUntilVisible(find.text('校车班次时刻'), 200);
-        await tester.tap(find.text('校车班次时刻'));
-        await tester.pumpAndSettle();
-
-        expect(find.byType(LifePage), findsOneWidget);
-        expect(find.text('校车班次'), findsOneWidget);
-
-        // Pop back to home
-        Navigator.of(tester.element(find.byType(LifePage))).pop();
-        await tester.pumpAndSettle();
-
-        // 2. Announcements: navigates directly on single tap
-        await tester.scrollUntilVisible(find.text('教务公告'), 200);
-        await tester.tap(find.text('教务公告'));
-        await tester.pumpAndSettle();
-
-        expect(find.byType(LifePage), findsOneWidget);
-        expect(find.text('教务公告'), findsWidgets);
-      },
-    );
-
-    testWidgets('6. No duplicate in-flight reads when user taps rapidly', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(800, 1400);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      mockBridge.callDelayMs = 200;
-
+    await tester.pumpAndSettle();
+    expect(bridge.campusCalls, isEmpty);
+    for (final tile in tester.widgetList<ListTile>(find.byType(ListTile))) {
+      expect(tile.subtitle, isNull);
+      expect((tile.title! as Text).maxLines, 1);
+    }
+  });
+  for (final entry in {
+    '校园卡': LifeService.transactions,
+    '教室空位': LifeService.rooms,
+    '寝室电量': LifeService.power,
+    '图书馆客流': LifeService.library,
+  }.entries) {
+    testWidgets('one tap opens ${entry.key}', (tester) async {
       await tester.pumpWidget(
         buildTestApp(home: EHallPage(controller: controller)),
       );
       await tester.pumpAndSettle();
-
-      await tester.scrollUntilVisible(find.text('图书馆客流'), 200);
-
-      // Tap once
-      await tester.tap(find.text('图书馆客流'));
-      await tester.pump(const Duration(milliseconds: 50));
-
-      // Rapid tap while read is still in-flight
-      await tester.tap(find.text('图书馆客流'));
-      await tester.pump(const Duration(milliseconds: 50));
-
+      await tester.ensureVisible(find.text(entry.key));
+      await tester.tap(find.text(entry.key));
       await tester.pumpAndSettle();
-
-      final libCalls = mockBridge.campusCalls
-          .where((c) => c['method'] == 'fudan.library.occupancy')
-          .toList();
       expect(
-        libCalls,
-        hasLength(1),
-        reason: 'Duplicate in-flight read must be suppressed',
+        tester.widget<LifePage>(find.byType(LifePage)).service,
+        entry.value,
+      );
+      expect(
+        bridge.campusCalls.any((c) => c['method'] == entry.value.method),
+        isTrue,
       );
     });
-
-    testWidgets(
-      '7. Retries failed reads and does not advance to detail until successful',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        mockBridge.throwOnMethod = 'fudan.dining.occupancy';
-        mockBridge.throwCode = 'NetworkTimeout';
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // First tap fails due to network error
-        await tester.scrollUntilVisible(find.text('食堂实时客流'), 200);
-        await tester.tap(find.text('食堂实时客流'));
-        await tester.pumpAndSettle();
-
-        expect(find.textContaining('点击重试'), findsOneWidget);
-        expect(find.byType(LifePage), findsNothing);
-
-        // Recover bridge
-        mockBridge.throwOnMethod = null;
-
-        // Second tap retries the failed read
-        await tester.tap(find.text('食堂实时客流'));
-        await tester.pumpAndSettle();
-
-        // Successful read now displays real metric
-        expect(find.textContaining('210人'), findsOneWidget);
-        expect(find.byType(LifePage), findsNothing);
-
-        // Third tap now opens LifePage detail
-        await tester.tap(find.text('食堂实时客流'));
-        await tester.pumpAndSettle();
-
-        expect(find.byType(LifePage), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '8. Explicit 2FA error dispatches directly to LifePage.dining',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        mockBridge.throwOnMethod = 'fudan.dining.occupancy';
-        mockBridge.throwCode = 'TwoFactorRequired';
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.scrollUntilVisible(find.text('食堂实时客流'), 200);
-        await tester.tap(find.text('食堂实时客流'));
-        await tester.pumpAndSettle();
-
-        // Dispatched directly to LifePage.dining for 2FA handling
-        expect(find.byType(LifePage), findsOneWidget);
-        expect(find.text('食堂客流'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '9. General authentication required explicitly navigates to account screen',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        mockBridge.throwOnMethod = 'fudan.library.occupancy';
-        mockBridge.throwCode = 'AuthenticationRequired';
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.scrollUntilVisible(find.text('图书馆客流'), 200);
-        await tester.tap(find.text('图书馆客流'));
-        await tester.pumpAndSettle();
-
-        // Explicit navigation to account settings for login recovery
-        expect(find.byType(AccountBalanceScreen), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '10. Per-account state drops in-flight reads and isolates fetched status on account switch',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // Fetch dorm power on Account 1
-        await tester.tap(find.text('寝室电量'));
-        await tester.pumpAndSettle();
-        expect(find.text('42.0 kWh'), findsOneWidget);
-
-        // Switch to Account 2
-        await controller.switchAccount('21307130099');
-        await tester.pumpAndSettle();
-
-        // Account 2 has fresh pending state, live metric not fetched yet
-        expect(find.text('42.0 kWh'), findsNothing);
-        expect(find.text('45.2 kWh'), findsOneWidget); // Offline cache
-
-        // First tap on Account 2 triggers live fetch for Account 2, does NOT navigate
-        await tester.tap(find.text('寝室电量'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('42.0 kWh'), findsOneWidget);
-        expect(find.byType(LifePage), findsNothing);
-      },
-    );
-  });
+  }
+  for (final width in [240.0, 360.0]) {
+    testWidgets('entry list fits narrow screens with large text $width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: MediaQueryData(
+              size: Size(width, 900),
+              textScaler: TextScaler.linear(1.8),
+            ),
+            child: EHallPage(controller: controller),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  }
 }

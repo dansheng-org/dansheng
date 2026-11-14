@@ -7,6 +7,16 @@ class CampusVenue {
 
   const CampusVenue({required this.id, required this.name});
 
+  String get campus {
+    for (final label in ['邯郸', '江湾', '枫林', '张江']) {
+      if (name.contains(label)) return '$label校区';
+    }
+    if (['北区', '正大', '南区', '本北', '国权路', '国福路'].any(name.contains)) {
+      return '邯郸校区';
+    }
+    return '其他校区';
+  }
+
   factory CampusVenue.fromJson(Map<String, dynamic> json) {
     return CampusVenue(
       id: (json['id'] as num?)?.toInt() ?? 0,
@@ -24,6 +34,10 @@ class VenueSlot {
   final int courtId;
   final String courtName;
   final bool available;
+  final String? startTime;
+  final String? endTime;
+  final bool readOnly;
+  final bool occupied;
 
   const VenueSlot({
     required this.periodId,
@@ -31,6 +45,10 @@ class VenueSlot {
     required this.courtId,
     required this.courtName,
     required this.available,
+    this.startTime,
+    this.endTime,
+    this.readOnly = false,
+    this.occupied = false,
   });
 
   factory VenueSlot.fromJson(Map<String, dynamic> json) {
@@ -40,6 +58,10 @@ class VenueSlot {
       courtId: (json['court_id'] as num?)?.toInt() ?? 0,
       courtName: json['court_name']?.toString() ?? '',
       available: json['available'] == true,
+      startTime: json['start_time']?.toString(),
+      endTime: json['end_time']?.toString(),
+      readOnly: json['read_only'] == true,
+      occupied: json['occupied'] == true,
     );
   }
 
@@ -50,6 +72,28 @@ class VenueSlot {
     'court_name': courtName,
     'available': available,
   };
+
+  /// Campus clock fields, independent of the device's time zone.
+  bool upcoming(DateTime day, DateTime now) {
+    final match = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(startTime ?? time);
+    if (match == null) return true;
+    final start = DateTime.utc(
+      day.year,
+      day.month,
+      day.day,
+      int.parse(match[1]!),
+      int.parse(match[2]!),
+    );
+    final clock = DateTime.utc(
+      now.year,
+      now.month,
+      now.day,
+      now.hour,
+      now.minute,
+      now.second,
+    );
+    return start.isAfter(clock);
+  }
 }
 
 /// An individual time and court slot within an appointment.

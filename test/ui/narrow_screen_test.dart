@@ -89,7 +89,7 @@ void main() {
       );
 
       // 1. Root defaults to eHall: verify rendering without overflow
-      expect(find.text('校园办事'), findsOneWidget);
+      expect(find.text('eHall').first, findsOneWidget);
       expect(find.text('eHall'), findsWidgets);
 
       // 2. Open Account & Balance from eHall toolbar

@@ -465,10 +465,10 @@ void main() {
     });
 
     test('9. Each direction maps to a Material icon', () {
-      expect(BusDirection.FORWARD.icon, Icons.arrow_forward);
-      expect(BusDirection.NONE.icon, Icons.arrow_forward);
-      expect(BusDirection.BACKWARD.icon, Icons.arrow_back);
-      expect(BusDirection.DUAL.icon, Icons.swap_horiz);
+      expect(BusDirection.FORWARD.icon, Icons.arrow_forward_rounded);
+      expect(BusDirection.NONE.icon, Icons.arrow_forward_rounded);
+      expect(BusDirection.BACKWARD.icon, Icons.arrow_back_rounded);
+      expect(BusDirection.DUAL.icon, Icons.swap_horiz_rounded);
     });
 
     testWidgets('10. Rows draw direction as an icon, never an arrow character', (
@@ -512,18 +512,18 @@ void main() {
             (w) => w is Icon && w.icon == icon && w.semanticLabel == label,
           );
 
-      final dual = directionIcon(Icons.swap_horiz, '双向');
+      final dual = directionIcon(Icons.swap_horiz_rounded, '双向');
       expect(dual, findsOneWidget);
       // The swap button draws the same glyph, so the page reads as one family.
-      expect(find.byIcon(Icons.swap_horiz), findsNWidgets(2));
-      expect(directionIcon(Icons.arrow_forward, '单向'), findsOneWidget);
+      expect(find.byIcon(Icons.swap_horiz_rounded), findsNWidgets(2));
+      expect(directionIcon(Icons.arrow_forward_rounded, '单向'), findsOneWidget);
 
       final icon = tester.widget<Icon>(dual);
       expect(icon.size, 22);
       expect(icon.color, Theme.of(tester.element(dual)).colorScheme.outline);
 
-      // Only the dual row keeps its caption
-      expect(find.text('双向'), findsOneWidget);
+      // The glyph communicates direction without a second caption
+      expect(find.text('双向'), findsNothing);
 
       // Icon and caption must not make screen readers say it twice
       final card = find.ancestor(of: dual, matching: find.byType(Card));

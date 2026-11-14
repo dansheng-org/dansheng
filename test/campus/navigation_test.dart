@@ -57,7 +57,7 @@ void main() {
 
         // Active page is EHallPage
         expect(find.byType(EHallPage), findsOneWidget);
-        expect(find.text('校园办事'), findsOneWidget);
+        expect(find.text('eHall'), findsWidgets);
 
         // Lazy pages: other 4 tabs are not yet in the tree
         expect(find.byType(LearningPage), findsNothing);
@@ -173,6 +173,7 @@ void main() {
         await tester.scrollUntilVisible(find.text('校园邮箱'), 300);
         await tester.ensureVisible(find.text('校园邮箱'));
         await tester.pumpAndSettle();
+        await tester.pumpAndSettle();
 
         await tester.tap(find.text('校园邮箱'));
         await tester.pumpAndSettle();
@@ -202,12 +203,12 @@ void main() {
         await tester.scrollUntilVisible(find.text('场馆预约'), 200);
         await tester.ensureVisible(find.text('场馆预约'));
         await tester.pumpAndSettle();
+        await tester.pumpAndSettle();
 
         expect(find.text('场馆预约'), findsOneWidget);
-        expect(find.text('预约中心'), findsOneWidget);
 
         // Tap '预约中心' to open VenuePage
-        await tester.tap(find.text('预约中心'));
+        await tester.tap(find.text('场馆预约'));
         await tester.pumpAndSettle();
 
         expect(find.byType(VenuePage), findsOneWidget);
@@ -216,8 +217,23 @@ void main() {
         expect(find.text('创建定时任务'), findsNothing);
 
         // Select an available slot in VenuePage
-        final slotFinder = find.text('1号场地').first;
-        await tester.tap(slotFinder);
+        final today = DateTime.now().toUtc().add(const Duration(hours: 8));
+        final tomorrow = today.add(const Duration(days: 1));
+        await tester.tap(
+          find.text(
+            '${tomorrow.month}/${tomorrow.day} ${['周一', '周二', '周三', '周四', '周五', '周六', '周日'][tomorrow.weekday - 1]}',
+          ),
+        );
+        await tester.pumpAndSettle();
+        final period = find.byType(CheckboxListTile).first;
+        await tester.ensureVisible(period);
+        await tester.pumpAndSettle();
+        await tester.tap(period);
+        await tester.pumpAndSettle();
+        final court = find.byType(FilterChip).first;
+        await tester.ensureVisible(court);
+        await tester.pumpAndSettle();
+        await tester.tap(court);
         await tester.pumpAndSettle();
 
         // Manual reservation button in bottom bar is prominent and enabled
@@ -231,7 +247,7 @@ void main() {
         final reserveCall = bridge.invocationLog.firstWhere(
           (c) =>
               c['command'] == HostCommand.campus &&
-              c['params']['method'] == 'venues.reserve',
+              c['params']['method'] == 'venues.reservePlan',
         );
         expect(reserveCall, isNotNull);
         expect(find.text('预约成功！'), findsOneWidget);
@@ -272,13 +288,16 @@ void main() {
         await tester.scrollUntilVisible(find.text('场馆预约'), 200);
         await tester.ensureVisible(find.text('场馆预约'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('预约中心'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('场馆预约'));
         await tester.pumpAndSettle();
 
         // Now '创建定时任务' IS visible! (gated scheduling)
         expect(find.text('创建定时任务'), findsOneWidget);
 
         // Tapping '创建定时任务' opens SchemaScreen
+        await tester.ensureVisible(find.text('创建定时任务'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('创建定时任务'));
         await tester.pumpAndSettle();
 

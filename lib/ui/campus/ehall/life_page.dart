@@ -4,6 +4,7 @@ import '../../core/dansheng_state.dart';
 import '../../screens/account_balance_screen.dart';
 import '../campus_api.dart';
 import 'bus_detail.dart';
+import 'ecard_detail.dart';
 import 'power_detail.dart';
 import 'room_detail.dart';
 
@@ -18,11 +19,7 @@ enum LifeService {
   dining('食堂客流', 'fudan.dining.occupancy', Icons.restaurant_outlined),
   bus('校车班次', 'fudan.bus', Icons.directions_bus_outlined),
   notices('教务公告', 'fudan.notices', Icons.campaign_outlined),
-  transactions(
-    '校园卡明细',
-    'fudan.ecard.transactions',
-    Icons.receipt_long_outlined,
-  ),
+  transactions('校园卡明细', 'fudan.ecard.statement', Icons.receipt_long_outlined),
   gpa('学分绩点', 'fudan.gpa', Icons.school_outlined),
   grades('课程成绩', 'fudan.grades', Icons.checklist_outlined),
   exams('考试安排', 'fudan.exams', Icons.event_note_outlined);
@@ -57,6 +54,10 @@ class LifePage extends StatelessWidget {
       initialDate: initialDate,
     ),
     LifeService.power => PowerDetailPage(controller: controller),
+    LifeService.transactions => EcardDetailPage(
+      controller: controller,
+      initialDate: initialDate,
+    ),
     _ => _CampusDetail(
       service: service,
       controller: controller,
@@ -80,9 +81,6 @@ class _CampusDetail extends StatefulWidget {
 
 class _LifeState extends State<_CampusDetail> {
   late final CampusApi api = CampusApi(widget.controller.client);
-  late DateTime day =
-      widget.initialDate ??
-      DateTime.now().toUtc().add(const Duration(hours: 8));
 
   dynamic result;
   String? problem;
@@ -301,13 +299,6 @@ class _LifeState extends State<_CampusDetail> {
         input.addAll({'student_association': assocId, 'semester_id': semester});
       }
 
-      if (s == LifeService.transactions) {
-        input.addAll({
-          'from': date(day.subtract(const Duration(days: 6))),
-          'to': date(day),
-          'page': 1,
-        });
-      }
       if (s == LifeService.dining) {
         input['area_code'] = diningAreaCode;
       }
@@ -361,19 +352,6 @@ class _LifeState extends State<_CampusDetail> {
       if (mounted && ticket == generation) {
         setState(() => busy = false);
       }
-    }
-  }
-
-  Future<void> chooseDay() async {
-    final selected = await showDatePicker(
-      context: context,
-      initialDate: day,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
-    if (selected != null && mounted) {
-      setState(() => day = selected);
-      await load();
     }
   }
 
@@ -492,7 +470,13 @@ class _LifeState extends State<_CampusDetail> {
 
       case LifeService.transactions:
         title = '${r['location'] ?? r['transaction_type'] ?? '校园卡消费'}';
-        sub = '${r['at'] ?? ''} · ¥ ${money(r['amount'])}';
+        final at = DateTime.tryParse(r['at']?.toString() ?? '');
+        final local = at?.toUtc().add(const Duration(hours: 8));
+        final stamp = local == null
+            ? ''
+            : '${date(local)} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+        sub =
+            '$stamp · ${r['transaction_type'] ?? ''} · ¥ ${money(r['amount'])}';
         break;
 
       case LifeService.notices:
@@ -651,21 +635,6 @@ class _LifeState extends State<_CampusDetail> {
               ),
             ),
             const SizedBox(height: 14),
-          ],
-
-          if (s == LifeService.transactions) ...[
-            Wrap(
-              spacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                TextButton.icon(
-                  onPressed: chooseDay,
-                  icon: const Icon(Icons.today_outlined),
-                  label: Text('查询日期: ${date(day)}'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
           ],
 
           if (s == LifeService.dining) ...[

@@ -8,6 +8,7 @@ import '../../core/dansheng_state.dart';
 import '../../schema/schema_models.dart';
 import '../campus_api.dart';
 import '../../screens/schema_screen.dart';
+import '../../screens/tasks_screen.dart';
 import 'venue_models.dart';
 
 /// Screen for campus sports venue browsing, availability calendar,
@@ -38,7 +39,20 @@ class _VenuePageState extends State<VenuePage>
   DateTime _selectedDate = DateTime.now().toUtc().add(const Duration(hours: 8));
 
   List<VenueSlot> _slots = [];
-  VenueSlot? _selectedSlot;
+  final Map<int, List<VenueSlot>> _selection = {};
+  VenueSlot? get _selectedSlot =>
+      _selection.values.expand((v) => v).firstOrNull;
+  String _search = '';
+  String? _campus;
+  int _venueGeneration = 0, _calendarGeneration = 0, _historyGeneration = 0;
+  int _accountEpoch = 0;
+  bool get _canReserve =>
+      !_reserving &&
+      !_loadingSlots &&
+      _slotsError == null &&
+      _uncertain.isEmpty &&
+      _selection.values.any((v) => v.isNotEmpty);
+  void _clearSelection() => _selection.clear();
 
   List<VenueAppointment> _appointments = [];
 
@@ -49,7 +63,6 @@ class _VenuePageState extends State<VenuePage>
   int? _cancellingId;
   final Set<int> _uncertainCancelIds = {};
 
-  String? _pendingTask;
   List<Map> _uncertain = [];
   bool _authenticating = false;
 
@@ -69,6 +82,7 @@ class _VenuePageState extends State<VenuePage>
     widget.controller.addListener(_onControllerChanged);
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
+      if (mounted) setState(() {});
       if (_tabController.index == 1 &&
           _appointments.isEmpty &&
           !_loadingAppointments) {
@@ -88,10 +102,17 @@ class _VenuePageState extends State<VenuePage>
   void _onControllerChanged() {
     if (widget.controller.activeAccountId != _lastAccountId) {
       _lastAccountId = widget.controller.activeAccountId;
+      _accountEpoch++;
+      _venueGeneration++;
+      _calendarGeneration++;
+      _historyGeneration++;
       // Revoke local selection and cached data upon account switch
       if (mounted) {
         setState(() {
-          _selectedSlot = null;
+          _clearSelection();
+          _reserving = false;
+          _authenticating = false;
+          _loadingAppointments = false;
           _selectedVenue = null;
           _slots = [];
           _appointments = [];
@@ -127,6 +148,10 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Future<void> _loadVenues() async {
+    final ticket = ++_venueGeneration;
+    final epoch = _accountEpoch;
+    bool current() =>
+        mounted && ticket == _venueGeneration && epoch == _accountEpoch;
     setState(() {
       _loadingVenues = true;
       _venuesError = null;
@@ -143,8 +168,23 @@ class _VenuePageState extends State<VenuePage>
         }
       }
 
-      if (!mounted) return;
+      if (!mounted || !current()) return;
       setState(() {
+        list.sort(
+          (a, b) => a.campus == b.campus
+              ? a.name.compareTo(b.name)
+              : ['邯郸校区', '江湾校区', '枫林校区', '张江校区', '其他校区']
+                    .indexOf(a.campus)
+                    .compareTo(
+                      [
+                        '邯郸校区',
+                        '江湾校区',
+                        '枫林校区',
+                        '张江校区',
+                        '其他校区',
+                      ].indexOf(b.campus),
+                    ),
+        );
         _venues = list;
         if (list.isNotEmpty &&
             (_selectedVenue == null ||
@@ -164,12 +204,12 @@ class _VenuePageState extends State<VenuePage>
         await _loadCalendar();
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || !current()) return;
       setState(() {
         _venuesError = campusError(e);
       });
     } finally {
-      if (mounted) {
+      if (mounted && current()) {
         setState(() {
           _loadingVenues = false;
         });
@@ -178,13 +218,17 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Future<void> _loadCalendar() async {
+    final ticket = ++_calendarGeneration;
+    final epoch = _accountEpoch;
+    bool current() =>
+        mounted && ticket == _calendarGeneration && epoch == _accountEpoch;
     final venue = _selectedVenue;
     if (venue == null) return;
 
     setState(() {
       _loadingSlots = true;
+      _slots = [];
       _slotsError = null;
-      _selectedSlot = null;
     });
 
     try {
@@ -203,17 +247,30 @@ class _VenuePageState extends State<VenuePage>
         }
       }
 
-      if (!mounted) return;
+      if (!mounted || !current()) return;
       setState(() {
         _slots = slots;
+        _selection.removeWhere(
+          (period, _) => !slots.any((s) => s.periodId == period),
+        );
+        for (final period in _selection.keys.toList()) {
+          final selected = _selection[period]!;
+          _selection[period] = [
+            for (final old in selected)
+              for (final fresh in slots)
+                if (fresh.periodId == old.periodId &&
+                    fresh.courtId == old.courtId)
+                  fresh,
+          ];
+        }
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || !current()) return;
       setState(() {
         _slotsError = campusError(e);
       });
     } finally {
-      if (mounted) {
+      if (mounted && current()) {
         setState(() {
           _loadingSlots = false;
         });
@@ -222,6 +279,10 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Future<void> _loadAppointments() async {
+    final ticket = ++_historyGeneration;
+    final epoch = _accountEpoch;
+    bool current() =>
+        mounted && ticket == _historyGeneration && epoch == _accountEpoch;
     setState(() {
       _loadingAppointments = true;
       _appointmentsError = null;
@@ -229,7 +290,8 @@ class _VenuePageState extends State<VenuePage>
 
     try {
       final pending = await _api.call('venues.pending');
-      if (mounted && pending is List) {
+      if (!mounted || !current()) return;
+      if (pending is List) {
         setState(() => _uncertain = pending.whereType<Map>().toList());
       }
       final res = await _api.call('venues.appointments');
@@ -244,17 +306,17 @@ class _VenuePageState extends State<VenuePage>
         }
       }
 
-      if (!mounted) return;
+      if (!mounted || !current()) return;
       setState(() {
         _appointments = list;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || !current()) return;
       setState(() {
         _appointmentsError = campusError(e);
       });
     } finally {
-      if (mounted) {
+      if (mounted && current()) {
         setState(() {
           _loadingAppointments = false;
         });
@@ -263,27 +325,29 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Future<void> _handleVisibleLogin() async {
+    final epoch = _accountEpoch;
+    bool current() => mounted && epoch == _accountEpoch;
     setState(() {
       _authenticating = true;
     });
 
     try {
       await _api.call('venues.visibleLogin');
-      if (!mounted) return;
+      if (!mounted || !current()) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('登录成功')));
       await _loadVenues();
-      if (!mounted) return;
+      if (!mounted || !current()) return;
       if (_tabController.index == 1) {
         await _loadAppointments();
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && current()) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('登录未完成: ${campusError(e)}')));
       }
     } finally {
-      if (mounted) {
+      if (mounted && current()) {
         setState(() {
           _authenticating = false;
         });
@@ -293,85 +357,60 @@ class _VenuePageState extends State<VenuePage>
 
   Future<void> _handleManualReserve() async {
     final venue = _selectedVenue;
-    final slot = _selectedSlot;
-    if (venue == null || slot == null || _reserving) return;
+    if (venue == null || !_canReserve) return;
+    final epoch = _accountEpoch;
+    final plans = _selection.values
+        .where((v) => v.isNotEmpty)
+        .map(
+          (v) => {
+            'period_id': v.first.periodId,
+            'time': v.first.time,
+            'courts': v.map((c) => c.courtId).toList(),
+          },
+        )
+        .toList();
     setState(() => _reserving = true);
-
-    final dateStr = _formatDate(_selectedDate);
-
     try {
-      // Step 1: Normalize and prepare manual reservation input
-      final prepRes = await _api.call('venues.prepareManual', {
+      final result = await _api.call('venues.reservePlan', {
         'venue_id': venue.id,
-        'target_date': dateStr,
-        'period_id': slot.periodId,
-        'court_id': slot.courtId,
-        'time': slot.time,
+        'target_date': _formatDate(_selectedDate),
+        'slots': plans,
       });
-
-      if (!mounted) return;
-      if (prepRes is! Map || prepRes['canonical_input'] is! Map) {
-        throw const FormatException('Invalid reservation preview');
-      }
-      final canonical = Map<String, dynamic>.from(
-        prepRes['canonical_input'] as Map,
-      );
-      _pendingTask = canonical['task_id']?.toString();
-
-      // Step 2: The native ModernSheet review binds confirmation to this exact plan.
-      // Single confirmation: Flutter does NOT show a second confirmation dialog.
-      final reserveResult = await _api.call('venues.reserve', {
-        'canonical_input': canonical,
-      });
-
-      if (mounted) {
-        final status = reserveResult is Map ? reserveResult['status'] : null;
-        final message = reserveResult is Map ? reserveResult['message'] : null;
-        final isSuccess = status == 'success' || status == 'OK';
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              isSuccess ? '预约成功！' : '预约结果: ${message ?? status ?? '已完成'}',
-            ),
-            backgroundColor: isSuccess ? Colors.green : null,
+      if (!mounted || epoch != _accountEpoch) return;
+      final successes = result is Map
+          ? (result['successes'] as List? ?? [])
+          : [];
+      final message = result is Map ? result['message'] : null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            successes.length == plans.length
+                ? '预约成功！'
+                : '已约 ${successes.length}/${plans.length} 个时段：${message ?? "未全部成功"}',
           ),
-        );
-      }
-
-      // Refresh calendar availability and switch to appointments
+        ),
+      );
+      _clearSelection();
       await _loadCalendar();
       await _loadAppointments();
     } catch (e) {
-      if (mounted) {
-        final isReconcile =
-            e is PlatformException && e.code == 'NeedsReconciliation';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('预约失败: ${campusError(e)}'),
-            action: isReconcile
-                ? SnackBarAction(
-                    label: '核对状态',
-                    onPressed: () => _handleReconcile(_pendingTask),
-                  )
-                : null,
-          ),
-        );
-      }
+      if (!mounted || epoch != _accountEpoch) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(campusError(e))));
+      // Reload the durable journal even if this write timed out before returning an id.
+      await _loadAppointments();
     } finally {
-      if (mounted) {
-        setState(() {
-          _reserving = false;
-        });
-      }
+      if (mounted && epoch == _accountEpoch) setState(() => _reserving = false);
     }
   }
 
   Future<void> _handleReconcile(String? task) async {
+    final epoch = _accountEpoch;
+    bool current() => mounted && epoch == _accountEpoch;
     if (task == null || task.isEmpty) return;
     try {
       final res = await _api.call('venues.reconcile', {'task_id': task});
-      if (mounted) {
+      if (mounted && current()) {
         final reconciled = res is Map && res['status'] == 'reconciled_success';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -381,7 +420,7 @@ class _VenuePageState extends State<VenuePage>
         _loadAppointments();
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && current()) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('核对异常: ${campusError(e)}')));
       }
@@ -389,6 +428,8 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Future<void> _handleCancelAppointment(VenueAppointment appt) async {
+    final epoch = _accountEpoch;
+    bool current() => mounted && epoch == _accountEpoch;
     if (_cancellingId != null) return;
     setState(() {
       _cancellingId = appt.id;
@@ -399,7 +440,7 @@ class _VenuePageState extends State<VenuePage>
       // Flutter does NOT display a second confirmation dialog.
       final res = await _api.call('venues.cancel', {'appointment_id': appt.id});
 
-      if (!mounted) return;
+      if (!mounted || !current()) return;
 
       final isUncertain =
           res is Map &&
@@ -448,7 +489,7 @@ class _VenuePageState extends State<VenuePage>
 
       await _loadAppointments();
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || !current()) return;
       final isReconcile =
           e is PlatformException &&
           (e.code == 'NeedsReconciliation' ||
@@ -478,7 +519,7 @@ class _VenuePageState extends State<VenuePage>
         ),
       );
     } finally {
-      if (mounted) {
+      if (mounted && current()) {
         setState(() {
           _cancellingId = null;
         });
@@ -487,17 +528,20 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Future<void> _handleReconcileCancel(int appointmentId) async {
+    final epoch = _accountEpoch;
+    bool current() => mounted && epoch == _accountEpoch;
     try {
       final res = await _api.call('venues.reconcileCancel', {
         'appointment_id': appointmentId,
       });
 
-      if (!mounted) return;
+      if (!mounted || !current()) return;
 
       final isCancelled =
           res is Map &&
           (res['status'] == 'success' ||
               res['status'] == 'cancelled' ||
+              res['status'] == 'reconciled_cancelled' ||
               res['status'] == 'reconciled_cancel' ||
               res['status'] == 'reconciled_success' ||
               res['cancelled'] == true ||
@@ -529,7 +573,7 @@ class _VenuePageState extends State<VenuePage>
 
       await _loadAppointments();
     } catch (e) {
-      if (mounted) {
+      if (mounted && current()) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('核对异常: ${campusError(e)}')));
@@ -569,16 +613,16 @@ class _VenuePageState extends State<VenuePage>
     final initialValues = <String, dynamic>{
       if (_selectedVenue != null) 'venue_id': _selectedVenue!.id,
       'target_date': _formatDate(_selectedDate),
-      if (_selectedSlot != null)
-        'selected_slots': [
+      'selected_slots': [
+        for (final courts in _selection.values.where((v) => v.isNotEmpty))
           jsonEncode({
-            'time': _selectedSlot!.time,
-            'period_id': _selectedSlot!.periodId,
-            'court_id': _selectedSlot!.courtId,
-            'courts': [_selectedSlot!.courtId],
-            'court_name': _selectedSlot!.courtName,
+            'time': courts.first.time,
+            'period_id': courts.first.periodId,
+            'court_id': courts.first.courtId,
+            'courts': courts.map((c) => c.courtId).toList(),
+            'court_name': courts.first.courtName,
           }),
-        ],
+      ],
     };
 
     Navigator.of(context).push(
@@ -602,6 +646,16 @@ class _VenuePageState extends State<VenuePage>
       appBar: AppBar(
         title: const Text('体育场馆预约'),
         actions: [
+          if (_automationPlugin != null)
+            IconButton(
+              tooltip: '任务中心',
+              icon: const Icon(Icons.task_alt),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TasksScreen(controller: widget.controller),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '刷新',
@@ -668,6 +722,34 @@ class _VenuePageState extends State<VenuePage>
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         children: [
+          TextField(
+            decoration: const InputDecoration(
+              labelText: '搜索场馆',
+              prefixIcon: Icon(Icons.search),
+            ),
+            onChanged: (value) => setState(() => _search = value.trim()),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            children: [
+              for (final campus in [
+                '全部校区',
+                '邯郸校区',
+                '江湾校区',
+                '枫林校区',
+                '张江校区',
+                '其他校区',
+              ])
+                ChoiceChip(
+                  label: Text(campus),
+                  selected: (_campus ?? '全部校区') == campus,
+                  onSelected: (_) => setState(
+                    () => _campus = campus == '全部校区' ? null : campus,
+                  ),
+                ),
+            ],
+          ),
           _buildVenueSelector(),
           const SizedBox(height: 16),
           _buildDateSelector(),
@@ -681,6 +763,16 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Widget _buildVenueSelector() {
+    final venues = _venues
+        .where(
+          (v) =>
+              (_campus == null || v.campus == _campus) &&
+              v.name.toLowerCase().contains(_search.toLowerCase()),
+        )
+        .toList();
+    if (venues.isEmpty) {
+      return const Padding(padding: EdgeInsets.all(16), child: Text('没有匹配的场馆'));
+    }
     return Card(
       elevation: 0,
       color: Theme.of(context).colorScheme.surfaceContainerHighest
@@ -691,12 +783,16 @@ class _VenuePageState extends State<VenuePage>
           child: DropdownButton<int>(
             isExpanded: true,
             hint: const Text('请选择场馆'),
-            value: _selectedVenue?.id,
-            items: _venues.map((v) {
+            value: venues.any((v) => v.id == _selectedVenue?.id)
+                ? _selectedVenue?.id
+                : null,
+            items: venues.map((v) {
               return DropdownMenuItem<int>(
                 value: v.id,
                 child: Text(
                   v.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               );
@@ -706,6 +802,7 @@ class _VenuePageState extends State<VenuePage>
               final found = _venues.firstWhere((v) => v.id == id);
               setState(() {
                 _selectedVenue = found;
+                _clearSelection();
               });
               _loadCalendar();
             },
@@ -723,12 +820,14 @@ class _VenuePageState extends State<VenuePage>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          key: const Key('venue_date_row'),
           children: [
-            Text(
-              '预约日期: ${_formatDate(_selectedDate)}',
-              style: Theme.of(context).textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
+            Expanded(
+              child: Text(
+                '预约日期: ${_formatDate(_selectedDate)}',
+                style: Theme.of(context).textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.calendar_month, size: 20),
@@ -737,12 +836,13 @@ class _VenuePageState extends State<VenuePage>
                 final picked = await showDatePicker(
                   context: context,
                   initialDate: _selectedDate,
-                  firstDate: now.subtract(const Duration(days: 1)),
+                  firstDate: DateTime(now.year, now.month, now.day),
                   lastDate: now.add(const Duration(days: 60)),
                 );
                 if (picked != null) {
                   setState(() {
                     _selectedDate = picked;
+                    _clearSelection();
                   });
                   _loadCalendar();
                 }
@@ -753,7 +853,7 @@ class _VenuePageState extends State<VenuePage>
         const SizedBox(height: 8),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: Row(
+          child: Wrap(
             children: dates.map((d) {
               final isSelected =
                   d.year == _selectedDate.year &&
@@ -780,6 +880,7 @@ class _VenuePageState extends State<VenuePage>
                     if (selected) {
                       setState(() {
                         _selectedDate = d;
+                        _clearSelection();
                       });
                       _loadCalendar();
                     }
@@ -794,8 +895,8 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Widget _buildSlotSectionHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
       children: [
         Text(
           '可用场次与时段',
@@ -816,152 +917,92 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Widget _buildSlotsGrid() {
-    if (_loadingSlots) {
-      return const Padding(
-        padding: EdgeInsets.all(40.0),
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-
+    if (_loadingSlots) return const Center(child: CircularProgressIndicator());
     if (_slotsError != null) {
-      return Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          children: [
-            Text(
-              _slotsError!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.tonal(
-              onPressed: _loadCalendar,
-              child: const Text('重试'),
-            ),
-          ],
-        ),
+      return Column(
+        children: [
+          Text(_slotsError!),
+          TextButton(onPressed: _loadCalendar, child: const Text('重试')),
+        ],
       );
     }
-
-    if (_slots.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(40.0),
-        child: Center(
-          child: Text('当前日期暂无可预约时段', style: TextStyle(color: Colors.grey)),
-        ),
-      );
+    if (_slots.isEmpty) return const Text('当前日期暂无可预约时段');
+    final periods = <int, List<VenueSlot>>{};
+    for (final slot in _slots) {
+      periods.putIfAbsent(slot.periodId, () => []).add(slot);
     }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _slots.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            childAspectRatio: 2.2,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-          ),
-          itemBuilder: (context, index) {
-            final slot = _slots[index];
-            final isSelected =
-                _selectedSlot?.periodId == slot.periodId &&
-                _selectedSlot?.courtId == slot.courtId;
-            final isAvailable = slot.available;
-
-            return InkWell(
-              onTap: isAvailable
-                  ? () {
-                      setState(() {
-                        _selectedSlot = isSelected ? null : slot;
-                      });
+    final now = DateTime.now().toUtc().add(const Duration(hours: 8));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('最多选择 3 个时段；每个时段按点选顺序尝试场地。'),
+        for (final period in periods.entries) ...[
+          CheckboxListTile(
+            key: ValueKey('period-${period.key}'),
+            title: Text(period.value.first.time),
+            subtitle: Text(
+              period.value.first.upcoming(_selectedDate, now)
+                  ? '${period.value.where((c) => c.available).length} 个场地可约'
+                  : '已开始或已结束',
+            ),
+            value: _selection.containsKey(period.key),
+            onChanged:
+                _reserving || !period.value.first.upcoming(_selectedDate, now)
+                ? null
+                : (value) {
+                    if (value == true && _selection.length >= 3) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('最多选择 3 个时段')),
+                      );
+                      return;
                     }
-                  : null,
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? Theme.of(context).colorScheme.primaryContainer
-                      : isAvailable
-                      ? Theme.of(context).colorScheme.surfaceContainerHighest
-                            .withValues(alpha: 0.5)
-                      : Theme.of(context).disabledColor.withValues(alpha: 0.08),
-                  border: Border.all(
-                    color: isSelected
-                        ? Theme.of(context).colorScheme.primary
-                        : isAvailable
-                        ? Theme.of(context).colorScheme.outlineVariant
-                        : Colors.transparent,
-                    width: isSelected ? 2 : 1,
+                    setState(() {
+                      if (value == true) {
+                        _selection[period.key] = [];
+                      } else {
+                        _selection.remove(period.key);
+                      }
+                    });
+                  },
+          ),
+          if (_selection.containsKey(period.key))
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final slot in period.value)
+                  Builder(
+                    builder: (context) {
+                      final courts = _selection[period.key]!;
+                      final priority = courts.indexWhere(
+                        (c) => c.courtId == slot.courtId,
+                      );
+                      return FilterChip(
+                        key: ValueKey('court-${period.key}-${slot.courtId}'),
+                        showCheckmark: false,
+                        label: Text(
+                          '${slot.courtName} · ${slot.available ? "可约" : "满"}',
+                        ),
+                        avatar: priority < 0
+                            ? null
+                            : CircleAvatar(child: Text('${priority + 1}')),
+                        selected: priority >= 0,
+                        onSelected: _reserving
+                            ? null
+                            : (_) => setState(() {
+                                if (priority >= 0) {
+                                  courts.removeAt(priority);
+                                } else {
+                                  courts.add(slot);
+                                }
+                              }),
+                      );
+                    },
                   ),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            slot.courtName,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                              color: isAvailable ? null : Colors.grey,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isAvailable
-                                ? Colors.green.withValues(alpha: 0.15)
-                                : Colors.grey.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            isAvailable ? '可约' : '满',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: isAvailable
-                                  ? Colors.green.shade800
-                                  : Colors.grey,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      slot.time,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isAvailable
-                            ? Theme.of(context).colorScheme.onSurfaceVariant
-                            : Colors.grey,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+              ],
+            ),
+        ],
+      ],
     );
   }
 
@@ -994,7 +1035,7 @@ class _VenuePageState extends State<VenuePage>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '已选: ${venue.name} · ${slot.courtName} (${slot.time})',
+                      '已选: ${venue.name} · ${_selection.length} 个时段',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1007,9 +1048,7 @@ class _VenuePageState extends State<VenuePage>
               children: [
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: (slot == null || _reserving)
-                        ? null
-                        : _handleManualReserve,
+                    onPressed: !_canReserve ? null : _handleManualReserve,
                     icon: _reserving
                         ? const SizedBox(
                             width: 18,
@@ -1137,19 +1176,47 @@ class _VenuePageState extends State<VenuePage>
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () async {
+          final epoch = _accountEpoch;
           try {
             final detail = await _api.call('venues.detail', {
               'appointment_id': item.id,
             });
-            if (!mounted) return;
+            if (!mounted || epoch != _accountEpoch) return;
             showDialog(
               context: context,
               builder: (ctx) => AlertDialog(
                 title: Text(
                   item.resourceName.isNotEmpty ? item.resourceName : '预约详情',
                 ),
-                content: SingleChildScrollView(child: Text(detail.toString())),
+                content: SingleChildScrollView(
+                  child: Text(
+                    [
+                      '预约号：${item.id}',
+                      item.statusName,
+                      for (final slot in item.slots)
+                        '${slot.date} ${slot.time} ${slot.resourceName}',
+                      if (detail is Map && detail['code'] != null)
+                        '凭证：${detail['code']}',
+                    ].where((line) => line.isNotEmpty).join('\n'),
+                  ),
+                ),
                 actions: [
+                  TextButton(
+                    onPressed: () async {
+                      try {
+                        await _api.call('venues.openVoucher', {
+                          'appointment_id': item.id,
+                        });
+                      } catch (e) {
+                        if (mounted && epoch == _accountEpoch) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(campusError(e))),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('查看预约凭证'),
+                  ),
                   TextButton(
                     onPressed: () => Navigator.of(ctx).pop(),
                     child: const Text('关闭'),

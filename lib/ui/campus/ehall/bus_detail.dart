@@ -103,11 +103,11 @@ enum BusDirection {
     switch (this) {
       case BusDirection.FORWARD:
       case BusDirection.NONE:
-        return Icons.arrow_forward;
+        return Icons.arrow_forward_rounded;
       case BusDirection.BACKWARD:
-        return Icons.arrow_back;
+        return Icons.arrow_back_rounded;
       case BusDirection.DUAL:
-        return Icons.swap_horiz;
+        return Icons.swap_horiz_rounded;
     }
   }
 
@@ -479,9 +479,24 @@ class BusDetailPageState extends State<BusDetailPage> {
       Campus.allCampusesWithNone.map((c) {
         return DropdownMenuItem<Campus>(
           value: c,
-          child: Text(c.displayTitle(context)),
+          alignment: Alignment.center,
+          child: Text(c.displayTitle(context), textAlign: TextAlign.center),
         );
       }).toList();
+
+  List<Widget> _selectedItems() => Campus.allCampusesWithNone
+      .map(
+        (campus) => Padding(
+          padding: const EdgeInsets.only(left: 24),
+          child: Center(
+            child: Text(
+              campus.displayTitle(context),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      )
+      .toList();
 
   @override
   Widget build(BuildContext context) {
@@ -561,9 +576,11 @@ class BusDetailPageState extends State<BusDetailPage> {
                             ),
                             DropdownButton<Campus>(
                               key: const Key('bus_start_dropdown'),
+                              alignment: Alignment.center,
                               isExpanded: true,
                               value: _startSelectItem,
                               items: _getItems(),
+                              selectedItemBuilder: (_) => _selectedItems(),
                               underline: const SizedBox.shrink(),
                               onChanged: (val) {
                                 if (val != null) {
@@ -580,7 +597,7 @@ class BusDetailPageState extends State<BusDetailPage> {
                         label: '互换始发站与终点站',
                         button: true,
                         child: IconButton(
-                          icon: const Icon(Icons.swap_horiz),
+                          icon: const Icon(Icons.swap_horiz_rounded),
                           tooltip: '互换起点和终点',
                           onPressed: _onLocationSwapped,
                         ),
@@ -602,9 +619,11 @@ class BusDetailPageState extends State<BusDetailPage> {
                             ),
                             DropdownButton<Campus>(
                               key: const Key('bus_dest_dropdown'),
+                              alignment: Alignment.center,
                               isExpanded: true,
                               value: _endSelectItem,
                               items: _getItems(),
+                              selectedItemBuilder: (_) => _selectedItems(),
                               underline: const SizedBox.shrink(),
                               onChanged: (val) {
                                 if (val != null) {
@@ -845,17 +864,6 @@ class BusDetailPageState extends State<BusDetailPage> {
                           ? '双向'
                           : '单向',
                     ),
-                    if (item.direction == BusDirection.DUAL)
-                      // The icon already announces this to screen readers.
-                      ExcludeSemantics(
-                        child: Text(
-                          '双向',
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(
-                                color: Theme.of(context).colorScheme.outline,
-                              ),
-                        ),
-                      ),
                   ],
                 ),
               ),
