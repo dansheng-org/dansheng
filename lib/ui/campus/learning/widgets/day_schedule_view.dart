@@ -4,13 +4,21 @@ import 'package:flutter/material.dart';
 import '../learning_controller.dart';
 import '../models/canvas_models.dart';
 import '../models/timetable_models.dart';
+import 'learning_common.dart';
 
 /// Shows the courses and due assignments for the currently selected date,
 /// with per-source auth/error isolation and interactive summary details.
 class DayScheduleView extends StatelessWidget {
   final LearningController controller;
 
-  const DayScheduleView({super.key, required this.controller});
+  /// Opens the eLearning page of a timetable course.
+  final void Function(TimetableCourse course)? onOpenCourse;
+
+  const DayScheduleView({
+    super.key,
+    required this.controller,
+    this.onOpenCourse,
+  });
 
   static const List<String> _weekdays = [
     '周一',
@@ -187,7 +195,7 @@ class DayScheduleView extends StatelessWidget {
             (c) => _CourseCard(
               course: c,
               colorScheme: colorScheme,
-              onTap: () => _showCourseDetails(context, c),
+              onTap: onOpenCourse == null ? null : () => onOpenCourse!(c),
             ),
           ),
       ],
@@ -216,7 +224,7 @@ class DayScheduleView extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
-                color: Colors.amber.shade100,
+                color: Colors.amber.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
@@ -224,7 +232,9 @@ class DayScheduleView extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
-                  color: Colors.amber.shade900,
+                  color: colorScheme.brightness == Brightness.dark
+                      ? Colors.amber.shade300
+                      : Colors.amber.shade900,
                 ),
               ),
             ),
@@ -276,10 +286,10 @@ class DayScheduleView extends StatelessWidget {
               onRetry: controller.loadCanvas,
             ),
           ...assignments.map(
-            (a) => _AssignmentCard(
+            (a) => AssignmentCard(
               assignment: a,
               colorScheme: colorScheme,
-              onTap: () => _showAssignmentDetails(context, a),
+              onTap: () => showAssignmentDetails(context, a),
             ),
           ),
         ],
@@ -393,107 +403,29 @@ class DayScheduleView extends StatelessWidget {
       ),
     );
   }
+}
 
-  void _showCourseDetails(BuildContext context, TimetableCourse course) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        final cs = theme.colorScheme;
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+/// Bottom sheet with the full details of one assignment.
+void showAssignmentDetails(BuildContext context, CanvasAssignment assignment) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (ctx) {
+      final cs = Theme.of(ctx).colorScheme;
+      final description = (assignment.description ?? '')
+          .replaceAll(RegExp(r'<[^>]+>'), '')
+          .trim();
+      return SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: cs.outlineVariant,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                course.name,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: cs.onSurface,
-                ),
-              ),
-              if (course.courseCode != null)
-                Text(
-                  '课程代码: ${course.courseCode}',
-                  style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
-                ),
-              const Divider(height: 24),
-              _buildDetailItem(
-                ctx,
-                Icons.access_time_rounded,
-                '上课时间',
-                course.timeSpanFormatted,
-              ),
-              if (course.room != null)
-                _buildDetailItem(ctx, Icons.room_rounded, '上课地点', course.room!),
-              if (course.teachers.isNotEmpty)
-                _buildDetailItem(
-                  ctx,
-                  Icons.person_outline_rounded,
-                  '授课教师',
-                  course.teachers.join(', '),
-                ),
-              if (course.weeks.isNotEmpty)
-                _buildDetailItem(
-                  ctx,
-                  Icons.date_range_rounded,
-                  '授课周次',
-                  '第 ${course.weeks.join(', ')} 周',
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showAssignmentDetails(
-    BuildContext context,
-    CanvasAssignment assignment,
-  ) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        final cs = theme.colorScheme;
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: cs.outlineVariant,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
               Text(
                 assignment.name,
                 style: TextStyle(
@@ -508,20 +440,20 @@ class DayScheduleView extends StatelessWidget {
                   style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
                 ),
               const Divider(height: 24),
-              _buildDetailItem(
+              _detailItem(
                 ctx,
                 Icons.schedule_rounded,
                 '截止时间',
                 assignment.fullDueFormatted,
               ),
               if (assignment.pointsPossible != null)
-                _buildDetailItem(
+                _detailItem(
                   ctx,
                   Icons.score_rounded,
                   '满分分值',
                   '${assignment.pointsPossible} 分',
                 ),
-              _buildDetailItem(
+              _detailItem(
                 ctx,
                 assignment.hasSubmittedSubmissions
                     ? Icons.check_circle_rounded
@@ -529,8 +461,7 @@ class DayScheduleView extends StatelessWidget {
                 '提交状态',
                 assignment.hasSubmittedSubmissions ? '已提交' : '待提交',
               ),
-              if (assignment.description != null &&
-                  assignment.description!.isNotEmpty) ...[
+              if (description.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text(
                   '作业要求说明:',
@@ -542,9 +473,7 @@ class DayScheduleView extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  assignment.description!
-                      .replaceAll(RegExp(r'<[^>]+>'), '')
-                      .trim(),
+                  description,
                   style: TextStyle(
                     fontSize: 13,
                     color: cs.onSurfaceVariant,
@@ -554,52 +483,52 @@ class DayScheduleView extends StatelessWidget {
               ],
             ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
-  Widget _buildDetailItem(
-    BuildContext context,
-    IconData icon,
-    String label,
-    String value,
-  ) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 16, color: cs.primary),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 70,
-            child: Text(
-              label,
-              style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+Widget _detailItem(
+  BuildContext context,
+  IconData icon,
+  String label,
+  String value,
+) {
+  final cs = Theme.of(context).colorScheme;
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: cs.primary),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 70,
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: cs.onSurface,
             ),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: cs.onSurface,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 }
 
 class _CourseCard extends StatelessWidget {
   final TimetableCourse course;
   final ColorScheme colorScheme;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   const _CourseCard({
     required this.course,
@@ -609,214 +538,233 @@ class _CourseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerLow,
+    final tint = courseTint(course.name, colorScheme);
+    final room = course.room ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: colorScheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
+          side: BorderSide(
             color: colorScheme.outlineVariant.withValues(alpha: 0.4),
           ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Container(width: 5, color: tint.accent),
                 Expanded(
-                  child: Text(
-                    course.name,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onSurface,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 11, 4, 11),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          course.name,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          course.timeSpanFormatted,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                        if (room.isNotEmpty || course.teachers.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 14,
+                            runSpacing: 2,
+                            children: [
+                              if (room.isNotEmpty)
+                                _meta(Icons.room_rounded, room),
+                              if (course.teachers.isNotEmpty)
+                                _meta(
+                                  Icons.person_outline_rounded,
+                                  course.teachers.join(', '),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
+                if (onTap != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Icon(
+                      Icons.chevron_right_rounded,
+                      size: 20,
+                      color: colorScheme.outline,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _meta(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: colorScheme.onSurfaceVariant),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            text,
+            style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One assignment row; used by the day schedule and by a course page.
+class AssignmentCard extends StatelessWidget {
+  final CanvasAssignment assignment;
+  final ColorScheme colorScheme;
+  final VoidCallback onTap;
+
+  /// Show the due date as well as the time, and drop the course name.
+  final bool inCourse;
+
+  const AssignmentCard({
+    super.key,
+    required this.assignment,
+    required this.colorScheme,
+    required this.onTap,
+    this.inCourse = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isSubmitted = assignment.hasSubmittedSubmissions;
+    final dark = colorScheme.brightness == Brightness.dark;
+    final amber = dark ? Colors.amber.shade300 : Colors.amber.shade900;
+    final green = dark ? Colors.green.shade300 : Colors.green.shade800;
+    final courseName = assignment.courseName ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: colorScheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isSubmitted
+                ? colorScheme.outlineVariant.withValues(alpha: 0.4)
+                : Colors.amber.shade300.withValues(alpha: dark ? 0.5 : 1),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  isSubmitted
+                      ? Icons.check_circle_rounded
+                      : Icons.pending_actions_rounded,
+                  size: 20,
+                  color: isSubmitted
+                      ? Colors.green.shade600
+                      : Colors.amber.shade700,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        assignment.name,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 2,
+                        children: [
+                          if (!inCourse && courseName.isNotEmpty)
+                            Text(
+                              courseName,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          Text(
+                            inCourse
+                                ? (assignment.dueAt == null
+                                      ? '无截止时间'
+                                      : '${assignment.fullDueFormatted} 截止')
+                                : assignment.dueTimeFormatted,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: amber,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          if (assignment.pointsPossible != null)
+                            Text(
+                              '${assignment.pointsPossible}分',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: colorScheme.primaryContainer,
+                    color: (isSubmitted ? Colors.green : Colors.amber)
+                        .withValues(alpha: dark ? 0.18 : 0.14),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    course.timeSpanFormatted,
+                    isSubmitted ? '已提交' : '待提交',
                     style: TextStyle(
                       fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.bold,
+                      color: isSubmitted ? green : amber,
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                if (course.room != null && course.room!.isNotEmpty) ...[
-                  Icon(
-                    Icons.room_rounded,
-                    size: 14,
-                    color: colorScheme.primary,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    course.room!,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                ],
-                if (course.teachers.isNotEmpty) ...[
-                  Icon(
-                    Icons.person_outline_rounded,
-                    size: 14,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      course.teachers.join(', '),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AssignmentCard extends StatelessWidget {
-  final CanvasAssignment assignment;
-  final ColorScheme colorScheme;
-  final VoidCallback onTap;
-
-  const _AssignmentCard({
-    required this.assignment,
-    required this.colorScheme,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isSubmitted = assignment.hasSubmittedSubmissions;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSubmitted
-                ? colorScheme.outlineVariant.withValues(alpha: 0.4)
-                : Colors.amber.shade300,
           ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              isSubmitted
-                  ? Icons.check_circle_rounded
-                  : Icons.pending_actions_rounded,
-              size: 20,
-              color: isSubmitted
-                  ? Colors.green.shade600
-                  : Colors.amber.shade700,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    assignment.name,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      if (assignment.courseName != null &&
-                          assignment.courseName!.isNotEmpty) ...[
-                        Text(
-                          assignment.courseName!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      Text(
-                        assignment.dueTimeFormatted,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.amber.shade900,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      if (assignment.pointsPossible != null) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          '${assignment.pointsPossible}分',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: isSubmitted
-                    ? Colors.green.shade50
-                    : Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                isSubmitted ? '已提交' : '待提交',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: isSubmitted
-                      ? Colors.green.shade800
-                      : Colors.amber.shade900,
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );

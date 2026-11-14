@@ -3,20 +3,27 @@ import 'package:flutter/material.dart';
 
 import '../learning_controller.dart';
 import '../models/canvas_models.dart';
+import 'day_schedule_view.dart';
+import 'learning_common.dart';
 
-/// Enrolled courses section with course summary, nested folder/file hierarchy,
-/// modules integration, announcements tab, and real file download + open actions via parent bridge.
+/// eLearning content of one course: files and modules, assignments and
+/// announcements, with real file download + open actions via parent bridge.
 class CourseFilesView extends StatefulWidget {
   final LearningController controller;
+  final String courseId;
 
-  const CourseFilesView({super.key, required this.controller});
+  const CourseFilesView({
+    super.key,
+    required this.controller,
+    required this.courseId,
+  });
 
   @override
   State<CourseFilesView> createState() => _CourseFilesViewState();
 }
 
 class _CourseFilesViewState extends State<CourseFilesView> {
-  int _tabIndex = 0; // 0 = 资料与模块 (Materials & Modules), 1 = 公告 (Announcements)
+  int _tabIndex = 0; // 0 = 资料, 1 = 作业, 2 = 公告
   final Set<String> _expandedFolderIds = {};
 
   void _toggleFolder(String folderId) {
@@ -31,403 +38,144 @@ class _CourseFilesViewState extends State<CourseFilesView> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
     final ctrl = widget.controller;
+    final id = widget.courseId;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Section header
-          Row(
-            children: [
-              Icon(Icons.school_rounded, size: 18, color: colorScheme.primary),
-              const SizedBox(width: 8),
-              Text(
-                '已选课程与资料',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-              const Spacer(),
-              if (ctrl.canvasFromCache)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    '离线缓存',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          // Canvas Auth / Error banner (Per-source isolation)
-          if (ctrl.canvasAuthRequired)
-            _buildCanvasAuthBanner(context, colorScheme)
-          else if (ctrl.canvasError != null && ctrl.courses.isEmpty)
-            _buildCanvasErrorBanner(context, colorScheme)
-          else if (ctrl.courses.isEmpty)
-            _buildEmptyCourses(context, colorScheme)
-          else
-            _buildCoursesContent(context, colorScheme),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCanvasAuthBanner(BuildContext context, ColorScheme colorScheme) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: colorScheme.errorContainer.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colorScheme.error.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.lock_outline_rounded, size: 20, color: colorScheme.error),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '学习平台需要登录以获取课程课件',
-              style: TextStyle(
-                fontSize: 13,
-                color: colorScheme.onErrorContainer,
-              ),
-            ),
-          ),
-          FilledButton.tonal(
-            onPressed: widget.controller.loginCanvas,
-            style: FilledButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-            ),
-            child: const Text('登录 Canvas'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCanvasErrorBanner(
-    BuildContext context,
-    ColorScheme colorScheme,
-  ) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.info_outline_rounded,
-            size: 18,
-            color: colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              widget.controller.canvasError ?? '课程资料加载失败',
-              style: TextStyle(fontSize: 13, color: colorScheme.onSurface),
-            ),
-          ),
-          TextButton(
-            onPressed: widget.controller.loadCanvas,
-            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-            child: const Text('重试'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyCourses(BuildContext context, ColorScheme colorScheme) {
-    if (widget.controller.canvasLoading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 20),
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
-    }
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.3),
-        ),
-      ),
-      child: Column(
-        children: [
-          Icon(Icons.menu_book_rounded, size: 28, color: colorScheme.outline),
-          const SizedBox(height: 6),
-          Text(
-            '暂无已选课程',
-            style: TextStyle(fontSize: 13, color: colorScheme.outline),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCoursesContent(BuildContext context, ColorScheme colorScheme) {
-    final ctrl = widget.controller;
-    final selectedId = ctrl.selectedCourseId ?? ctrl.courses.first.id;
-    final selectedCourse = ctrl.courses.firstWhere(
-      (c) => c.id == selectedId,
-      orElse: () => ctrl.courses.first,
-    );
-
-    final folders = ctrl.folders[selectedId] ?? [];
-    final materials = ctrl.materials[selectedId] ?? [];
-    final modules = ctrl.modules[selectedId] ?? [];
-    final assignments = ctrl.assignments[selectedId] ?? [];
-    final announcements = ctrl.announcements[selectedId] ?? [];
+    final folders = ctrl.folders[id] ?? const <CanvasFolder>[];
+    final materials = ctrl.materials[id] ?? const <CanvasMaterial>[];
+    final modules = ctrl.modules[id] ?? const <CanvasModule>[];
+    final assignments = ctrl.assignments[id] ?? const <CanvasAssignment>[];
+    final announcements =
+        ctrl.announcements[id] ?? const <CanvasAnnouncement>[];
+    final loading = ctrl.isCourseLoading(id);
+    final detailError = ctrl.detailsError(id);
+    const label = TextStyle(fontSize: 12);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Horizontal course chips selector
-        if (ctrl.canvasError != null)
-          _buildCanvasErrorBanner(context, colorScheme),
-        if (ctrl.detailsError(selectedId) != null)
-          Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.info_outline_rounded,
-                  size: 18,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    ctrl.detailsError(selectedId)!,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.onSurface,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => ctrl.loadCourseDetails(selectedId),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  child: const Text('重试'),
-                ),
-              ],
-            ),
+        if (detailError != null)
+          InfoBanner(
+            message: detailError,
+            actionLabel: '重试',
+            onAction: () => ctrl.loadCourseDetails(id),
           ),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: ctrl.courses.map((course) {
-              final isSel = course.id == selectedId;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: FilterChip(
-                  label: Text(
-                    course.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  selected: isSel,
-                  onSelected: (_) => ctrl.selectCourse(course.id),
-                  visualDensity: VisualDensity.compact,
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<int>(
+            showSelectedIcon: false,
+            segments: [
+              const ButtonSegment(value: 0, label: Text('资料', style: label)),
+              ButtonSegment(
+                value: 1,
+                label: Text(
+                  assignments.isNotEmpty ? '作业(${assignments.length})' : '作业',
+                  style: label,
                 ),
-              );
-            }).toList(),
+              ),
+              ButtonSegment(
+                value: 2,
+                label: Text(
+                  announcements.isNotEmpty
+                      ? '公告(${announcements.length})'
+                      : '公告',
+                  style: label,
+                ),
+              ),
+            ],
+            selected: {_tabIndex},
+            onSelectionChanged: (set) {
+              if (set.isNotEmpty) {
+                setState(() => _tabIndex = set.first);
+              }
+            },
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
           ),
         ),
-        const SizedBox(height: 10),
-
-        // Course details & summary card
-        Card(
-          elevation: 0,
-          color: colorScheme.surfaceContainerLow,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(
-              color: colorScheme.outlineVariant.withValues(alpha: 0.4),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        const SizedBox(height: 12),
+        if (_tabIndex == 0) ...[
+          if (loading &&
+              folders.isEmpty &&
+              materials.isEmpty &&
+              modules.isEmpty)
+            const SectionSpinner()
+          else ...[
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
               children: [
-                // Course summary top row
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            selectedCourse.name,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: colorScheme.onSurface,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              if (selectedCourse.courseCode != null) ...[
-                                Text(
-                                  selectedCourse.courseCode!,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                              ],
-                              if (selectedCourse.termName != null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 1,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: colorScheme.surfaceContainerHighest,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    selectedCourse.termName!,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Sub-tab switch: 资料与模块 vs 公告
-                    SegmentedButton<int>(
-                      segments: [
-                        const ButtonSegment(
-                          value: 0,
-                          label: Text('资料', style: TextStyle(fontSize: 12)),
-                        ),
-                        ButtonSegment(
-                          value: 1,
-                          label: Text(
-                            announcements.isNotEmpty
-                                ? '公告(${announcements.length})'
-                                : '公告',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                      ],
-                      selected: {_tabIndex},
-                      onSelectionChanged: (set) {
-                        if (set.isNotEmpty) {
-                          setState(() => _tabIndex = set.first);
-                        }
-                      },
-                      style: ButtonStyle(
-                        visualDensity: VisualDensity.compact,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        padding: WidgetStateProperty.all(
-                          const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 0,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                _buildSummaryBadge(
+                  colorScheme,
+                  icon: Icons.folder_outlined,
+                  label: '${folders.length} 文件夹',
                 ),
-                const SizedBox(height: 10),
-
-                // Course stats summary badges
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _buildSummaryBadge(
-                        colorScheme,
-                        icon: Icons.folder_outlined,
-                        label: '${folders.length} 文件夹',
-                      ),
-                      const SizedBox(width: 6),
-                      _buildSummaryBadge(
-                        colorScheme,
-                        icon: Icons.insert_drive_file_outlined,
-                        label: '${materials.length} 课件文件',
-                      ),
-                      if (modules.isNotEmpty) ...[
-                        const SizedBox(width: 6),
-                        _buildSummaryBadge(
-                          colorScheme,
-                          icon: Icons.view_module_outlined,
-                          label: '${modules.length} 学习模块',
-                        ),
-                      ],
-                      if (assignments.isNotEmpty) ...[
-                        const SizedBox(width: 6),
-                        _buildSummaryBadge(
-                          colorScheme,
-                          icon: Icons.assignment_outlined,
-                          label: '${assignments.length} 项作业',
-                        ),
-                      ],
-                    ],
-                  ),
+                _buildSummaryBadge(
+                  colorScheme,
+                  icon: Icons.insert_drive_file_outlined,
+                  label: '${materials.length} 课件文件',
                 ),
-                const Divider(height: 22),
-
-                // Tab Content
-                if (_tabIndex == 0)
-                  _buildMaterialsAndModulesTab(
-                    context,
+                if (modules.isNotEmpty)
+                  _buildSummaryBadge(
                     colorScheme,
-                    courseId: selectedId,
-                    folders: folders,
-                    materials: materials,
-                    modules: modules,
-                  )
-                else
-                  _buildAnnouncementsTab(context, colorScheme, selectedId),
+                    icon: Icons.view_module_outlined,
+                    label: '${modules.length} 学习模块',
+                  ),
               ],
             ),
+            const SizedBox(height: 12),
+            _buildMaterialsAndModulesTab(
+              context,
+              colorScheme,
+              courseId: id,
+              folders: folders,
+              materials: materials,
+              modules: modules,
+            ),
+          ],
+        ] else if (_tabIndex == 1)
+          _buildAssignmentsTab(context, colorScheme, assignments, loading)
+        else
+          _buildAnnouncementsTab(context, colorScheme, id),
+      ],
+    );
+  }
+
+  Widget _buildAssignmentsTab(
+    BuildContext context,
+    ColorScheme colorScheme,
+    List<CanvasAssignment> assignments,
+    bool loading,
+  ) {
+    if (assignments.isEmpty) {
+      return loading
+          ? const SectionSpinner()
+          : const EmptyHint(
+              icon: Icons.assignment_turned_in_outlined,
+              text: '此课程暂无作业',
+            );
+    }
+    // Upcoming deadlines first (soonest on top), then undated, then past.
+    final now = widget.controller.currentTime();
+    int rank(CanvasAssignment a) =>
+        a.dueAt == null ? 1 : (a.dueAt!.isBefore(now) ? 2 : 0);
+    final sorted = List<CanvasAssignment>.of(assignments)
+      ..sort((a, b) {
+        final byRank = rank(a).compareTo(rank(b));
+        if (byRank != 0 || a.dueAt == null || b.dueAt == null) return byRank;
+        return rank(a) == 0
+            ? a.dueAt!.compareTo(b.dueAt!)
+            : b.dueAt!.compareTo(a.dueAt!);
+      });
+    return Column(
+      children: [
+        for (final assignment in sorted)
+          AssignmentCard(
+            assignment: assignment,
+            colorScheme: colorScheme,
+            inCourse: true,
+            onTap: () => showAssignmentDetails(context, assignment),
           ),
-        ),
       ],
     );
   }

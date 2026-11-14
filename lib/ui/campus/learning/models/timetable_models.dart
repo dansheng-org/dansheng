@@ -249,6 +249,22 @@ class TimetableCourse {
   }
 }
 
+/// Collapses week numbers into ranges, e.g. `1-4, 6, 8-16`.
+String formatWeeks(List<int> weeks) {
+  final sorted = weeks.toSet().toList()..sort();
+  final parts = <String>[];
+  var i = 0;
+  while (i < sorted.length) {
+    var j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] == sorted[j] + 1) {
+      j++;
+    }
+    parts.add(i == j ? '${sorted[i]}' : '${sorted[i]}-${sorted[j]}');
+    i = j + 1;
+  }
+  return parts.join(', ');
+}
+
 /// Parsed Timetable containing list of courses and semester info.
 class TimetableData {
   final Semester? semester;

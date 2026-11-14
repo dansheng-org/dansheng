@@ -5,16 +5,17 @@ import 'package:dansheng_app/ui/core/dansheng_state.dart';
 import 'package:dansheng_app/ui/screens/account_balance_screen.dart';
 
 import '../campus_api.dart';
+import 'course_page.dart';
 import 'learning_controller.dart';
 import 'personal_agenda.dart';
 import 'models/timetable_models.dart';
 import 'widgets/calendar_header.dart';
-import 'widgets/course_files_view.dart';
+import 'widgets/course_list_view.dart';
 import 'widgets/day_schedule_view.dart';
 
 /// Main eLearning & Timetable tab view.
-/// Integrates browsable calendar, day schedule, timetable (UG/PG parameters and semesters),
-/// Canvas announcements/assignments, and nested course folder/files with parent bridge download and open.
+/// Shows the week timetable grid (or a month calendar), the schedule of the selected day and
+/// every enrolled eLearning course; a timetable block or a course row opens that course's page.
 class LearningPage extends StatefulWidget {
   final DanshengController controller;
 
@@ -81,8 +82,6 @@ class _LearningPageState extends State<LearningPage> {
             elevation: 0,
             scrolledUnderElevation: 1,
             actions: [
-              // Academic filter & Semesters actions
-              _buildAcademicFilterActions(context, colorScheme),
               // Manual Refresh
               IconButton(
                 icon: const Icon(Icons.refresh_rounded),
@@ -147,22 +146,35 @@ class _LearningPageState extends State<LearningPage> {
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
-                // Top compact browsable calendar
-                CalendarHeader(controller: _learningController),
+                // Week timetable grid / month calendar
+                CalendarHeader(
+                  controller: _learningController,
+                  onOpenCourses: _openTimetableCourses,
+                ),
                 _buildFilterBar(context, colorScheme),
+                const SizedBox(height: 6),
 
-                // Day selection schedule: courses + due assignments
-                DayScheduleView(controller: _learningController),
-                PersonalAgenda(
-                  api: _campusApi,
-                  day: _learningController.selectedDate,
-                  account: widget.controller.activeAccountId,
+                // Schedule of the selected day: courses + due assignments
+                DayScheduleView(
+                  controller: _learningController,
+                  onOpenCourse: (course) => _openTimetableCourses([course]),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: PersonalAgenda(
+                    api: _campusApi,
+                    day: _learningController.selectedDate,
+                    account: widget.controller.activeAccountId,
+                  ),
                 ),
 
                 const SizedBox(height: 8),
 
-                // Enrolled courses and nested folders/files
-                CourseFilesView(controller: _learningController),
+                // Every enrolled eLearning course
+                CourseListView(
+                  controller: _learningController,
+                  onOpen: (course) => _openCourse(canvasCourseId: course.id),
+                ),
 
                 const SizedBox(height: 32),
               ],
@@ -300,10 +312,58 @@ class _LearningPageState extends State<LearningPage> {
     );
   }
 
-  Widget _buildAcademicFilterActions(
-    BuildContext context,
-    ColorScheme colorScheme,
-  ) {
-    return const SizedBox.shrink();
+  /// Opens the course behind a timetable block; a slot shared by several
+  /// courses asks which one first.
+  Future<void> _openTimetableCourses(List<TimetableCourse> courses) async {
+    if (courses.isEmpty) return;
+    var course = courses.first;
+    if (courses.length > 1) {
+      final picked = await showModalBottomSheet<TimetableCourse>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheet) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final item in courses)
+                ListTile(
+                  leading: const Icon(Icons.menu_book_outlined),
+                  title: Text(item.name),
+                  subtitle: Text(
+                    [
+                      item.timeSpanFormatted,
+                      if ((item.room ?? '').isNotEmpty) item.room!,
+                    ].join(' · '),
+                  ),
+                  onTap: () => Navigator.pop(sheet, item),
+                ),
+            ],
+          ),
+        ),
+      );
+      if (picked == null || !mounted) return;
+      course = picked;
+    }
+    _openCourse(
+      session: course,
+      canvasCourseId: _learningController.canvasCourseFor(course)?.id,
+    );
+  }
+
+  void _openCourse({TimetableCourse? session, String? canvasCourseId}) {
+    // Selecting here (not inside the new route's build) starts the fetch of
+    // the course files before the page appears.
+    if (canvasCourseId != null) {
+      _learningController.selectCourse(canvasCourseId);
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CoursePage(
+          controller: _learningController,
+          session: session,
+          canvasCourseId: canvasCourseId,
+        ),
+      ),
+    );
   }
 }
