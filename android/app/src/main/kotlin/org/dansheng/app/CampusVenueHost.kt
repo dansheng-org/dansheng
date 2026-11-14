@@ -109,6 +109,16 @@ class CampusVenueHost(private val activity:Activity, private val runtime:Runtime
             "visibleLogin"->if(runtime.visiblePage.hasForeground())restoreLock.withLock{foregroundLogin(account)} else run("visibleLogin",input)
             "venues","calendar","appointments","detail","journal","prepareCancel"->read(action.removePrefix("venues."),input,account)
             "pending"->pending(account)
+            "reservePlan"->reservePlan(input,account)
+            "openVoucher"->{
+                val id=input.getLong("appointment_id")
+                require(id>0)
+                withContext(Dispatchers.Main){
+                    activity.startActivity(android.content.Intent(activity,VenueVoucherActivity::class.java)
+                        .putExtra("account_id",account).putExtra("appointment_id",id))
+                }
+                JSONObject().put("opened",true)
+            }
             "reconcile"->{
                 val task=input.getString("task_id")
                 val result=run("reconcile",input) as JSONObject
@@ -190,5 +200,40 @@ class CampusVenueHost(private val activity:Activity, private val runtime:Runtime
                 .put("target_date",input.optString("target_date")).put("time",input.optString("time")))
         }
         return out
+    }
+
+    /** One reviewed plan; each fallback retains its own Core preview, consent and journal. */
+    private suspend fun reservePlan(input:JSONObject,account:String):JSONObject {
+        val epoch=runtime.accountEpoch
+        fun checked(){if(runtime.account()!=account || runtime.accountEpoch!=epoch)throw PortError("AccountChanged")}
+        val plans=input.getJSONArray("slots")
+        require(plans.length() in 1..3)
+        val prepared=mutableListOf<List<JSONObject>>()
+        val periods=mutableSetOf<Int>()
+        for(i in 0 until plans.length()){
+            val plan=plans.getJSONObject(i)
+            require(periods.add(plan.getInt("period_id")))
+            val courts=plan.getJSONArray("courts")
+            require(courts.length() in 1..200)
+            val seen=mutableSetOf<Int>()
+            prepared+= (0 until courts.length()).map { j ->
+                val court=courts.getInt(j);require(seen.add(court))
+                checked()
+                (run("prepareManual",JSONObject().put("account_id",account)
+                    .put("task_id","manual-"+java.util.UUID.randomUUID())
+                    .put("venue_id",input.getInt("venue_id")).put("target_date",input.getString("target_date"))
+                    .put("period_id",plan.getInt("period_id")).put("time",plan.getString("time")).put("court_id",court)) as JSONObject)
+            }
+        }
+        val summary=prepared.joinToString("\n\n"){ choices -> choices.joinToString("\n↓ 备选\n"){it.getString("summary")} }
+        sheet.confirm("确认场馆预约",summary,"按顺序预约")
+        checked()
+        return VenuePlanRunner.run(prepared.map { choices -> choices.map { it.getJSONObject("canonical_input") } },
+            ::checked, {delay(1000)}) { canonical ->
+            val args=JSONObject().put("plugin_id",BUILTIN_PLUGIN_ID).put("action","reserve").put("input",canonical)
+            val hash=(runtime.request("actions.preview",args) as JSONObject).getString("input_sha256")
+            runtime.recordConsent(BUILTIN_PLUGIN_ID,"reserve",canonical,hash)
+            run("reserve",canonical) as JSONObject
+        }
     }
 }

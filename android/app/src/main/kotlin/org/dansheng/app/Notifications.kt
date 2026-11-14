@@ -72,6 +72,8 @@ class Notifications(private val context: Context, private val accountNow:()->Str
             }
             manager.createNotificationChannel(jobsChannel)
             manager.createNotificationChannel(alertsChannel)
+            manager.createNotificationChannel(NotificationChannel(PowerAlerts.CHANNEL,"寝室电量预警",NotificationManager.IMPORTANCE_DEFAULT)
+                .apply{description="剩余电量达到设置阈值时提醒"})
         }
     }
 

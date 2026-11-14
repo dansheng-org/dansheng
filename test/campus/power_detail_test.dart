@@ -327,6 +327,8 @@ void main() {
           const Key('power_verify_2fa_action_button'),
         );
         expect(verifyBtn, findsOneWidget);
+        await tester.ensureVisible(verifyBtn);
+        await tester.pumpAndSettle();
         await tester.tap(verifyBtn);
         await tester.pumpAndSettle();
 

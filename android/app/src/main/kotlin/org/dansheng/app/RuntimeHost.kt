@@ -22,6 +22,7 @@ class RuntimeHost(private val context: Context, browserIsolated:Boolean=true, pa
     val visiblePage = pageFactory(grantGate)
     val wakePort = AndroidWakePort(context.applicationContext)
     val vault = KeystoreVault(context)
+    internal val powerAlerts=PowerAlerts(context,this)
     internal val authGuard = Any()
     @Volatile internal var accountEpoch = 0L
         private set
@@ -79,6 +80,7 @@ class RuntimeHost(private val context: Context, browserIsolated:Boolean=true, pa
         }
         // Register execution port for alarm and background wake delivery immediately
         AndroidRuntime.execution = wakeHost
+        Thread({try{powerAlerts.restore()}catch(_:Exception){}}, "electricity-alert-restore").start()
     }
 
     fun ensureNativeLoaded(): Boolean {
@@ -224,12 +226,18 @@ class RuntimeHost(private val context: Context, browserIsolated:Boolean=true, pa
         val op = NativeCore.request(engine, requestBytes)
         // Visible SSO may take up to 50 s and the native card connector has a
         // 45 s exchange deadline. Do not abandon either operation at 30 s.
-        val deadline = System.currentTimeMillis() + 58_000L
+        val bulkRead=method in setOf("fudan.ecard.statement","fudan.ecard.statistics","fudan.electricity.statistics")
+        val deadline = System.currentTimeMillis() + if(bulkRead)180_000L else 58_000L
         var responseBytes: ByteArray? = null
-        while (System.currentTimeMillis() < deadline) {
+        try { while (System.currentTimeMillis() < deadline) {
             responseBytes = NativeCore.poll(op)
             if (responseBytes != null) break
             Thread.sleep(10)
+        }}catch(_:InterruptedException){
+            NativeCore.cancel(op)
+            val until=System.currentTimeMillis()+3000
+            while(System.currentTimeMillis()<until){if(NativeCore.poll(op)!=null)break;Thread.sleep(10)}
+            throw PortError("Cancelled")
         }
 
         if (responseBytes == null) {
@@ -296,11 +304,13 @@ class RuntimeHost(private val context: Context, browserIsolated:Boolean=true, pa
         }
 
         if(sanitized.isEmpty()) {
-            check(prefs.edit().remove("active_account").commit()); activeAccount=null; return
+            check(prefs.edit().remove("active_account").commit()); activeAccount=null; powerAlerts.cancel(); return
         }
         request("accounts.upsert", JSONObject().put("account_id", sanitized).put("label", sanitized))
         check(prefs.edit().putString("active_account", sanitized).commit())
         activeAccount = sanitized
+        powerAlerts.cancel()
+        powerAlerts.restore()
     }
 
     fun account(): String? = activeAccount

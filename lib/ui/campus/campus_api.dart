@@ -39,6 +39,10 @@ String campusError(Object error) {
     return '请选择当前账号后再试。';
   }
   if (any(['ConfigurationRequired'])) return '需要先完成平台绑定';
+  if (any(['NotificationPermissionRequired'])) return '请允许应用通知后开启预警';
+  if (any(['BackgroundScheduleUnavailable'])) return '系统暂时无法安排后台检查，请重试';
+  if (any(['SourceSchemaChanged'])) return '校园服务返回的数据格式发生变化，请更新后重试';
+  if (any(['LimitExceeded'])) return '查询记录较多，请缩小日期范围后重试';
   if (any(['PermissionDenied', 'ApprovalRequired'])) return '权限不足或账号受限';
   if (any(['NeedsReconciliation'])) return '提交结果待核对，请先刷新记录，不要重复提交。';
   if (any(['CourtOccupied', 'SlotUnavailable'])) return '这个时段已不可约，请刷新后另选。';

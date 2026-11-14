@@ -1,16 +1,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
         android:label="旦生"
         android:name="org.dansheng.app.DanshengApplication"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:icon="@mipmap/ic_launcher">
+        <service android:name=".PowerAlertJobService" android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="true"/>
         <provider android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.coursefiles" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/course_paths"/>
         </provider>
         <activity android:name=".CampusFileReaderActivity" android:exported="false"
+            android:theme="@style/Theme.Dansheng.SheetContent"/>
+        <activity android:name=".VenueVoucherActivity" android:exported="false"
             android:theme="@style/Theme.Dansheng.SheetContent"/>
         <activity android:name=".CampusPortalActivity" android:exported="false" android:process=":campus_verify"
             android:theme="@style/Theme.Dansheng.SheetContent" />

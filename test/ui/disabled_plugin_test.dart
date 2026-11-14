@@ -47,7 +47,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Root defaults to eHall; navigate to 插件 tab
-      expect(find.text('校园办事'), findsOneWidget);
+      expect(find.text('eHall').first, findsOneWidget);
       await tester.tap(find.text('插件'));
       await tester.pumpAndSettle();
 

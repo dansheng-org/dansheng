@@ -4,8 +4,8 @@
   "state": "development_snapshot",
   "core": {
     "version": "0.1.0",
-    "commit": "5ab13d93c39f8eb84a9208d40387b93c115fc8d9",
-    "source_sha256": "5e482d26f6519f8199fecfae9fb5531d8e5cc5e7441ec3632e25bef6394b3590",
+    "commit": "b21ba39c43038c88ecb3519a40c00997add6bcdf",
+    "source_sha256": "171db768b48b74233179db1d610ecfa9591ea44eee0192bdc1d2a0f93fa8aa4f",
     "adapter_source_sha256": "77ec2d44d00fcb121d3b5b4856dcd67dc373c4f3bca004db84217faffee2c88c",
     "api_version": 1,
     "abi_version": 1,
@@ -29,20 +29,20 @@
       "arm64-v8a",
       "x86_64"
     ],
-    "bytes": 19709144,
-    "sha256": "6c956c05167b866c48b5a8e742d8ee86ea6d74adda42955273ba3c519dae9dec",
+    "bytes": 19789917,
+    "sha256": "4ba974f1cb2b48e60c07d837b986f592dbc20c3704e9a365b56936f8be3cd466",
     "native_entries": [
       {
         "entry": "jni/arm64-v8a/libdansheng_ffi.so",
-        "bytes": 17284912,
-        "sha256": "d0b2db70b3ca84a18ff6d2b9cdf5b1b2f6ea2282d2a22d2fa151a36a12d3848a",
-        "staging_sha256": "f9e60f1bcc1441332a8fb37938c7570840d1b69605fdd484a43525b30c5b19b2"
+        "bytes": 17340208,
+        "sha256": "f5ac5252e9513dd1172fcf6657ed2d7ee81c92845ce18b0fe15573741f6c96ce",
+        "staging_sha256": "097692c7bd4e69eec8291ec38851e45a9cdf3537a3df86b64c2803ede7664028"
       },
       {
         "entry": "jni/x86_64/libdansheng_ffi.so",
-        "bytes": 40125080,
-        "sha256": "9b39dd213dc5c4009dee25db3b4a6b88bca449c9429995a8b37b3d656d96f6c3",
-        "staging_sha256": "aa3ac5fd9158bd00378480b086627d30cdec2cec1659b289966055df21ea7f30"
+        "bytes": 40361752,
+        "sha256": "2c06f07ba6172aefd0b6e03b1d1d956edb707178c9dd62f721e9fc0f771d6422",
+        "staging_sha256": "d85e58939a0a0623b866d2d41612cc7906263c71e9a10d3c5f5ee471ac8416f9"
       }
     ],
     "packaged_receipt_complete": true,

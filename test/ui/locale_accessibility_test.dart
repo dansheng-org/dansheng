@@ -17,7 +17,7 @@ void main() {
       await core.initialize();
       await tester.pumpWidget(DanshengApp(controller: core));
       await tester.pumpAndSettle();
-      final context = tester.element(find.text('校园办事'));
+      final context = tester.element(find.text('eHall').first);
       expect(MaterialLocalizations.of(context).cancelButtonLabel, '取消');
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));

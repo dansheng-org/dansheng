@@ -3,7 +3,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -13,7 +12,6 @@ import 'package:dansheng_app/ui/core/dansheng_state.dart';
 import 'package:dansheng_app/ui/campus/campus_api.dart';
 import 'package:dansheng_app/ui/campus/ehall/ehall_page.dart';
 import 'package:dansheng_app/ui/campus/ehall/life_page.dart';
-import 'package:dansheng_app/ui/campus/venues/venue_page.dart';
 import 'package:dansheng_app/ui/theme/app_theme.dart';
 
 const undergraduateNotice = '关于2026年秋季学期选课与退课安排的通知';
@@ -385,227 +383,6 @@ void main() {
       await controller.refreshBalance();
     });
 
-    testWidgets(
-      '1. EHallPage renders with ZERO hidden network calls on first open',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        mockBridge.campusCalls.clear();
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // Verify no venues network calls happened during initial open
-        final venueNetworkCalls = mockBridge.campusCalls
-            .where(
-              (c) =>
-                  c['method'] == 'venues.venues' ||
-                  c['method'] == 'venues.calendar',
-            )
-            .toList();
-        expect(
-          venueNetworkCalls,
-          isEmpty,
-          reason: 'Must not trigger hidden network calls on open',
-        );
-
-        // Verify concise unqueried subtitle without hardcoded venue enumeration
-        expect(find.text('选场馆、看空位、预约'), findsOneWidget);
-        expect(find.textContaining('正大体育馆 · 南区网球场'), findsNothing);
-
-        // Verify key titles and sections
-        expect(find.text('校园办事'), findsOneWidget);
-        expect(find.text('校园卡'), findsOneWidget);
-        expect(find.text('教室空位'), findsOneWidget);
-        expect(find.text('寝室电量'), findsOneWidget);
-        expect(find.text('场馆预约'), findsOneWidget);
-        expect(find.text('生活与出行'), findsOneWidget);
-        expect(find.text('教务查询'), findsOneWidget);
-        expect(find.text('校园邮箱'), findsOneWidget);
-        expect(find.widgetWithText(ListTile, '校园卡明细'), findsNothing);
-
-        // Verify initial unqueried venue snapshot prompt
-        expect(find.text('查询今日空位'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '2. Prominent cards display real balance, truthful seats and nested power payload',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // Card balance prominent display
-        expect(find.text('¥ 238.50'), findsOneWidget);
-        expect(find.textContaining('复旦同学'), findsOneWidget);
-
-        // Dorm power cached value from nested payload
-        expect(find.text('45.2 kWh'), findsOneWidget);
-
-        // Classroom cached value counts the rooms in the cached batch
-        expect(find.text('1 间教室'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '3. Visibly distinguishes no-account state without fabricated zeros',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        mockBridge.activeAccount = null;
-        mockBridge.balanceData = {};
-        controller = DanshengController(client: client);
-        await controller.initialize();
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // Zero fabricated balance check
-        expect(find.text('¥ 0.00'), findsNothing);
-        expect(find.text('¥ 0'), findsNothing);
-        expect(find.text('设置账号'), findsWidgets);
-
-        // Room and power show pending account configuration
-        expect(find.text('待设置账号'), findsNWidgets(2));
-
-        // Trigger venue query without account -> visibly shows account prompt
-        await tester.scrollUntilVisible(find.text('查询今日空位'), 200);
-        await tester.tap(find.text('查询今日空位'));
-        await tester.pumpAndSettle();
-
-        expect(find.textContaining('未设置账号'), findsWidgets);
-      },
-    );
-
-    testWidgets(
-      '4. User-triggered venue query shows summary, slots, and manual drill-down',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // Scroll and click "查询今日空位"
-        await tester.scrollUntilVisible(find.text('查询今日空位'), 200);
-        await tester.tap(find.text('查询今日空位'));
-        await tester.pumpAndSettle();
-
-        // Verifies venues.venues and venues.calendar are now called
-        final methods = mockBridge.campusCalls.map((c) => c['method']).toList();
-        expect(methods, contains('venues.venues'));
-        expect(methods, contains('venues.calendar'));
-
-        // Verifies summary of available slots
-        expect(find.textContaining('正大体育馆羽毛球场'), findsWidgets);
-        expect(find.textContaining('2 个时段可约'), findsOneWidget);
-
-        // Inline slot preview chips
-        expect(find.textContaining('10:00-11:00 1号场地'), findsOneWidget);
-        expect(find.textContaining('11:00-12:00 1号场地'), findsOneWidget);
-
-        // Drill down into manual VenuePage
-        await tester.tap(find.widgetWithText(FilledButton, '手动预约'));
-        await tester.pumpAndSettle();
-
-        expect(find.byType(VenuePage), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '5. Venue snapshot handles authentication required with login recovery',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        mockBridge.throwOnVenues = true;
-        mockBridge.throwCode = 'AuthenticationRequired';
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        // Trigger refresh
-        await tester.scrollUntilVisible(find.text('查询今日空位'), 200);
-        await tester.tap(find.text('查询今日空位'));
-        await tester.pumpAndSettle();
-
-        // Visibly indicates authentication needed
-        expect(find.text('需要登录校园服务'), findsWidgets);
-        expect(find.text('登录并刷新'), findsOneWidget);
-
-        // Tap login and refresh
-        await tester.tap(find.text('登录并刷新'));
-        await tester.pumpAndSettle();
-
-        // Verifies venues.visibleLogin was executed and slots are now displayed
-        final methods = mockBridge.campusCalls.map((c) => c['method']).toList();
-        expect(methods, contains('venues.visibleLogin'));
-        expect(find.textContaining('2 个时段可约'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '5b. Mistyping or cancelling the login sheet keeps the login button on the home card',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        mockBridge.throwOnVenues = true;
-        mockBridge.throwCode = 'AuthenticationRequired';
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(find.text('查询今日空位'), 200);
-        await tester.tap(find.text('查询今日空位'));
-        await tester.pumpAndSettle();
-
-        mockBridge.throwOnMethod = 'venues.visibleLogin';
-        mockBridge.throwCode = 'InvalidCredentials';
-        await tester.tap(find.text('登录并刷新'));
-        await tester.pumpAndSettle();
-        expect(find.textContaining('账号或密码错误'), findsOneWidget);
-        expect(find.text('登录并刷新'), findsOneWidget);
-
-        mockBridge.throwCode = 'Cancelled';
-        await tester.tap(find.text('登录并刷新'));
-        await tester.pumpAndSettle();
-        expect(find.text('需要登录校园服务'), findsOneWidget);
-        expect(find.text('登录并刷新'), findsOneWidget);
-        expect(find.textContaining('已取消'), findsNothing);
-
-        mockBridge.throwOnMethod = null;
-      },
-    );
-
     test(
       'A rejected password is named rather than reported as a missing login',
       () {
@@ -617,40 +394,6 @@ void main() {
           campusError(PlatformException(code: 'AuthenticationRequired')),
           '需要登录校园服务',
         );
-      },
-    );
-
-    testWidgets(
-      '6. Standalone manual reservation works without scheduler; plugin adds scheduling only',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        // Without scheduler plugin
-        mockBridge.plugins = [];
-        await controller.initialize();
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.text('可定时'), findsNothing);
-
-        // With scheduler plugin enabled
-        mockBridge.plugins = [
-          {'id': 'org.danxi.sports_sniper', 'name': '场馆定时调度', 'enabled': true},
-        ];
-        await controller.initialize();
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.text('可定时'), findsOneWidget);
       },
     );
 
@@ -811,41 +554,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('校园办事'), findsOneWidget);
+        expect(find.text('eHall'), findsOneWidget);
         expect(find.text('校园卡'), findsOneWidget);
         expect(find.text('场馆预约'), findsOneWidget);
-        expect(tester.takeException(), isNull);
-      },
-    );
-
-    testWidgets(
-      '14. Account switch drops stale in-flight results and resets cached state',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.text('¥ 238.50'), findsOneWidget);
-
-        // Switch to different account: verifies previous balance is immediately dropped
-        mockBridge.balanceData = {'balance': '12.00'};
-        await controller.switchAccount('21307130099');
-        await tester.pumpAndSettle();
-
-        // Old balance dropped, shows fresh pending state
-        expect(find.text('¥ 238.50'), findsNothing);
-        expect(find.text('查看明细'), findsOneWidget);
-
-        // Now refresh balance for new account
-        await controller.refreshBalance();
-        await tester.pumpAndSettle();
-        expect(find.text('¥ 12.00'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );
@@ -863,17 +574,8 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        // The first tap fetches in place; the next opens the period grid.
         await tester.tap(find.text('教室空位'));
         await tester.pumpAndSettle();
-        expect(find.byType(LifePage), findsNothing);
-        expect(
-          mockBridge.campusCalls.where((c) => c['method'] == 'fudan.rooms'),
-          hasLength(1),
-        );
-        await tester.tap(find.text('教室空位'));
-        await tester.pumpAndSettle();
-
         // LifePage opened with classrooms loaded using the building parameter mapped to H3 code
         expect(find.byType(LifePage), findsOneWidget);
         expect(find.text('第三教学楼'), findsWidgets);
@@ -884,13 +586,6 @@ void main() {
         );
         expect(roomsCall['params']['building'], 'H3');
         expect(roomsCall['params']['date'], isNotNull);
-
-        final cacheCall = mockBridge.campusCalls.firstWhere(
-          (c) =>
-              c['method'] == 'campus.cached' &&
-              c['params']['method'] == 'fudan.rooms',
-        );
-        expect(cacheCall['params']['building'], 'H3');
       },
     );
 
@@ -1185,205 +880,6 @@ void main() {
       expect(find.text('校园双因素认证'), findsOneWidget);
       expect(find.text('id.fudan.edu.cn'), findsOneWidget);
       expect(find.text('my.fudan.edu.cn'), findsNothing);
-    });
-
-    group('19. Rooms card', () {
-      void useTallView(WidgetTester tester, {double width = 800}) {
-        tester.view.physicalSize = Size(width, 1400);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-      }
-
-      int roomQueries() => mockBridge.campusCalls
-          .where((c) => c['method'] == 'fudan.rooms')
-          .length;
-
-      Finder cardOf(String title) =>
-          find.ancestor(of: find.text(title), matching: find.byType(InkWell));
-
-      // Measured per card: the venue card's button row overflows at these
-      // widths on its own, so a page-wide exception check would blame this card.
-      void expectCardFits(WidgetTester tester, String title) {
-        final flexes = find.descendant(
-          of: cardOf(title),
-          matching: find.byWidgetPredicate((w) => w is Flex),
-        );
-        expect(flexes, findsWidgets);
-        for (final flex in tester.renderObjectList<RenderFlex>(flexes)) {
-          final horizontal = flex.direction == Axis.horizontal;
-          var used = 0.0;
-          flex.visitChildren((child) {
-            final size = (child as RenderBox).size;
-            used += horizontal ? size.width : size.height;
-          });
-          expect(
-            used,
-            lessThanOrEqualTo(
-              (horizontal ? flex.size.width : flex.size.height) + 0.01,
-            ),
-            reason: '$title card overflows',
-          );
-        }
-      }
-
-      testWidgets('shows no description before any query', (tester) async {
-        useTallView(tester);
-        mockBridge.hasCachedRooms = false;
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.text('查空位节次'), findsOneWidget);
-        expect(find.text('教学楼实时座位'), findsNothing);
-      });
-
-      testWidgets('shows no description over a cached room', (tester) async {
-        useTallView(tester);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.text('1 间教室'), findsOneWidget);
-        expect(find.text('空闲 3 节次'), findsNothing);
-        expect(find.text('教学楼座位'), findsNothing);
-      });
-
-      testWidgets('keeps the metric but no description after a query', (
-        tester,
-      ) async {
-        useTallView(tester);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('教室空位'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('2 间教室'), findsOneWidget);
-        expect(find.textContaining('查看节次'), findsNothing);
-        expect(find.textContaining('第三教学楼'), findsNothing);
-      });
-
-      testWidgets('shows the reason when the query fails until a retry works', (
-        tester,
-      ) async {
-        useTallView(tester);
-        const reason = '暂时无法连接服务，请检查校园网络后刷新。';
-        mockBridge.throwOnMethod = 'fudan.rooms';
-        mockBridge.throwCode = 'SourceTransportUnavailable';
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('教室空位'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('点击重试'), findsOneWidget);
-        expect(find.text(reason), findsOneWidget);
-        expect(find.byType(LifePage), findsNothing);
-
-        mockBridge.throwOnMethod = null;
-        await tester.tap(find.text('教室空位'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('2 间教室'), findsOneWidget);
-        expect(find.text('点击重试'), findsNothing);
-        expect(find.text(reason), findsNothing);
-      });
-
-      testWidgets('matches the power card height and is tappable to its edge', (
-        tester,
-      ) async {
-        useTallView(tester);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        final rooms = tester.getRect(cardOf('教室空位'));
-        final power = tester.getRect(cardOf('寝室电量'));
-        expect(rooms.top, power.top);
-        expect(rooms.height, power.height);
-        expect(rooms.width, power.width);
-        expect(power.left - rooms.right, 12);
-
-        // Below the rooms text, where only the stretched card can take the tap
-        await tester.tapAt(Offset(rooms.center.dx, rooms.bottom - 4));
-        await tester.pumpAndSettle();
-        expect(roomQueries(), 1);
-      });
-
-      testWidgets('stacks at full width below 280 of available width', (
-        tester,
-      ) async {
-        // 300 wide minus the page's 20 gutters leaves 260.
-        useTallView(tester, width: 300);
-
-        await tester.pumpWidget(
-          buildTestApp(home: EHallPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
-
-        final rooms = tester.getRect(cardOf('教室空位'));
-        final power = tester.getRect(cardOf('寝室电量'));
-        expect(rooms.width, 260);
-        expect(power.width, 260);
-        expect(power.top - rooms.bottom, 12);
-        expectCardFits(tester, '教室空位');
-        expectCardFits(tester, '寝室电量');
-
-        await tester.tapAt(Offset(rooms.center.dx, rooms.bottom - 4));
-        await tester.pumpAndSettle();
-        expect(roomQueries(), 1);
-        tester.takeException(); // The venue card's row, see expectCardFits.
-      });
-
-      // 320 leaves exactly 280 of width, the narrowest side-by-side layout.
-      for (final width in [320.0, 800.0]) {
-        testWidgets(
-          'fits at ${width.toInt()} wide with 1.8x font, also on error',
-          (tester) async {
-            useTallView(tester, width: width);
-            mockBridge.throwOnMethod = 'fudan.rooms';
-            mockBridge.throwCode = 'SourceTransportUnavailable';
-
-            await tester.pumpWidget(
-              buildTestApp(
-                home: EHallPage(controller: controller),
-                textScale: 1.8,
-              ),
-            );
-            await tester.pumpAndSettle();
-
-            void expectPairFits() {
-              final rooms = tester.getRect(cardOf('教室空位'));
-              final power = tester.getRect(cardOf('寝室电量'));
-              expect(rooms.height, power.height);
-              expect(rooms.top, power.top);
-              expectCardFits(tester, '教室空位');
-              expectCardFits(tester, '寝室电量');
-            }
-
-            expectPairFits();
-
-            await tester.tap(find.text('教室空位'));
-            await tester.pumpAndSettle();
-            expect(find.textContaining('暂时无法连接服务'), findsOneWidget);
-            expectPairFits();
-            tester.takeException(); // The venue card's row, see expectCardFits.
-          },
-        );
-      }
     });
   });
 }

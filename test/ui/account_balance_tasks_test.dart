@@ -42,12 +42,12 @@ void main() {
       await tester.pumpAndSettle();
 
       // 1. Wallet and Account Actions under eHall
-      expect(find.text('校园办事'), findsOneWidget);
+      expect(find.text('eHall').first, findsOneWidget);
 
-      // Refresh card balance while on eHall
+      // Balance remains on its detail page; the eHall entry stays one line.
       await controller.refreshBalance();
       await tester.pumpAndSettle();
-      expect(find.textContaining('125.60'), findsOneWidget);
+      expect(find.textContaining('125.60'), findsNothing);
 
       // Open AccountBalanceScreen via toolbar button
       await tester.tap(find.byTooltip('账号与校园卡'));

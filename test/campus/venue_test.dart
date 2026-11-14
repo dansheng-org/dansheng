@@ -154,6 +154,11 @@ class MockCampusBridge implements DanshengBridge {
               'input_sha256': 'mock_sha256_hash_123',
             });
 
+          case 'venues.reservePlan':
+            return jsonEncode({
+              'successes': methodParams['slots'],
+              'message': 'OK',
+            });
           case 'venues.reserve':
             return jsonEncode({
               'status': 'success',
@@ -214,7 +219,13 @@ class MockCampusBridge implements DanshengBridge {
 }
 
 Widget createVenueTestApp({required DanshengController controller}) {
-  return MaterialApp(home: VenuePage(controller: controller));
+  return MaterialApp(
+    home: VenuePage(
+      controller: controller,
+      initialVenueId: 900,
+      initialDate: DateTime(2099, 1, 3),
+    ),
+  );
 }
 
 void main() {
@@ -232,6 +243,10 @@ void main() {
     tester,
   ) async {
     await controller.initialize();
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(createVenueTestApp(controller: controller));
     await tester.pumpAndSettle();
 
@@ -239,8 +254,8 @@ void main() {
     expect(find.text('正大体育馆羽毛球场'), findsWidgets);
 
     // Verify calendar slots are displayed
-    expect(find.text('1号场地'), findsWidgets);
-    expect(find.text('2号场地'), findsOneWidget);
+    expect(find.byKey(const ValueKey('period-71')), findsOneWidget);
+    expect(find.text('2号场地 · 满'), findsNothing);
     expect(find.text('10:00-11:00'), findsWidgets);
 
     // Verify prominent manual action button is visible
@@ -257,15 +272,21 @@ void main() {
     'Selecting an available slot enables the prominent manual reservation button',
     (tester) async {
       await controller.initialize();
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(createVenueTestApp(controller: controller));
       await tester.pumpAndSettle();
 
       // Tap on the first available slot (1号场地 10:00-11:00)
-      final availableSlotFinder = find
-          .ancestor(of: find.text('1号场地'), matching: find.byType(InkWell))
-          .first;
-
-      await tester.tap(availableSlotFinder);
+      await tester.ensureVisible(find.byKey(const ValueKey('period-71')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('period-71')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('court-71-101')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('court-71-101')));
       await tester.pumpAndSettle();
 
       // Verify button is now enabled
@@ -275,7 +296,7 @@ void main() {
       expect(button.enabled, isTrue);
 
       // Verify selected slot details are shown in the bottom bar
-      expect(find.textContaining('已选: 正大体育馆羽毛球场 · 1号场地'), findsOneWidget);
+      expect(find.textContaining('已选: 正大体育馆羽毛球场 · 1 个时段'), findsOneWidget);
     },
   );
 
@@ -286,6 +307,10 @@ void main() {
       mockBridge.plugins = [];
       await controller.initialize();
 
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(createVenueTestApp(controller: controller));
       await tester.pumpAndSettle();
 
@@ -311,6 +336,10 @@ void main() {
         },
       ];
       await controller.refreshAll();
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(createVenueTestApp(controller: controller));
       await tester.pumpAndSettle();
 
@@ -347,20 +376,29 @@ void main() {
       ];
       await controller.initialize();
 
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(createVenueTestApp(controller: controller));
       await tester.pumpAndSettle();
 
       // Select slot first to verify prefill
-      final availableSlotFinder = find
-          .ancestor(of: find.text('1号场地'), matching: find.byType(InkWell))
-          .first;
-      await tester.tap(availableSlotFinder);
+      await tester.ensureVisible(find.byKey(const ValueKey('period-71')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('period-71')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('court-71-101')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('court-71-101')));
       await tester.pumpAndSettle();
 
       // Button should be visible
       expect(find.text('创建定时任务'), findsOneWidget);
 
       // Tap the button
+      await tester.ensureVisible(find.text('创建定时任务'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('创建定时任务'));
       await tester.pumpAndSettle();
 
@@ -383,14 +421,21 @@ void main() {
     'Manual reservation executes prepareManual, shows confirmation, and calls reserve',
     (tester) async {
       await controller.initialize();
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(createVenueTestApp(controller: controller));
       await tester.pumpAndSettle();
 
       // Select slot
-      final availableSlotFinder = find
-          .ancestor(of: find.text('1号场地'), matching: find.byType(InkWell))
-          .first;
-      await tester.tap(availableSlotFinder);
+      await tester.ensureVisible(find.byKey(const ValueKey('period-71')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('period-71')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('court-71-101')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('court-71-101')));
       await tester.pumpAndSettle();
 
       // Click "立即预约" - single native confirmation flow (no Flutter bottom sheet)
@@ -403,8 +448,8 @@ void main() {
           .toList();
       final methods = campusCalls.map((c) => c['params']['method']).toList();
 
-      expect(methods, contains('venues.prepareManual'));
-      expect(methods, contains('venues.reserve'));
+      expect(methods, contains('venues.reservePlan'));
+      expect(methods.where((m) => m == 'venues.reservePlan'), hasLength(1));
 
       // Verify success snackbar
       expect(find.text('预约成功！'), findsOneWidget);
@@ -415,6 +460,10 @@ void main() {
     tester,
   ) async {
     await controller.initialize();
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(createVenueTestApp(controller: controller));
     await tester.pumpAndSettle();
 
@@ -428,7 +477,7 @@ void main() {
     expect(find.text('预约成功'), findsOneWidget);
 
     // Tap appointment item to view details
-    await tester.tap(find.text('正大体育馆羽毛球场').first);
+    await tester.tap(find.text('正大体育馆羽毛球场').last);
     await tester.pumpAndSettle();
 
     // Verify detail dialog is shown
@@ -440,6 +489,10 @@ void main() {
     'Offline cancellation flow invokes venues.cancel without second confirmation and supports reconcileCancel',
     (tester) async {
       await controller.initialize();
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(createVenueTestApp(controller: controller));
       await tester.pumpAndSettle();
 
@@ -534,6 +587,10 @@ void main() {
     mockBridge.throwCode = 'AuthenticationRequired';
 
     await controller.initialize();
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(createVenueTestApp(controller: controller));
     await tester.pumpAndSettle();
 
@@ -559,14 +616,21 @@ void main() {
     tester,
   ) async {
     await controller.initialize();
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(createVenueTestApp(controller: controller));
     await tester.pumpAndSettle();
 
     // Select slot
-    final availableSlotFinder = find
-        .ancestor(of: find.text('1号场地'), matching: find.byType(InkWell))
-        .first;
-    await tester.tap(availableSlotFinder);
+    await tester.ensureVisible(find.byKey(const ValueKey('period-71')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('period-71')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('court-71-101')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('court-71-101')));
     await tester.pumpAndSettle();
 
     expect(find.widgetWithText(FilledButton, '立即预约'), findsOneWidget);

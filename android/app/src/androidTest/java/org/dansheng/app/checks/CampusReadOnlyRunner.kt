@@ -75,6 +75,28 @@ class CampusReadOnlyRunner: Instrumentation() {
                     }
                 }
             }
+            if(config.getString("only")=="power-public"){
+                val connection=java.net.URL("https://zlapp.fudan.edu.cn/fudanelec/wap/default/info").openConnection() as javax.net.ssl.HttpsURLConnection
+                try{
+                    connection.connectTimeout=10000;connection.readTimeout=10000;connection.instanceFollowRedirects=false
+                    out.putString("power_public_java","http_"+connection.responseCode)
+                    connection.getHeaderField("Location")?.let{out.putString("power_redirect_host",java.net.URI(it).host)}
+                }catch(e:Exception){out.putString("power_public_java",e.javaClass.simpleName)}
+                finally{connection.disconnect()}
+                probe("power_public_native"){
+                    val r=call("http.request","method" to "GET","url" to "https://zlapp.fudan.edu.cn/fudanelec/wap/default/info","follow_redirects" to false) as JSONObject
+                    out.putInt("power_public_native_http",r.getInt("status"));true
+                }
+                out.putString("result","completed");finish(Activity.RESULT_OK,out);return
+            }
+            if(config.getString("only")=="power-alert-platform"){
+                verifyPowerAlertPlatform(this,rt,out)
+                out.putString("result","completed");finish(Activity.RESULT_OK,out);return
+            }
+            if(config.getString("only")=="power-alert"){
+                if(login("power")!=null)verifyRealPowerAlertJob(this,rt,out)
+                out.putString("result","completed");finish(Activity.RESULT_OK,out);return
+            }
             if(config.getString("only")=="power") {
                 if(login("power")!=null)probe("power_shape"){
                     val r=call("http.request","method" to "GET","url" to "https://zlapp.fudan.edu.cn/fudanelec/wap/default/info","follow_redirects" to false) as JSONObject
@@ -126,7 +148,12 @@ class CampusReadOnlyRunner: Instrumentation() {
                 out.putString("result","completed");finish(Activity.RESULT_OK,out);return
             }
             val hasCampus=login("ecard")!=null
-            if(creds!=null){
+            if(hasCampus && config.getString("only")=="venue") {
+                probe("ecard_balance"){call("fudan.ecard.balance")}
+                val end=LocalDate.now(ZoneId.of("Asia/Shanghai"))
+                probe("ecard_transactions"){call("fudan.ecard.transactions","from" to end.minusDays(6).toString(),"to" to end.toString(),"page" to 1)}
+            }
+            if(creds!=null && config.getString("only")!="venue"){
                 probe("notices_ug"){call("fudan.notices")}
                 probe("notices_pg"){call("fudan.notices","level" to "graduate")}
             }

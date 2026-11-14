@@ -104,6 +104,8 @@ class MockDanshengBridge implements DanshengBridge {
         };
       case 'venues.reserve':
         return {'status': 'success', 'message': '预约成功'};
+      case 'venues.reservePlan':
+        return {'successes': methodParams['slots'], 'message': '预约成功'};
       case 'venues.reconcile':
         return {'reconciled': true};
       case 'fudan.semesters':

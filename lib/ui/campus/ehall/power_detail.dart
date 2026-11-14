@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../core/dansheng_state.dart';
 import '../../screens/account_balance_screen.dart';
 import '../campus_api.dart';
+import 'usage_bar_chart.dart';
+import 'power_alert_settings.dart';
 
 /// Represents parsed dorm electricity balance information matching DanXi ElectricityItem.
 class ElectricityBalanceInfo {
@@ -73,6 +74,11 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
   bool _hasMoreHistory = true;
   int _historyTicket = 0;
 
+  String _usagePeriod = 'day';
+  Map? _usageSummary;
+  String? _usageError;
+  bool _loadingUsage = false;
+  int _usageTicket = 0;
   String? _lastAccountId;
 
   @override
@@ -101,9 +107,18 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     final current = widget.controller.activeAccountId;
     if (current != _lastAccountId) {
       _lastAccountId = current;
+      _balanceTicket++;
+      _historyTicket++;
+      _usageTicket++;
       if (mounted) {
         setState(() {
           _balanceInfo = null;
+          _loadingBalance = false;
+          _loadingHistory = false;
+          _loadingMoreHistory = false;
+          _loadingUsage = false;
+          _usageSummary = null;
+          _usageError = null;
           _balanceError = null;
           _balanceAuthRequired = false;
           _historyRecords.clear();
@@ -120,7 +135,11 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
   }
 
   Future<void> _loadAll() async {
-    await Future.wait([_loadBalance(), _loadHistory(refresh: true)]);
+    await Future.wait([
+      _loadBalance(),
+      _loadHistory(refresh: true),
+      _loadUsage(),
+    ]);
   }
 
   bool _isAuthError(Object error) {
@@ -458,7 +477,7 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     try {
       await _api.call('campus.verifyDining', {'service': 'power_history'});
       if (mounted) {
-        await _loadHistory(refresh: true);
+        await Future.wait([_loadHistory(refresh: true), _loadUsage()]);
       }
     } catch (e) {
       if (mounted) {
@@ -498,6 +517,22 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
               _buildNoAccountBanner(colors, textTheme),
             ] else ...[
               _buildBalanceSection(colors, textTheme),
+              Card(
+                child: ListTile(
+                  key: const Key('power_alert_entry'),
+                  leading: const Icon(Icons.notifications_active_outlined),
+                  title: const Text('设置预警提醒'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          PowerAlertSettingsPage(controller: widget.controller),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildUsageTrendCard(colors, textTheme),
               const SizedBox(height: 16),
               _buildHistorySection(colors, textTheme),
             ],
@@ -871,9 +906,6 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
             ),
           )
         else ...[
-          // Optional mini trend chart matching DanXi LineChart
-          _buildUsageTrendCard(colors, textTheme),
-          const SizedBox(height: 10),
           // History records list with date, kWh, dorm_name and pagination
           ..._historyRecords.asMap().entries.map((entry) {
             final index = entry.key;
@@ -887,86 +919,106 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     );
   }
 
+  Future<void> _loadUsage() async {
+    final ticket = ++_usageTicket;
+    final account = widget.controller.activeAccountId;
+    setState(() {
+      _usageSummary = null;
+      _usageError = null;
+      _loadingUsage = account != null;
+    });
+    if (account == null) return;
+    try {
+      final response = await _api.call('fudan.electricity.statistics', {
+        'period': _usagePeriod,
+      });
+      if (!mounted ||
+          ticket != _usageTicket ||
+          account != widget.controller.activeAccountId) {
+        return;
+      }
+      final payload = response is Map && response['payload'] is Map
+          ? response['payload']
+          : response;
+      if (payload is! Map || payload['buckets'] is! List) {
+        throw const FormatException('Invalid usage statistics');
+      }
+      setState(() => _usageSummary = payload);
+    } catch (e) {
+      if (mounted &&
+          ticket == _usageTicket &&
+          account == widget.controller.activeAccountId) {
+        setState(() => _usageError = campusError(e));
+      }
+    } finally {
+      if (mounted && ticket == _usageTicket) {
+        setState(() => _loadingUsage = false);
+      }
+    }
+  }
+
   Widget _buildUsageTrendCard(ColorScheme colors, TextTheme textTheme) {
-    final recent = _historyRecords.take(14).toList();
-    final parsed = recent
-        .map((r) => double.tryParse(r.amount) ?? 0.0)
-        .where((a) => a > 0)
+    final buckets = (_usageSummary?['buckets'] as List? ?? [])
+        .whereType<Map>()
         .toList();
-    if (parsed.isEmpty) return const SizedBox.shrink();
-
-    final maxVal = parsed.reduce(math.max);
-    final reversed = recent.reversed.toList();
-
-    return Material(
-      color: colors.surfaceContainerLowest,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: colors.outlineVariant),
-      ),
+    return Card(
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
+            Text('用电走势', style: textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
               children: [
-                Icon(Icons.show_chart, size: 16, color: colors.primary),
-                const SizedBox(width: 6),
-                Text(
-                  '近期用电走势',
-                  style: textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
+                for (final entry in {
+                  'day': '天',
+                  'week': '周',
+                  'month': '月',
+                  'year': '年',
+                }.entries)
+                  ChoiceChip(
+                    key: ValueKey('usage_period_${entry.key}'),
+                    label: Text(entry.value),
+                    selected: _usagePeriod == entry.key,
+                    onSelected: (_) {
+                      setState(() => _usagePeriod = entry.key);
+                      _loadUsage();
+                    },
                   ),
-                ),
-                const Spacer(),
-                Text(
-                  '最高 ${maxVal.toStringAsFixed(1)} kWh',
-                  style: textTheme.labelSmall?.copyWith(color: colors.outline),
-                ),
               ],
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              height: 70,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: reversed.map((item) {
-                  final val = double.tryParse(item.amount) ?? 0.0;
-                  final ratio = maxVal > 0
-                      ? (val / maxVal).clamp(0.08, 1.0)
-                      : 0.1;
-                  final dateShort = item.date.length >= 5
-                      ? item.date.substring(item.date.length - 5)
-                      : item.date;
-
-                  return Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Container(
-                            height: 48 * ratio,
-                            decoration: BoxDecoration(
-                              color: colors.primary.withValues(alpha: 0.85),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            dateShort,
-                            style: const TextStyle(fontSize: 8),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
+            Text(
+              _usagePeriod == 'week' ? '单位 kWh · 每周按周一归集' : '单位 kWh',
+              style: textTheme.bodySmall,
             ),
+            const SizedBox(height: 12),
+            if (_loadingUsage)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_usageError != null)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(_usageError!),
+                trailing: TextButton(
+                  onPressed: _loadUsage,
+                  child: const Text('重试'),
+                ),
+              )
+            else if (_usageSummary != null) ...[
+              UsageBarChart(buckets: buckets, period: _usagePeriod),
+              const SizedBox(height: 12),
+              Text(
+                '共 ${_usageSummary!['record_count']} 条用电记录',
+                style: textTheme.bodySmall,
+              ),
+              if (_usageSummary!['complete'] != true)
+                Text('按校方已提供的记录统计，完整性未确认', style: textTheme.bodySmall),
+            ],
           ],
         ),
       ),

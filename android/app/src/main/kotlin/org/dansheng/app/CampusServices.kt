@@ -21,6 +21,7 @@ internal class CampusServices(
 ) {
     private val venues=CampusVenueHost(activity,rt,sheet)
     private val reads=setOf(
+        "fudan.ecard.statement","fudan.ecard.statistics","fudan.electricity.statistics",
         "fudan.rooms","fudan.electricity","fudan.electricity.history","fudan.ecard.transactions","fudan.library.occupancy","fudan.dining.occupancy","fudan.bus","fudan.notices",
         "fudan.semesters","fudan.timetable.sync","fudan.postgraduate.sync","fudan.student_association","fudan.exams","fudan.grades","fudan.gpa","fudan.pe",
         "canvas.courses.sync","canvas.announcements.sync","canvas.assignments.sync","canvas.materials.sync","canvas.modules.sync","canvas.module_items.sync","canvas.folders.sync","canvas.pages.sync","canvas.page.read",
@@ -44,6 +45,15 @@ internal class CampusServices(
         val account=rt.account() ?: throw PortError("AccountRequired")
         if(supplied.has("account_id") && supplied.optString("account_id")!=account)throw PortError("AccountMismatch")
         val p=JSONObject(supplied.toString()).put("account_id",account)
+        if(method.startsWith("powerAlert.")){
+            return when(method.removePrefix("powerAlert.")){
+                "get"->rt.powerAlerts.status()
+                "set"->rt.powerAlerts.configure(p.getBoolean("enabled"),p.getDouble("threshold_kwh"))
+                "check"->rt.powerAlerts.check()
+                "notificationSettings"->{rt.powerAlerts.openNotificationSettings();rt.permissions()}
+                else->throw PortError("MethodUnavailable")
+            }.also{checked(account)}
+        }
         if(method.startsWith("agenda."))return CampusAgenda.call(rt,account,method.removePrefix("agenda."),p).also{checked(account)}
         if(method=="campus.login")return login(p.getString("service"),account,p.optBoolean("replace"))
         if(method=="campus.verifyDining")return verifyPortal(account,
@@ -97,9 +107,9 @@ internal class CampusServices(
             val service=when {
                 method.startsWith("canvas.") -> "canvas"
                 method.startsWith("community.tea.") -> "forum"
-                method=="fudan.ecard.transactions" -> "ecard"
+                method.startsWith("fudan.ecard.") -> "ecard"
                 method=="fudan.electricity" -> "power"
-                method=="fudan.dining.occupancy" || method=="fudan.electricity.history" -> "dining"
+                method=="fudan.dining.occupancy" || method=="fudan.electricity.history" || method=="fudan.electricity.statistics" -> "dining"
                 method=="fudan.bus" -> "bus"
                 method=="fudan.rooms" -> "webvpn"
                 method in setOf("fudan.semesters","fudan.timetable.sync","fudan.student_association","fudan.grades","fudan.exams","fudan.gpa","fudan.pe") -> "academic"
