@@ -1,15 +1,17 @@
 #Requires -Version 7.0
 param([Parameter(Mandatory)][string]$Apk,[Parameter(Mandatory)][ValidateSet('arm64-v8a','x86_64')][string]$Abi,
-      [Parameter(Mandatory)][string]$Output,[string]$CoreRoot,[string]$ArtifactDirectory,[string]$LockFile,[switch]$Release)
+      [Parameter(Mandatory)][string]$Output,[string]$CoreRoot,[string]$ArtifactDirectory,[string]$LockFile,[switch]$Release,[switch]$SdkOnly)
 $ErrorActionPreference='Stop'
 $app=Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'core-dependency.ps1')
 . (Join-Path $PSScriptRoot 'apk-archive.ps1')
-$CoreRoot=Resolve-DanshengCoreRoot -AppRoot $app -CoreRoot $CoreRoot
+if(-not$SdkOnly){$CoreRoot=Resolve-DanshengCoreRoot -AppRoot $app -CoreRoot $CoreRoot}
 $ArtifactDirectory=Resolve-DanshengCoreArtifactDirectory -AppRoot $app -ArtifactDirectory $ArtifactDirectory
 $aar=Get-DanshengAppAarPath -AppRoot $app -ArtifactDirectory $ArtifactDirectory -LockFile $LockFile
 $lockPath=Resolve-DanshengAppCoreLock -AppRoot $app -LockFile $LockFile
 $lock=if(Test-Path -LiteralPath $lockPath){Get-Content -LiteralPath $lockPath -Raw|ConvertFrom-Json}else{$null}
+if($SdkOnly-and-not$lock){throw 'SDK-only APK audit requires core.lock.json.'}
+$resourceRoot=if($SdkOnly){Join-Path $ArtifactDirectory 'resources'}else{$CoreRoot}
 $receipt=Get-Content -LiteralPath (Join-Path $ArtifactDirectory 'receipt.json') -Raw|ConvertFrom-Json
 $expected=if($lock){$lock.artifact.sha256}else{$receipt.aar_sha256}
 if((Get-FileHash -LiteralPath $aar).Hash-ine$expected-or(Get-FileHash -LiteralPath $aar).Hash-ine$receipt.aar_sha256){throw 'Selected AAR differs from lock or producer receipt.'}
@@ -29,7 +31,7 @@ try{
     $modules=@('main.mjs','api.mjs','policy.mjs')
     foreach($name in $names){if($name-match'(?i)credentials\.txt$|\.(jks|p12|dspack)$|fudan-sports|closed-loop'-or($name.EndsWith('.mjs')-and$name-notin@($modules|ForEach-Object {$builtin+$_}))){throw 'APK contains private, test or external automation payload.'}}
     foreach($part in @('manifest.json','host-policy.json','main.mjs','api.mjs','policy.mjs','NOTICE.md')){
-        if((Hash-Bytes (Read-ZipBytes $archive ($builtin+$part)))-ine(Get-FileHash -LiteralPath (Join-Path $CoreRoot ('plugins/builtin/fudan-venues/'+$part))).Hash){throw "Official component differs from source: $part"}
+        if((Hash-Bytes (Read-ZipBytes $archive ($builtin+$part)))-ine(Get-FileHash -LiteralPath (Join-Path $resourceRoot ('plugins/builtin/fudan-venues/'+$part))).Hash){throw "Official component differs from source: $part"}
     }
     $libraries=@(foreach($name in @($names|Where-Object {$_-match'^lib/.+\.so$'})){
         $bytes=Read-ZipBytes $archive $name

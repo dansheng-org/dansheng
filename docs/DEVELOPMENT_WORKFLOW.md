@@ -73,6 +73,12 @@ runtime、SDK 与锁由 Agent 在启动/构建前自动准备；无需用户执�
 App 消费明确且已验证的 Core SDK，跨仓库改动才协调 Core/App 来源和两侧版本。
 以下 New/Initialize/Enter 是可选配对管理器，不是使用原生 worktree 的必经步骤。
 
+维护者的 `AGENTS.md`、`CLAUDE.md` 与 `credentials.txt` 仅在本机保存，由共用的
+`info/exclude` 忽略，并通过 Orca Worktree Shared Paths 链接共享。`CLAUDE.md` 引用
+`@AGENTS.md`。这些内容不进入公开提交；已存在的历史提交不在本轮重写。
+新 worktree 不会被 Git 自动复制这些文件，必须由已配置的 Orca 共享机制提供。
+运行中的 Agent 需要重新加载指令才能采用修改；详见 [本地配置](LOCAL_WORKTREES.md)。
+
 ## 现状与准备任务
 
 经用户授权迁移后，Core 位于 `D:/Code/dansheng-core`，App 位于 `D:/Code/dansheng-app`；C 盘旧目录保留且只读。当前任务树位于 `D:/Worktrees/<TaskKey>/core|app`，分别共享 D 盘 Core/App 的 Git 对象，并有独立 index/HEAD。DS-001 只作为历史只读准备树保留。`D:/Code/dansheng` 是旧 main 的兼容入口，不是第三个产品仓库，也不是新脚本默认项目名。
@@ -167,6 +173,7 @@ runtime；审阅签名身份在该 runtime 内创建／复用，保留旧工件�
 - Native SDK：Core 的 `Test-DanshengCoreDependency.ps1` 核对 lock、AAR/resources、source/ABI、Pub锁；稳定发布加 `-ForRelease`。
 - 已准备 SDK 的环境回归：`scripts/tests/native-environment.integration.ps1` 使用显式 Core/CoreTools/runtime/artifact 参数，检查无预置任务和不同任务环境、失败后的恢复及既存构建副本保留；需要真实 SDK 和已初始化的离线缓存，普通源码 CI 不执行它。
 - Android：得到正确 SDK 后才构建；模拟器与真实设备分别授权/记录。现有 `verify-*` 脚本可能操作资源或读取本机凭据，不能作为 CI 中自动可执行的只读脚本。
-- `.github/workflows/app-ci.yml` 是最小源码 CI 配置，尚未在远程执行。缺真实已发布 Core acquisition 时，原生干净 CI 构建与稳定发布仍待接线，不能用虚构包/SHA凑齐。
+- `.github/workflows/app-ci.yml` 执行源码、脚本和绑定检查。2026-11-14 查询到 App `2cb195318b481c3ba18ebe16c7e742d270a6c51a` 的[远程源码检查成功](https://github.com/dansheng-org/dansheng/actions/runs/43562826533)；这不代表后续变更已远程执行。
+- `.github/workflows/app-prerelease.yml` 在 main 的 push 源码检查成功后构建 ARM64 签名包并发布 Pre-release，也可在 main 手动触发。SDK 快照镜像、固定签名 Secrets、不可覆盖的逐提交标签和首次启用步骤见 [PRERELEASE.md](PRERELEASE.md)。开发快照依赖不通过稳定发布门槛；新增 workflow 必须实际运行后才能声称远程构建成功。
 
 清理需先确认任务已接收且没有 dirty/untracked 内容，保留可恢复记录。不执行 force remove、强制删分支、reset/clean、retag 或覆盖 remote。

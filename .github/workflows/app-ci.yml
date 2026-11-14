@@ -22,6 +22,7 @@ jobs:
           ./scripts/tests/core-dependency.tests.ps1
           ./scripts/tests/core-tools.tests.ps1
           ./scripts/tests/apk-archive.tests.ps1
+          ./scripts/tests/prerelease.tests.ps1
   flutter:
     runs-on: ubuntu-latest
     env:

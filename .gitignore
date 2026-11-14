@@ -77,3 +77,25 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Task runtime, release packages and local diagnostics.
+/artifacts/
+/logs/
+/tmp/
+/runtime/
+/signing/
+/test-results/
+**/.kotlin/
+*.hprof
+*.aab
+*.apks
+*.idsig
+*.pfx
+
+# Personal agent state; private shared files use the common Git info/exclude.
+AGENTS.local.md
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+.codex/worktrees/
+.codex/sessions/

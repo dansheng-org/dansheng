@@ -1,5 +1,21 @@
 # Core 原生 SDK 兼容性
 
+## 当前锁定依赖
+
+以 `core.lock.json` 为准：App `0.2.4+6`，Core commit
+`b21ba39c43038c88ecb3519a40c00997add6bcdf`，AAR SHA-256
+`4ba974f1cb2b48e60c07d837b986f592dbc20c3704e9a365b56936f8be3cd466`。
+状态为 `development_snapshot`，`acquisition_uri=null`。Pre-release 使用
+[独立下载清单](../.github/prerelease-sdk.json) 镜像这一组精确 SDK、资源与原始收据，
+不会把它重新标记为 Core 稳定发布。首次镜像上传和签名配置见 [发布说明](PRERELEASE.md)。
+
+App 的 SDK-only 发布路径调用锁定 Core 提交的权威验证器，不传源码根目录；验证 AAR、
+实际 native entry、7 项资源和 Pub lock，再由现有 Gradle 边界复核。SDK 镜像携带从准确 Core
+提交导出的两份权威工具，下载清单锁定其逐文件摘要；不替换 SDK 生产源码身份。
+SDK ZIP 只允许明确列出的分发载荷，并额外锁定传输摘要。
+
+## 历史接收与迁移
+
 2026-11-12 的 DS-002 接收验证使用 Core `5ab13d93c39f8eb84a9208d40387b93c115fc8d9`，从真实 Git 工作树重建 SDK，并更新 `core.lock.json`。源码、AAR、打包原生库及本轮实际验证见 [main 接收记录](ds002-main-acceptance-20261112.md)。下文的迁移表格和旧 AAR 摘要保留为历史记录。
 
 采用规范路线 B：Core 原生库/SDK + 精确 artifact lock。当前 Core 没有可供 App Git 依赖的 Dart package；本轮不引入 flutter_rust_bridge 或第三份接口权威源。

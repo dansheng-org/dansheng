@@ -1,0 +1,17 @@
+{
+  "uri": "https://github.com/dansheng-org/dansheng/releases/download/sdk-snapshot-b21ba39c4303-4ba974f1cb2b/core-sdk-b21ba39c4303-4ba974f1cb2b-tools.zip",
+  "sha256": "16431bf1ffbea0b6eed6d099c58220fb904404b76761a66c2266470f8b828126",
+  "validator": {
+    "core_commit": "b21ba39c43038c88ecb3519a40c00997add6bcdf",
+    "files": [
+      {
+        "name": "Test-DanshengCoreDependency.ps1",
+        "sha256": "c657186a622b4125272eade73d37e684d7cc89bf960e2a895454566c7a755ea9"
+      },
+      {
+        "name": "Dansheng.Workspace.psm1",
+        "sha256": "1ecc85faea5e4aff86aa0d28c65082b49ae0dafa8c712d92e3c906ef7bc8d5cf"
+      }
+    ]
+  }
+}

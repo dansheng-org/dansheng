@@ -1,8 +1,8 @@
-# 旦生 Android 工作台
+# 旦生 · Dansheng
 
-DS-002 的源码对照、最新 Core SDK、构建和离线模拟器验证见 [main 接收记录](docs/ds002-main-acceptance-20261112.md)。D 盘迁移的历史记录见 [迁移验收](docs/devdrive-validation.md)。
+[![源码检查](https://github.com/dansheng-org/dansheng/actions/workflows/app-ci.yml/badge.svg)](https://github.com/dansheng-org/dansheng/actions/workflows/app-ci.yml)
 
-0.2.2 的校园卡、教室、校车、用电记录及两种校园认证入口见 [eHall 使用和验收说明](docs/ehall-0.2.2.md)。
+面向复旦校园生活的 Android 客户端，将校园服务、课程资料、日程和本机 Agent 入口放在同一个工作台。使用 Flutter 构建界面，通过独立的 [dansheng-core](https://github.com/dansheng-org/dansheng-core) 提供校园服务和原生能力。
 
 旦生默认打开 **eHall**。校园服务随应用提供；目前唯一的可选扩展是**定时抢场**。安装或卸载它都不影响查场地、手动预约和取消已有预约。
 
@@ -16,7 +16,13 @@ DS-002 的源码对照、最新 Core SDK、构建和离线模拟器验证见 [ma
 
 ## 安装与使用
 
-手机安装 `dansheng-android-arm64-beta.apk`；模拟器安装 `dansheng-android-x86_64-debug.apk`。最低 Android 9（API 28）。从 eHall 右上角设置账号；教务、Canvas、树洞和体育各自完成对应的登录。课表与作业不共用一个登录成功标记，某个服务不可用时，其他服务仍可使用。
+最低 Android 9（API 28），手机审阅包默认 ARM64。版本声明为 **0.2.4+6**。
+
+自动发布流程生成 `dansheng-<版本>+<构建号>-arm64-prerelease.apk`，并在 [Releases](https://github.com/dansheng-org/dansheng/releases) 附上 `SHA256SUMS` 与构建信息。首次启用需要先上传锁定的 SDK 快照并配置专用签名 Secrets；配置文件本身不代表已有可下载版本。当前 Core 依赖为开发快照，自动产物均标记 **Pre-release**。触发方式、首次配置和签名说明见 [Pre-release 发布](docs/PRERELEASE.md)。
+
+既有内部测试包名为 `dansheng-android-arm64-beta.apk`；`dansheng-android-x86_64-debug.apk` 用于模拟器。自动 Pre-release 使用独立且持久的签名身份；不同签名不能直接覆盖安装，首次切换前先确认设备上的数据处理方式。
+
+从 eHall 右上角设置账号；教务、Canvas、树洞和体育各自完成对应的登录。课表与作业不共用一个登录成功标记，某个服务不可用时，其他服务仍可使用。
 
 在「账号与卡包」连接统一认证、树洞或 Canvas。成功验证后，设备用 Android Keystore 加密保存凭据；校园卡、教务、校车等可以复用同一账号的统一认证密码，树洞使用单独的注册邮箱与密码。切换账号不会串用凭据；选择「退出账号」会删除当前账号保存的登录信息。树洞后缀只决定邮箱候选顺序，实际登录由用户选定的邮箱决定。
 
@@ -27,6 +33,17 @@ eLearning 优先恢复已连接的 Canvas 凭据。令牌失效或没有令牌�
 MCP 的绑定地址、当前端口和复制配对信息的操作在 Agent 页提供。PC 客户端可用页面显示的 `adb forward` 命令转发，不需要把监听地址改为外网。关闭服务、切换账号或进程退出会使配对失效。
 
 ## 构建
+
+两个产品仓库独立维护。App 通过 `core.lock.json` 精确消费 Core 原生 SDK，绑定链路为 C ABI → JNI/AAR → Kotlin → Pigeon/Dart。
+
+只做源码检查无需准备 Android 原生 SDK：
+
+```powershell
+flutter pub get --enforce-lockfile
+./scripts/check-format.ps1
+flutter analyze
+flutter test
+```
 
 Core 源码必须检出 `core.lock.json` 中的准确提交。配对任务目录 `app` 会优先查找旁边的 `core`，普通目录会查找平级 `dansheng-core`；显式参数/环境设置优先，既存 `dansheng` 目录仍可兼容。使用 Flutter 3.47.7、Dart 3.13.5、JDK 21、Gradle 9.7.1、AGP 9.3.2、Android SDK 37 和 NDK 30.0.16138531。
 
@@ -53,7 +70,9 @@ Gradle 将官方手动场馆适配模块装入 APK 的 `assets/builtin-venues/`�
 
 ## 双仓库任务开发
 
-新协作规则见 [AGENTS.md](AGENTS.md)、[开发工作流](docs/DEVELOPMENT_WORKFLOW.md) 和 [Core 兼容矩阵](docs/CORE_COMPATIBILITY.md)。已有目录和历史验收保留；DS-001 仅为历史只读准备树，当前工作流使用真实 main 提交创建的任务 worktree，未经接收不构成发布。
+开发约定见 [开发工作流](docs/DEVELOPMENT_WORKFLOW.md) 和 [Core 兼容矩阵](docs/CORE_COMPATIBILITY.md)。已有目录和历史验收保留；DS-001 仅为历史只读准备树，当前工作流使用真实 main 提交创建的任务 worktree，未经接收不构成发布。
+
+本机 Agent 指令和凭据不属于公开源码。维护者可通过 Git 共用的 `info/exclude` 与 Orca 的 Worktree Shared Paths 共享本地文件；Git 本身不会复制未跟踪／被忽略文件。共享设置属于本机配置，克隆仓库后需自行准备。操作方式见 [本地工作树配置](docs/LOCAL_WORKTREES.md)。
 
 配对任务可通过 `-CoreRoot` 或 `DANSHENG_CORE_ROOT` 指向授权的 Core worktree，`DANSHENG_CORE_SDK_DIR` / `-ArtifactDirectory` 指向任务原生 SDK。未指定 Core 时按配对 `core`、平级 `dansheng-core`、既存 `dansheng` 的顺序查找；SDK 默认为记录的 task runtime 下 `native-sdk`，不把原 App 的 AAR/收据与另一份 Core 源码混用。`core.lock.json` 固定真实来源与工件；无提交的开发 snapshot 不会通过稳定发布验证。
 
@@ -71,3 +90,12 @@ Set-Location $AppTask
 ```
 
 分发输出使用任务 runtime 的 `artifacts`，日志使用 `logs`，SDK 输出使用 `native-sdk`。完整 debug/独立插件/androidTest 组合默认内置 PowerShell APK 审计，不要求 Python；需要内部 beta 签名时显式加 `-IncludeBeta`。内部测试签名默认在该任务的 `signing/android-beta` 创建并复用，也可通过 `-SigningDirectory` 选择同一 runtime 内的目录；C 盘原签名身份和 DPAPI 文件保留原地。`verify-ui-runtime.ps1` 默认只展示计划，`-Apply` 才创建全新 D AVD，并通过真实设置页面验证 Dart→Pigeon→Kotlin→JNI→Rust。
+
+## 验证记录
+
+- [0.2.4 eHall 与提醒验收](docs/ehall-0.2.4.md)
+- [0.2.2 校园卡、教室、校车与认证说明](docs/ehall-0.2.2.md)
+- [2026-11-12 主线接收记录](docs/ds002-main-acceptance-20261112.md)
+- [D 盘迁移历史](docs/devdrive-validation.md)
+
+这些记录对应各自注明的源码与工件；新的 CI、模拟器或真机结果分别记录。

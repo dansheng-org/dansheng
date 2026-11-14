@@ -1,0 +1,174 @@
+name: Android Pre-release
+on:
+  workflow_run:
+    workflows: [App source checks]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-prerelease-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      commit: ${{ steps.identity.outputs.commit }}
+      version: ${{ steps.identity.outputs.version }}
+    env:
+      PUB_HOSTED_URL: https://pub.dev
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          path: app
+          persist-credentials: false
+      - name: Select exact App and Core identities
+        id: identity
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtime = Join-Path $env:RUNNER_TEMP "dansheng-prerelease-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "DANSHENG_TASK_RUNTIME=$runtime" >> $env:GITHUB_ENV
+          . ./scripts/prerelease-common.ps1
+          $commit = git rev-parse HEAD
+          $identity = Get-DanshengPrereleaseIdentity -AppRoot $PWD.Path -Commit $commit
+          $lock = Get-Content core.lock.json -Raw | ConvertFrom-Json
+          if ($lock.core.commit -notmatch '^[a-f0-9]{40}$') { throw 'Missing exact Core commit.' }
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+          "tag=$($identity.tag)" >> $env:GITHUB_OUTPUT
+          "version=$($identity.version)" >> $env:GITHUB_OUTPUT
+          "core=$($lock.core.commit)" >> $env:GITHUB_OUTPUT
+      - name: Verify existing release before building
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          # A rerun must never replace assets or move an existing tag.
+          $tags = @(gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot reconcile existing releases.' }
+          $refs = @(gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/$env:RELEASE_TAG" --jq '.[].ref')
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot reconcile existing tags.' }
+          if ($tags -ccontains $env:RELEASE_TAG -or $refs -ccontains "refs/tags/$env:RELEASE_TAG") {
+            throw 'This commit already has a release. Inspect it before retrying; no overwrite is performed.'
+          }
+      - name: Require persistent signing secrets
+        env:
+          KEYSTORE: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          if (-not $env:KEYSTORE -or -not $env:KEYSTORE_PASSWORD) { throw 'Configure both DANSHENG_PRERELEASE_KEYSTORE_* secrets first.' }
+          $dir = Join-Path $env:DANSHENG_TASK_RUNTIME 'signing'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $key = Join-Path $dir 'prerelease.p12'
+          [IO.File]::WriteAllBytes($key, [Convert]::FromBase64String($env:KEYSTORE))
+          "DANSHENG_BETA_STORE=$key" >> $env:GITHUB_ENV
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: microsoft
+          java-version: '21'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: false
+      - name: Prepare pinned Android tools
+        run: |
+          $manager = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest/bin/sdkmanager.bat'
+          & $manager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;30.0.16138531'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot install pinned Android SDK/NDK.' }
+      - name: Acquire and verify exact development SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $sdk = Get-Content .github/prerelease-sdk.json -Raw | ConvertFrom-Json
+          $url = [Uri]$sdk.uri
+          if ($url.Scheme -ne 'https' -or $url.Host -ne 'github.com' -or $url.UserInfo -or $url.Query -or $url.Fragment -or
+              $url.AbsolutePath -notmatch '^/([^/]+/[^/]+)/releases/download/([^/]+)/([^/]+)$') { throw 'Expected a pinned GitHub release asset URL.' }
+          $repo = $Matches[1]; $tag = $Matches[2]; $asset = $Matches[3]
+          if ($repo -cne $env:GITHUB_REPOSITORY -or $asset -notmatch '^[A-Za-z0-9._-]+\.zip$') { throw 'SDK mirror must belong to this repository.' }
+          $downloads = Join-Path $env:DANSHENG_TASK_RUNTIME 'downloads'
+          New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+          gh release download $tag --repo $repo --pattern $asset --dir $downloads
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download the locked SDK mirror.' }
+          $native = Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk'
+          ./scripts/prerelease-sdk.ps1 -Action Install `
+            -Archive (Join-Path $downloads $asset) -ArtifactDirectory $native `
+            -CoreToolsRoot (Join-Path $native 'validation-tools') -Sha256 $sdk.sha256
+      - name: Source checks for a manual run
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          $env:PUB_CACHE = Join-Path $env:DANSHENG_TASK_RUNTIME 'pub-cache'
+          flutter pub get --enforce-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'Pub failed.' }
+          ./scripts/check-format.ps1
+          ./scripts/tests/core-dependency.tests.ps1
+          ./scripts/tests/core-tools.tests.ps1
+          ./scripts/tests/apk-archive.tests.ps1
+          ./scripts/tests/prerelease.tests.ps1
+          flutter analyze
+          if ($LASTEXITCODE -ne 0) { throw 'Analysis failed.' }
+          flutter test
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
+          dart run pigeon --input pigeons/dansheng.dart
+          if ($LASTEXITCODE -ne 0) { throw 'Pigeon failed.' }
+          git diff --exit-code -- pubspec.lock lib/bridge.g.dart android/app/src/main/kotlin/org/dansheng/app/Bridge.g.kt
+          if ($LASTEXITCODE -ne 0) { throw 'Lock or generated bindings changed.' }
+      - name: Build, sign and audit ARM64 release APK
+        env:
+          DANSHENG_BETA_PASSWORD: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          ./scripts/build-prerelease.ps1 -RuntimeRoot $env:DANSHENG_TASK_RUNTIME `
+            -ArtifactDirectory (Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk') `
+            -CoreToolsRoot (Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk/validation-tools')
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-prerelease-${{ steps.identity.outputs.commit }}
+          path: ${{ env.DANSHENG_TASK_RUNTIME }}/artifacts/review/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-prerelease-${{ needs.build.outputs.commit }}
+          path: release
+      - name: Create a draft, attach validated assets, then publish Pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          APP_COMMIT: ${{ needs.build.outputs.commit }}
+          APP_VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum --check SHA256SUMS
+          gh api "repos/$GH_REPO/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$APP_COMMIT" >/dev/null
+          gh release create "$RELEASE_TAG" ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt \
+            --verify-tag --title "Android $APP_VERSION Pre-release (${APP_COMMIT:0:12})" \
+            --notes-file release-notes.md --draft --prerelease --latest=false
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
