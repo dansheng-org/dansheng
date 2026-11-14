@@ -1,0 +1,101 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Widget Preview related
+.widget_preview/
+
+.local/
+.workers/
+/credentials.txt
+*.jks
+*.keystore
+dist/
+*.p12
+
+# Local repository-workflow overrides, native artifacts and private state.
+/pubspec_overrides.yaml
+/TASK.md
+/local/
+/profiles/
+/vault/
+**/local.properties
+**/build/
+# Generated Android reports (including retained historical problems-report.html)
+/android/build/
+**/.cxx/
+**/.gradle/
+**/__pycache__/
+*.db
+*.db-shm
+*.db-wal
+*.aar
+*.apk
+*.dspack
+.env
+.env.*
+!.env.example
+
+# Task runtime, release packages and local diagnostics.
+/artifacts/
+/logs/
+/tmp/
+/runtime/
+/signing/
+/test-results/
+**/.kotlin/
+*.hprof
+*.aab
+*.apks
+*.idsig
+*.pfx
+
+# Personal agent state; private shared files use the common Git info/exclude.
+AGENTS.local.md
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+.codex/worktrees/
+.codex/sessions/
