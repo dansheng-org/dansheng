@@ -12,13 +12,19 @@ use url::Url;
 pub const GATEWAY_ORIGIN: &str = "https://webvpn.fudan.edu.cn";
 const ENCODING_KEY: &[u8; 16] = b"wrdvpnisthebest!";
 pub const DEFAULT_ORIGINS: &[&str] = &[
+    "https://fdjwgl.fudan.edu.cn",
+    "https://elearning.fudan.edu.cn",
+    "https://ecard.fudan.edu.cn",
+    "https://zlapp.fudan.edu.cn",
+    "https://my.fudan.edu.cn",
+    "https://yjsxk.fudan.edu.cn",
+    "https://ehall.fudan.edu.cn",
+    "http://10.64.130.6",
     "https://www.fduhole.com",
     "https://auth.fduhole.com",
     "https://danke.fduhole.com",
     "https://forum.fduhole.com",
     "https://image.fduhole.com",
-    "https://yjsxk.fudan.edu.cn",
-    "http://10.64.130.6",
 ];
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
