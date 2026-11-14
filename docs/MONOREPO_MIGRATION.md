@@ -26,6 +26,18 @@
 
 最终主目录 `D:/Code/dansheng` 为真实 Git 工作目录，取代旧的 Core junction。现有已注册工作树路径保留，Git common directory 指针在主目录移动后 repair；旧 Core 工作树指向备份 Core repo。旧历史工作树不自动转成新布局，新的功能任务从统一 main 创建。
 
+代码与 Git 数据已实际搬迁，App/Core worktree repair 已执行，WebVPN 迁移前后的 binary diff SHA-256 完全相同。两个原 main 均是新 main 的祖先；connectivity 检查通过，原有 dangling blobs 未清理。
+
+### 本机会话占用与剩余收尾
+
+`D:/Code/dansheng-app` 目前仅剩空目录壳及空 `.git`，没有源码、凭据或 Git 数据。Windows 拒绝重命名被当前 Codex、Orca 和它们子进程持有的目录。已用微软签名的 Handle 工具确认具体占用；没有关闭进程或强制关闭 handle。
+
+备份目录的 `Finalize-EmptyAppDirectory.ps1` 已在隐藏后台启动：仅当旧目录没有文件及链接时尝试原子移动到备份，遇到占用等待；若出现新内容立即停止并保留。关闭持有旧路径的终端/Orca 窗口后可完成。状态保存在 `directory-finalization.json`，最长等待七天；若进程已退出，可重新运行脚本。状态为 complete 前不能宣称 D:/Code 已只剩一个 Dansheng 名称目录。
+
+旧 C 盘 App 工作树的私人共享符号链接仍保留原目标路径；Windows 未授予重建符号链接权限，因此这些历史链接目前失效。原私人文件完好位于 `app-local` 备份，不复制凭据到新源码。新任务使用新的 monorepo 与本机指令入口，不依赖这些旧链接。
+
+Orca 新登记为 `38d57c50-a857-481c-8594-04063dc1b8a0`，path 为 D:/Code/dansheng，worktreeBasePath 为 D:/worktree，worktreeBaseRef 为本地 main（远程尚未接收迁移）。旧登记标记为历史以保留会话；没有删除它们的工作树或会话。新登记未启用凭据共享。原生 CLI 没有配置 setup hook 的入口，本轮通过 agent startup 的根 Enter 脚本准备环境，不宣称保存了自动 hook。
+
 迁移任务为 `migration/monorepo`，工作树 `D:/worktree/dansheng-app/monorepo-migration`。历史路径有意不改名。源码结构、CI、native 路径解析、模块根校验和运行资源隔离均适配 monorepo。所有本机 AGENTS/CLAUDE 入口不跟踪；公共规则在 `docs/AGENT_POLICY.md` 版本化，根 Enter 为新 checkout 生成无私人内容的入口。
 
 采用非 squash subtree 仅为一次历史导入；日常开发不再 subtree pull/push，不使用 submodule。Core 和 App 仍可独立版本发布，但跨模块功能在同一 PR 原子接收。
