@@ -29,7 +29,7 @@ jobs:
       commit: ${{ steps.identity.outputs.commit }}
       version: ${{ steps.identity.outputs.version }}
     env:
-      PUB_HOSTED_URL: https://pub.dev
+      PUB_HOSTED_URL: https://pub.flutter-io.cn
     defaults:
       run:
         shell: pwsh
