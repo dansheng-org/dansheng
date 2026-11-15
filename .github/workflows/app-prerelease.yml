@@ -125,6 +125,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -137,10 +138,27 @@ jobs:
           : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
           source "$DANSHENG_CI_ROOT/runner-env.sh"
           pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Publish
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: android-prerelease-${{ needs.build.outputs.commit }}
-          path: ${{ env.DANSHENG_TASK_RUNTIME }}/release
+      - name: Download audited release payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: android-prerelease-${{ needs.build.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e "$DANSHENG_TASK_RUNTIME/release"
+          for attempt in 1 2 3; do
+            staging="$DANSHENG_TASK_RUNTIME/release-download-$attempt"
+            mkdir "$staging"
+            if gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "$ARTIFACT_NAME" --dir "$staging" &&
+              (cd "$staging" && sha256sum --check SHA256SUMS); then
+              mv -T "$staging" "$DANSHENG_TASK_RUNTIME/release"
+              exit 0
+            fi
+            echo "Release download attempt $attempt failed verification."
+            if test "$attempt" -lt 3; then sleep 10; fi
+          done
+          exit 1
       - name: Create a draft, attach validated assets, then publish Pre-release
         env:
           GH_TOKEN: ${{ github.token }}
