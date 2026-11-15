@@ -40,16 +40,23 @@ fn initialize_webvpn_routes(context: &ServiceContext<'_>, account: &str) -> Core
     } else {
         serde_json::from_value(saved)?
     };
+    // The Fudan switch's current setting decides new Fudan routes; the forum
+    // stays on its own fallback mode.
     let mode = routes
         .iter()
-        .find(|route| route.provider == "fudan.webvpn")
+        .find(|route| {
+            route.provider == "fudan.webvpn" && crate::webvpn::is_fudan_origin(&route.origin)
+        })
         .map(|route| route.mode)
         .unwrap_or(dansheng_core::network_routes::RouteMode::Auto);
     // Login fills missing defaults without deleting custom routes or overriding
     // explicit per-origin modes, including the owner's disabled (Direct) state.
     for origin in crate::webvpn::DEFAULT_ORIGINS {
         if !routes.iter().any(|route| route.origin == *origin) {
-            routes.push(crate::webvpn::gateway_route(origin, mode)?);
+            routes.push(crate::webvpn::gateway_route(
+                origin,
+                crate::webvpn::default_mode(origin, mode),
+            )?);
         }
     }
     dansheng_core::network_routes::validate_routes(&routes)?;
@@ -59,6 +66,65 @@ fn initialize_webvpn_routes(context: &ServiceContext<'_>, account: &str) -> Core
         &serde_json::to_value(&routes)?,
     )?;
     context.network.set_routes(account, routes)
+}
+
+/// Whether `origin` is set to always go through WebVPN for this account.
+#[cfg(feature = "webvpn")]
+fn gateway_only(context: &ServiceContext<'_>, account: &str, origin: &str) -> bool {
+    context.network.routes(account).is_ok_and(|routes| {
+        routes.iter().any(|route| {
+            route.origin == origin
+                && route.mode == dansheng_core::network_routes::RouteMode::Gateway
+        })
+    })
+}
+
+/// Signs in to one UIS service. With WebVPN switched on for the service the
+/// sign-in itself runs through WebVPN (WebVPN is signed into first when its
+/// session is missing), and the site session lives in the gateway session.
+#[cfg(feature = "login")]
+async fn uis_sign_in(
+    context: &ServiceContext<'_>,
+    account: &str,
+    password: &str,
+    target: crate::login::LoginTarget,
+) -> CoreResult<()> {
+    let fail = |e: crate::login::LoginError| CoreError::new(e.code(), e.message());
+    #[cfg(feature = "webvpn")]
+    if target != crate::login::LoginTarget::WebVpn
+        && gateway_only(context, account, target.origin())
+    {
+        use crate::login::{LoginError, LoginTarget, login, login_via_gateway};
+        let gateway = crate::webvpn::GATEWAY_ORIGIN;
+        let cookies = context.network.session_cookies(account, gateway)?;
+        let session = match login_via_gateway(account, password, target, &cookies).await {
+            Err(LoginError::GatewaySessionRequired) => {
+                let vpn = login(account, password, LoginTarget::WebVpn)
+                    .await
+                    .map_err(fail)?;
+                context
+                    .network
+                    .set_session(account, gateway, None, vpn.cookies.clone())?;
+                login_via_gateway(account, password, target, &vpn.cookies).await
+            }
+            other => other,
+        }
+        .map_err(fail)?;
+        return context
+            .network
+            .set_session(account, gateway, None, session.cookies);
+    }
+    let session = crate::login::login(account, password, target)
+        .await
+        .map_err(fail)?;
+    context
+        .network
+        .set_session(account, &session.origin, None, session.cookies)?;
+    #[cfg(feature = "webvpn")]
+    if target == crate::login::LoginTarget::WebVpn {
+        initialize_webvpn_routes(context, account)?;
+    }
+    Ok(())
 }
 
 pub(crate) struct BoundTransport<'a> {
@@ -885,7 +951,23 @@ impl CoreService for CampusService {
                     "cloud drive login requires the profile owner",
                 ));
             }
-            let session = crate::fudan_cloud::login(account, required_string(&params, "password")?)
+            let password = required_string(&params, "password")?;
+            // With WebVPN on, the drive is signed into through it. The drive
+            // password is not the UIS one, so a missing WebVPN session is
+            // reported (WebVpnLoginRequired) for the host to sign in first.
+            #[cfg(feature = "webvpn")]
+            if gateway_only(&context, account, crate::fudan_cloud::ORIGIN) {
+                let gateway = crate::webvpn::GATEWAY_ORIGIN;
+                let cookies = context.network.session_cookies(account, gateway)?;
+                let session = crate::fudan_cloud::login_via_gateway(account, password, &cookies)
+                    .await
+                    .map_err(|e| CoreError::new(e.code(), e.message()))?;
+                context
+                    .network
+                    .set_session(account, gateway, None, session.cookies)?;
+                return Ok(json!({"account_id":account,"session_imported":true}));
+            }
+            let session = crate::fudan_cloud::login(account, password)
                 .await
                 .map_err(|e| CoreError::new(e.code(), e.message()))?;
             context.network.set_session(
@@ -936,16 +1018,7 @@ impl CoreService for CampusService {
             } else {
                 crate::login::LoginTarget::Ecard
             };
-            let session = crate::login::login(account, password, target)
-                .await
-                .map_err(|e| CoreError::new(e.code(), e.message()))?;
-            context
-                .network
-                .set_session(account, &session.origin, None, session.cookies)?;
-            #[cfg(feature = "webvpn")]
-            if target == crate::login::LoginTarget::WebVpn {
-                initialize_webvpn_routes(&context, account)?;
-            }
+            uis_sign_in(&context, account, password, target).await?;
             return Ok(json!({"account_id":account,"session_imported":true}));
         }
         #[cfg(feature = "webvpn")]
@@ -956,7 +1029,9 @@ impl CoreService for CampusService {
             let routes = context.network.routes(account)?;
             let vpn_routes: Vec<_> = routes
                 .iter()
-                .filter(|r| r.provider == "fudan.webvpn")
+                .filter(|r| {
+                    r.provider == "fudan.webvpn" && crate::webvpn::is_fudan_origin(&r.origin)
+                })
                 .collect();
             let first_mode = vpn_routes
                 .first()
@@ -1020,7 +1095,23 @@ impl CoreService for CampusService {
             if origins.is_empty() {
                 return Err(CoreError::invalid("webvpn origins must not be empty"));
             }
-            let vpn_routes = crate::webvpn::gateway_routes(&origins, route_mode)?;
+            // Defaults: the switch sets every Fudan route; the forum keeps WebVPN
+            // as a fallback only. An explicit origin list takes the mode as is.
+            let vpn_routes = if params.get("origins").is_some() {
+                crate::webvpn::gateway_routes(&origins, route_mode)?
+            } else {
+                let routes = origins
+                    .iter()
+                    .map(|origin| {
+                        crate::webvpn::gateway_route(
+                            origin,
+                            crate::webvpn::default_mode(origin, route_mode),
+                        )
+                    })
+                    .collect::<CoreResult<Vec<_>>>()?;
+                dansheng_core::network_routes::validate_routes(&routes)?;
+                routes
+            };
 
             let saved = context.store.kv_get("core:network-routes", account)?;
             let mut existing_routes: Vec<dansheng_core::network_routes::GatewayRoute> =
@@ -1077,21 +1168,55 @@ impl CoreService for CampusService {
                 ));
             }
             let origin = "https://elearning.fudan.edu.cn";
-            let session = crate::login::login(
-                account,
-                required_string(&params, "password")?,
-                crate::login::LoginTarget::Canvas,
-            )
-            .await
-            .map_err(|e| CoreError::new(e.code(), e.message()))?;
-            if session.origin != origin {
-                return Err(CoreError::new(
-                    "UnsafeRedirect",
-                    "unexpected Canvas session origin",
-                ));
-            }
+            let password = required_string(&params, "password")?;
+            // With WebVPN on, the sign-in and the check run through it and the
+            // Canvas session lives in the gateway session.
+            #[cfg(feature = "webvpn")]
+            let via_gateway = gateway_only(&context, account, origin);
+            #[cfg(not(feature = "webvpn"))]
+            let via_gateway = false;
             let trial = Network::default();
-            trial.set_session(account, origin, None, session.cookies.clone())?;
+            let session = if via_gateway {
+                #[cfg(feature = "webvpn")]
+                {
+                    use crate::login::{LoginError, LoginTarget, login, login_via_gateway};
+                    let fail = |e: LoginError| CoreError::new(e.code(), e.message());
+                    let gateway = crate::webvpn::GATEWAY_ORIGIN;
+                    let mut cookies = context.network.session_cookies(account, gateway)?;
+                    let mut first =
+                        login_via_gateway(account, password, LoginTarget::Canvas, &cookies).await;
+                    if matches!(first, Err(LoginError::GatewaySessionRequired)) {
+                        cookies = login(account, password, LoginTarget::WebVpn)
+                            .await
+                            .map_err(fail)?
+                            .cookies;
+                        context
+                            .network
+                            .set_session(account, gateway, None, cookies.clone())?;
+                        first = login_via_gateway(account, password, LoginTarget::Canvas, &cookies)
+                            .await;
+                    }
+                    let session = first.map_err(fail)?;
+                    trial.set_routes(account, context.network.routes(account)?)?;
+                    trial.set_session(account, gateway, None, session.cookies.clone())?;
+                    session
+                }
+                #[cfg(not(feature = "webvpn"))]
+                unreachable!()
+            } else {
+                let session =
+                    crate::login::login(account, password, crate::login::LoginTarget::Canvas)
+                        .await
+                        .map_err(|e| CoreError::new(e.code(), e.message()))?;
+                if session.origin != origin {
+                    return Err(CoreError::new(
+                        "UnsafeRedirect",
+                        "unexpected Canvas session origin",
+                    ));
+                }
+                trial.set_session(account, origin, None, session.cookies.clone())?;
+                session
+            };
             let mut g = grant.clone();
             g.origins.insert(origin.to_owned());
             g.capabilities.insert("http.request".into());
@@ -1118,9 +1243,10 @@ impl CoreService for CampusService {
                 CoreError::new("AuthenticationRequired", "Canvas profile unavailable")
             })?;
             verify_canvas_account(&identity, account)?;
+            // `session.origin` is the gateway when the sign-in ran through it.
             context
                 .network
-                .set_session(account, origin, None, session.cookies)?;
+                .set_session(account, &session.origin, None, session.cookies)?;
             context.store.kv_set(
                 "service:canvas",
                 account,
@@ -1146,12 +1272,49 @@ impl CoreService for CampusService {
                 .timeout(std::time::Duration::from_secs(15))
                 .build()
                 .map_err(|_| CoreError::new("NetworkError", "cannot initialize Canvas login"))?;
-            let response = client
+            let mut request = client
                 .get(format!("{origin}/api/v1/users/self/profile"))
-                .bearer_auth(token)
+                .bearer_auth(token);
+            #[cfg(feature = "webvpn")]
+            let via_gateway = gateway_only(&context, account, origin);
+            #[cfg(not(feature = "webvpn"))]
+            let via_gateway = false;
+            #[cfg(feature = "webvpn")]
+            if via_gateway {
+                // Checked through WebVPN like every later Canvas read.
+                let cookies = context
+                    .network
+                    .session_cookies(account, crate::webvpn::GATEWAY_ORIGIN)?;
+                if cookies.is_empty() {
+                    return Err(CoreError::new(
+                        "WebVpnLoginRequired",
+                        "sign in to WebVPN before linking Canvas through it",
+                    ));
+                }
+                let header = cookies
+                    .iter()
+                    .filter_map(|c| c.split(';').next())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let url = crate::webvpn::encode_url(
+                    &url::Url::parse(&format!("{origin}/api/v1/users/self/profile"))
+                        .map_err(|_| CoreError::invalid("invalid Canvas address"))?,
+                )?;
+                request = client
+                    .get(url)
+                    .bearer_auth(token)
+                    .header(reqwest::header::COOKIE, header);
+            }
+            let response = request
                 .send()
                 .await
                 .map_err(|_| CoreError::new("NetworkError", "Canvas profile unavailable"))?;
+            if via_gateway && response.status().is_redirection() {
+                return Err(CoreError::new(
+                    "WebVpnLoginRequired",
+                    "the WebVPN session has expired",
+                ));
+            }
             if response.status().as_u16() != 200 {
                 return Err(CoreError::new(
                     "AuthenticationRequired",
@@ -3647,22 +3810,33 @@ async fn download_cloud_file(
         session.check()?;
         return Ok(cached);
     }
-    let downloaded = assets::dispatch(
-        context.store,
-        context.network,
-        &service,
-        &delegated,
-        "files.download",
-        json!({
-            "url": url.to_string(),
-            "account_id": account,
-            "source_id": "official.fudan.cloud.files",
-            "name": name,
-            "mime_type": mime,
-            "max_bytes": assets::MAX_FILE_BYTES,
-        }),
-    )
-    .await;
+    // The drive resolves to a campus address; keep the owner's named LAN
+    // approval for this one GET, as WebDAV downloads do.
+    let downloaded = context
+        .network
+        .with_owner_private_origin_read(
+            principal,
+            grant,
+            &service,
+            account,
+            crate::fudan_cloud::ORIGIN,
+            assets::dispatch(
+                context.store,
+                context.network,
+                &service,
+                &delegated,
+                "files.download",
+                json!({
+                    "url": url.to_string(),
+                    "account_id": account,
+                    "source_id": "official.fudan.cloud.files",
+                    "name": name,
+                    "mime_type": mime,
+                    "max_bytes": assets::MAX_FILE_BYTES,
+                }),
+            ),
+        )
+        .await;
     let downloaded = session
         .finish(&context, &service, &delegated, downloaded)
         .await?;
@@ -3974,7 +4148,8 @@ mod adapter_tests {
             .unwrap();
         assert_eq!(status["mode"], "direct");
         assert_eq!(status["enabled"], false);
-        assert_eq!(status["origins"], json!(crate::webvpn::DEFAULT_ORIGINS));
+        // Status describes the Fudan switch; the forum routes are not part of it.
+        assert_eq!(status["origins"], json!(crate::webvpn::FUDAN_ORIGINS));
         assert!(
             network
                 .routes("test-user")
@@ -4126,7 +4301,8 @@ mod adapter_tests {
             .unwrap();
         initialize_webvpn_routes(&ctx, "existing-user").unwrap();
         let routes = network.routes("existing-user").unwrap();
-        assert_eq!(routes.len(), crate::webvpn::DEFAULT_ORIGINS.len() + 1);
+        // library, ecard and my are already present (my under another provider).
+        assert_eq!(routes.len(), crate::webvpn::DEFAULT_ORIGINS.len());
         assert!(routes.contains(&custom));
         assert!(routes.contains(&direct));
         assert!(routes.contains(&other));
@@ -4134,7 +4310,12 @@ mod adapter_tests {
             routes
                 .iter()
                 .filter(|route| route.origin != direct.origin && route.origin != other.origin)
-                .all(|route| route.mode == RouteMode::Gateway)
+                .all(|route| route.mode
+                    == if crate::webvpn::is_fudan_origin(&route.origin) {
+                        RouteMode::Gateway
+                    } else {
+                        RouteMode::Auto
+                    })
         );
         initialize_webvpn_routes(&ctx, "existing-user").unwrap();
         assert_eq!(network.routes("existing-user").unwrap(), routes);
@@ -4157,6 +4338,9 @@ mod adapter_tests {
             .unwrap();
         assert_eq!(status["mode"], "mixed");
         assert_eq!(status["enabled"], true);
-        assert_eq!(status["routes_count"], crate::webvpn::DEFAULT_ORIGINS.len());
+        assert_eq!(
+            status["routes_count"],
+            crate::webvpn::FUDAN_ORIGINS.len() - 1
+        );
     }
 }

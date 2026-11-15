@@ -47,3 +47,18 @@ WebView 的页面上下文请求保持原平台端口；本模块不把页面 fe
 默认目标沿用 DanXi 白名单。显式 `-Origins` 可指定适配器接受的复旦资源 origin；身份认证入口和 WebVPN 本身不能成为循环路由目标。`-Mode direct` 关闭所选映射的网关传输。真实网关登录或资源读取失败必须保留为失败，离线映射测试不证明真实校内可达。
 
 测试包括独立 AES-CFB 向量、URL/分页反向映射、原站权限检查、账号隔离、Cookie/Bearer 类型隔离、真实本地 TLS 网关、连接失败只读回退和 HTTP 500/写操作不重发。真实测试报告另存仓库外的本机 reports 目录。
+
+## 复旦 WebVPN 开关：全部 fudan.edu.cn 服务
+
+`fudan.webvpn.configure {mode}` 把开关语义固定在 Rust 侧：
+
+- `gateway`（App 的“开”）：`webvpn::FUDAN_ORIGINS` 里每个 fudan.edu.cn 服务（以及内网空教室 `http://10.64.130.6`）一律经 WebVPN；`direct`（“关”）一律直连。树洞（fduhole.com）不属于开关范围，开启时保持 `auto`，只在直连失败时回落。
+- `FUDAN_ORIGINS` 由单元测试 `fudan_origins_cover_every_connector_address` 守护：连接器源码中出现的任何 fudan.edu.cn 地址都必须在列表里（身份认证 id/uis 与 WebVPN 本身除外），新增服务漏配会直接测试失败。
+- 网关只携带 WebVPN Cookie，站点会话保存在 WebVPN 服务端。实测（2026-11-15）WebVPN 会话不会把 UIS 单点登录带进被代理站点：elearning、fdjwgl、ecard、zlapp、my 经网关都会跳到被代理的 id.fudan.edu.cn 登录页。因此开启后各服务的登录也必须经网关完成：
+  - `login::login_via_gateway` 复用同一 UIS 登录流程，只替换传输层：逻辑 URL 编码为网关地址，响应 `Location` 和页面内被网关改写的链接（`webvpn::decode_text`）还原为逻辑 URL，原有的跳转目标、票据和口令重放检查保持不变；成功后导出更新后的 WebVPN Cookie。
+  - `uis_sign_in` / `canvas.uis.login` 在目标源为 `gateway` 时走网关登录；WebVPN 会话缺失或过期时用同一 UIS 口令先登录 WebVPN 再重试一次（口令已提交后不再重试）。
+  - 云盘口令不是 UIS 口令：`fudan.cloud.login` 与 `canvas.token.bind` 在 WebVPN 会话缺失时返回 `WebVpnLoginRequired`，由 Android 宿主先登录 WebVPN 再重试。
+- 数据请求遇到网关跳往被代理的身份认证页时，`decode_location` 已返回 `AuthenticationRequired`，宿主据此重新登录（经网关）。
+- 限制：cookie-CSRF 写操作（Canvas 网页会话发信）按原设计拒绝网关路由；一律走网关后需改用 Canvas 令牌。
+
+实测入口（只读，凭据仅在进程内读取）：`DANSHENG_TEST_CREDENTIALS=<file> cargo test -p dansheng-connectors --features services,webvpn --test webvpn_live -- --ignored --nocapture`。

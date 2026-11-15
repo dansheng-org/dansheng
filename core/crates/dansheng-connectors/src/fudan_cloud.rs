@@ -1287,6 +1287,107 @@ pub async fn login(
     Ok(CloudSession { cookies })
 }
 
+/// The same single `POST /login`, sent through WebVPN on top of the given
+/// gateway session. The drive's session then lives in the gateway session,
+/// so the returned cookies are the updated gateway cookies. Never retried.
+#[cfg(feature = "webvpn")]
+pub async fn login_via_gateway(
+    student_id: &str,
+    password: &str,
+    gateway_cookies: &[String],
+) -> Result<CloudSession, crate::login::LoginError> {
+    use crate::login::LoginError;
+    use reqwest::header::{ACCEPT, CONTENT_TYPE, COOKIE, SET_COOKIE};
+    if !(4..=64).contains(&student_id.len())
+        || !student_id.bytes().all(|b| b.is_ascii_alphanumeric())
+        || password.is_empty()
+        || password.len() > 256
+        || password.chars().any(|c| matches!(c, '\0' | '\r' | '\n'))
+    {
+        return Err(LoginError::InvalidInput);
+    }
+    let gateway = Url::parse(crate::webvpn::GATEWAY_ORIGIN).expect("constant origin");
+    let mut jar = cookie_store::CookieStore::default();
+    for cookie in gateway_cookies {
+        let _ = jar.parse(cookie, &gateway);
+    }
+    let header = jar
+        .iter_unexpired()
+        .map(|c| format!("{}={}", c.name(), c.value()))
+        .collect::<Vec<_>>()
+        .join("; ");
+    if header.is_empty() {
+        return Err(LoginError::GatewaySessionRequired);
+    }
+    let mut url = Url::parse(ORIGIN).expect("constant origin");
+    url.set_path("/login");
+    url.query_pairs_mut()
+        .append_pair("csrftoken", &csrf_token());
+    let url = crate::webvpn::encode_url(&url).map_err(|_| LoginError::UnsafeRedirect)?;
+    let client = crate::login::verified_login_client()?
+        .build()
+        .map_err(|_| LoginError::NetworkError)?;
+    let response = client
+        .post(url)
+        .header(ACCEPT, "application/x-protobuf")
+        .header(CONTENT_TYPE, "application/logininfo")
+        .header(COOKIE, header)
+        .body(login_body(student_id, password))
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                LoginError::Timeout
+            } else {
+                LoginError::NetworkError
+            }
+        })?;
+    let status = response.status();
+    if status.is_redirection() {
+        // Only the gateway's own sign-in redirects a protobuf POST.
+        return Err(LoginError::GatewaySessionRequired);
+    }
+    for value in response.headers().get_all(SET_COOKIE).iter().take(16) {
+        if let Ok(text) = value.to_str()
+            && text.len() <= 4096
+            && let Ok(cookie) = cookie_store::Cookie::parse(text, &gateway)
+            && cookie.domain.as_cow().as_deref() == gateway.host_str()
+        {
+            let _ = jar.insert(cookie.into_owned(), &gateway);
+        }
+    }
+    let body = response
+        .bytes()
+        .await
+        .map_err(|_| LoginError::NetworkError)?;
+    if body.len() > 64 * 1024 {
+        return Err(LoginError::ResponseTooLarge);
+    }
+    if status.is_server_error() || status.as_u16() == 429 {
+        return Err(LoginError::ServiceUnavailable);
+    }
+    let code = fields(&body)
+        .ok()
+        .and_then(|f| int_of(&f, 1))
+        .ok_or(LoginError::ProtocolChanged)?;
+    if code != 1 {
+        return Err(login_error(code));
+    }
+    let cookies = jar
+        .iter_unexpired()
+        .map(|cookie| {
+            let mut raw = std::ops::Deref::deref(cookie).clone();
+            raw.set_path(cookie.path.as_ref().to_owned());
+            raw.set_max_age(None);
+            if let cookie_store::CookieExpiration::AtUtc(expiry) = cookie.expires {
+                raw.set_expires(expiry);
+            }
+            raw.to_string()
+        })
+        .collect();
+    Ok(CloudSession { cookies })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

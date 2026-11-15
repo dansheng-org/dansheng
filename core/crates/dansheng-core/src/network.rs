@@ -802,6 +802,32 @@ impl Network {
             })
             .unwrap_or(false)
     }
+    /// The unexpired cookies of one account/origin session as Set-Cookie
+    /// strings. For trusted adapters that must continue a session outside the
+    /// HTTP client (a gateway sign-in); never return these to plugins or UI.
+    pub fn session_cookies(&self, account: &str, origin: &str) -> CoreResult<Vec<String>> {
+        let Some((origin, _, jar, _)) = self.copy_session(Some(account), origin)? else {
+            return Ok(Vec::new());
+        };
+        let url = Url::parse(&origin).map_err(|_| CoreError::invalid("invalid session origin"))?;
+        let jar = jar
+            .0
+            .lock()
+            .map_err(|_| CoreError::new("SessionError", "session lock poisoned"))?;
+        Ok(jar
+            .iter_unexpired()
+            .filter(|cookie| cookie.domain.matches(&url))
+            .map(|cookie| {
+                let mut raw = std::ops::Deref::deref(cookie).clone();
+                raw.set_path(cookie.path.as_ref().to_owned());
+                raw.set_max_age(None);
+                if let cookie_store::CookieExpiration::AtUtc(expiry) = cookie.expires {
+                    raw.set_expires(expiry);
+                }
+                raw.to_string()
+            })
+            .collect())
+    }
     pub fn has_session_for_origin(&self, account: &str, origin: &str) -> bool {
         self.credential_available(account, origin, CredentialKind::Cookie)
             || self.credential_available(account, origin, CredentialKind::Bearer)
@@ -1059,9 +1085,37 @@ impl Network {
         } else {
             15000
         });
+        // A gateway can accept the connection and then never answer. A read
+        // that got no response at all is sent once more on a fresh connection,
+        // inside the same overall deadline. Writes and streamed downloads never.
+        let gateway_read = mode == RouteMode::Gateway
+            && matches!(input.method.as_str(), "GET" | "HEAD")
+            && transfer.sink.is_none()
+            && !transfer.resume;
+        let mut first = input.clone();
+        if gateway_read {
+            first.timeout_ms = Some((total_ms / 2).clamp(3000, 8000).min(total_ms));
+        }
         let result = self
-            .execute_once(principal, grant, input.clone(), transfer.clone(), &routes)
+            .execute_once(principal, grant, first, transfer.clone(), &routes)
             .await;
+        if gateway_read
+            && result.as_ref().is_err_and(|e| {
+                matches!(
+                    e.code.as_str(),
+                    "Timeout" | "NetworkUnreachable" | "NetworkError"
+                )
+            })
+        {
+            let remaining = total_ms
+                .saturating_sub(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
+            if remaining >= 1000 {
+                input.timeout_ms = Some(remaining);
+                return self
+                    .execute_once(principal, grant, input, transfer, &routes)
+                    .await;
+            }
+        }
         if safe_fallback
             && result
                 .as_ref()
@@ -2278,6 +2332,18 @@ mod tests {
         Arc<Mutex<Vec<String>>>,
         tokio::task::JoinHandle<()>,
     ) {
+        tls_gateway_stalling(0).await
+    }
+    /// Like `tls_gateway`, but the first `stalls` requests are read and then
+    /// never answered, as a stuck gateway does.
+    async fn tls_gateway_stalling(
+        stalls: usize,
+    ) -> (
+        String,
+        rustls::pki_types::CertificateDer<'static>,
+        Arc<Mutex<Vec<String>>>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let der = cert.cert.der().clone();
         let key = rustls::pki_types::PrivateKeyDer::Pkcs8(
@@ -2318,6 +2384,13 @@ mod tests {
                     .lock()
                     .unwrap()
                     .push(String::from_utf8(data).unwrap());
+                if observed.lock().unwrap().len() <= stalls {
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        drop(stream);
+                    });
+                    continue;
+                }
                 let body = r#"{"ok":true}"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: REFRESH=synthetic; Path=/; Secure\r\nLink: <{gateway}/gate/resource/api/data?page=2>; rel=\"next\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -2451,6 +2524,90 @@ mod tests {
         let mut write = request;
         write.method = "POST".into();
         write.body = Some(serde_json::json!({"synthetic":true}));
+        assert_eq!(
+            network
+                .request(&Principal::owner(), &grant, write)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            "NeedsReconciliation"
+        );
+        assert_eq!(requests.lock().unwrap().len(), 1);
+        task.abort();
+    }
+    #[tokio::test]
+    async fn a_stalled_gateway_read_is_sent_once_more_but_never_a_write() {
+        let (gateway, cert, requests, task) = tls_gateway_stalling(1).await;
+        let origin = "https://campus.example".to_owned();
+        let mut network = Network::default();
+        network.test_roots.push(cert);
+        network
+            .set_routes(
+                "a",
+                vec![GatewayRoute {
+                    provider: "fixture".into(),
+                    origin: origin.clone(),
+                    gateway_prefix: format!("{gateway}/gate/resource"),
+                    mode: RouteMode::Gateway,
+                }],
+            )
+            .unwrap();
+        network
+            .set_session(
+                "a",
+                &gateway,
+                None,
+                vec!["VPN=synthetic; Path=/; Secure".into()],
+            )
+            .unwrap();
+        let grant = Grant {
+            allow_private_network: true,
+            ..Default::default()
+        };
+        let read = HttpRequest {
+            url: format!("{origin}/api/data"),
+            account_id: Some("a".into()),
+            timeout_ms: Some(10000),
+            ..Default::default()
+        };
+        let started = std::time::Instant::now();
+        let response = network
+            .request(&Principal::owner(), &grant, read.clone())
+            .await
+            .unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(requests.lock().unwrap().len(), 2);
+        // The stalled attempt used about half of the deadline, not all of it.
+        assert!(started.elapsed() < std::time::Duration::from_secs(9));
+        task.abort();
+
+        let (gateway, cert, requests, task) = tls_gateway_stalling(1).await;
+        let mut network = Network::default();
+        network.test_roots.push(cert);
+        network
+            .set_routes(
+                "a",
+                vec![GatewayRoute {
+                    provider: "fixture".into(),
+                    origin: origin.clone(),
+                    gateway_prefix: format!("{gateway}/gate/resource"),
+                    mode: RouteMode::Gateway,
+                }],
+            )
+            .unwrap();
+        network
+            .set_session(
+                "a",
+                &gateway,
+                None,
+                vec!["VPN=synthetic; Path=/; Secure".into()],
+            )
+            .unwrap();
+        let mut write = read;
+        write.method = "POST".into();
+        write.body = Some(serde_json::json!({"synthetic":true}));
+        write.timeout_ms = Some(3000);
         assert_eq!(
             network
                 .request(&Principal::owner(), &grant, write)
