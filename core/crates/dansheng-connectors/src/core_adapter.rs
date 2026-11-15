@@ -27,6 +27,36 @@ pub struct CampusService;
 // school storage origin. Network selects credentials again per origin on redirect.
 #[cfg(feature = "login")]
 const FUDAN_CANVAS_STORAGE: &str = "https://elearning.obs.fudan.edu.cn";
+
+#[cfg(feature = "webvpn")]
+fn initialize_webvpn_routes(context: &ServiceContext<'_>, account: &str) -> CoreResult<()> {
+    let saved = context.store.kv_get("core:network-routes", account)?;
+    let mut routes: Vec<dansheng_core::network_routes::GatewayRoute> = if saved.is_null() {
+        vec![]
+    } else {
+        serde_json::from_value(saved)?
+    };
+    let mode = routes
+        .iter()
+        .find(|route| route.provider == "fudan.webvpn")
+        .map(|route| route.mode)
+        .unwrap_or(dansheng_core::network_routes::RouteMode::Auto);
+    // Login fills missing defaults without deleting custom routes or overriding
+    // explicit per-origin modes, including the owner's disabled (Direct) state.
+    for origin in crate::webvpn::DEFAULT_ORIGINS {
+        if !routes.iter().any(|route| route.origin == *origin) {
+            routes.push(crate::webvpn::gateway_route(origin, mode)?);
+        }
+    }
+    dansheng_core::network_routes::validate_routes(&routes)?;
+    context.store.kv_set(
+        "core:network-routes",
+        account,
+        &serde_json::to_value(&routes)?,
+    )?;
+    context.network.set_routes(account, routes)
+}
+
 pub(crate) struct BoundTransport<'a> {
     pub(crate) network: &'a Network,
     pub(crate) platform: &'a dyn PlatformPort,
@@ -490,6 +520,10 @@ impl CoreService for CampusService {
             ("fudan.portal.bind", "fudan.life.login"),
             #[cfg(feature = "login")]
             ("fudan.ecard.session", "fudan.card.login"),
+            #[cfg(feature = "webvpn")]
+            ("fudan.webvpn.status", "fudan.academic.read"),
+            #[cfg(feature = "webvpn")]
+            ("fudan.webvpn.configure", "fudan.academic.read"),
             ("fudan.ecard.transactions", "fudan.card.read"),
             ("fudan.ecard.statement", "fudan.card.read"),
             ("fudan.ecard.statistics", "fudan.card.read"),
@@ -817,28 +851,118 @@ impl CoreService for CampusService {
                 .set_session(account, &session.origin, None, session.cookies)?;
             #[cfg(feature = "webvpn")]
             if target == crate::login::LoginTarget::WebVpn {
-                let saved = context.store.kv_get("core:network-routes", account)?;
-                let mut routes: Vec<dansheng_core::network_routes::GatewayRoute> =
-                    if saved.is_null() {
-                        vec![]
-                    } else {
-                        serde_json::from_value(saved)?
-                    };
-                let room = crate::webvpn::gateway_route(
-                    "http://10.64.130.6",
-                    dansheng_core::network_routes::RouteMode::Gateway,
-                )?;
-                routes.retain(|r| r.origin != room.origin);
-                routes.push(room);
-                dansheng_core::network_routes::validate_routes(&routes)?;
-                context.store.kv_set(
-                    "core:network-routes",
-                    account,
-                    &serde_json::to_value(&routes)?,
-                )?;
-                context.network.set_routes(account, routes)?;
+                initialize_webvpn_routes(&context, account)?;
             }
             return Ok(json!({"account_id":account,"session_imported":true}));
+        }
+        #[cfg(feature = "webvpn")]
+        if method == "fudan.webvpn.status" {
+            let has_session = context
+                .network
+                .has_session_for_origin(account, crate::webvpn::GATEWAY_ORIGIN);
+            let routes = context.network.routes(account)?;
+            let vpn_routes: Vec<_> = routes
+                .iter()
+                .filter(|r| r.provider == "fudan.webvpn")
+                .collect();
+            let first_mode = vpn_routes
+                .first()
+                .map(|route| route.mode)
+                .unwrap_or_default();
+            let mode = if vpn_routes.iter().any(|route| route.mode != first_mode) {
+                "mixed"
+            } else {
+                match first_mode {
+                    dansheng_core::network_routes::RouteMode::Direct => "direct",
+                    dansheng_core::network_routes::RouteMode::Gateway => "gateway",
+                    dansheng_core::network_routes::RouteMode::Auto => "auto",
+                }
+            };
+            let origins: Vec<String> = vpn_routes.iter().map(|r| r.origin.clone()).collect();
+            return Ok(json!({
+                "account_id": account,
+                "has_session": has_session,
+                "mode": mode,
+                "enabled": vpn_routes.iter().any(|route| route.mode != dansheng_core::network_routes::RouteMode::Direct),
+                "routes_count": vpn_routes.len(),
+                "origins": origins,
+            }));
+        }
+        #[cfg(feature = "webvpn")]
+        if method == "fudan.webvpn.configure" {
+            if !principal.is_owner() {
+                return Err(CoreError::new(
+                    "PermissionDenied",
+                    "webvpn configuration requires the profile owner",
+                ));
+            }
+            if account.len() > 256 || account.chars().any(char::is_control) {
+                return Err(CoreError::invalid("invalid routing account"));
+            }
+            let mode_str = match params.get("mode") {
+                None => "auto",
+                Some(value) => value
+                    .as_str()
+                    .ok_or_else(|| CoreError::invalid("webvpn mode must be a string"))?,
+            };
+            let route_mode = match mode_str {
+                "auto" => dansheng_core::network_routes::RouteMode::Auto,
+                "gateway" | "always" => dansheng_core::network_routes::RouteMode::Gateway,
+                "direct" | "off" | "disabled" => dansheng_core::network_routes::RouteMode::Direct,
+                _ => {
+                    return Err(CoreError::invalid(
+                        "invalid webvpn mode (expected auto, gateway, or direct)",
+                    ));
+                }
+            };
+            let origins: Vec<String> = match params.get("origins") {
+                Some(value) => serde_json::from_value(value.clone()).map_err(|_| {
+                    CoreError::invalid("webvpn origins must be an array of strings")
+                })?,
+                None => crate::webvpn::DEFAULT_ORIGINS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            };
+            if origins.is_empty() {
+                return Err(CoreError::invalid("webvpn origins must not be empty"));
+            }
+            let vpn_routes = crate::webvpn::gateway_routes(&origins, route_mode)?;
+
+            let saved = context.store.kv_get("core:network-routes", account)?;
+            let mut existing_routes: Vec<dansheng_core::network_routes::GatewayRoute> =
+                if saved.is_null() {
+                    vec![]
+                } else {
+                    serde_json::from_value(saved)?
+                };
+
+            existing_routes.retain(|r| r.provider != "fudan.webvpn");
+            // Direct mappings retain the explicit mode across login/restart.
+            // routes_count counts configured mappings, including disabled ones.
+            existing_routes.extend(vpn_routes);
+            dansheng_core::network_routes::validate_routes(&existing_routes)?;
+            context.store.kv_set(
+                "core:network-routes",
+                account,
+                &serde_json::to_value(&existing_routes)?,
+            )?;
+            context
+                .network
+                .set_routes(account, existing_routes.clone())?;
+
+            let has_session = context
+                .network
+                .has_session_for_origin(account, crate::webvpn::GATEWAY_ORIGIN);
+
+            return Ok(json!({
+                "account_id": account,
+                "configured": true,
+                "mode": route_mode,
+                "has_session": has_session,
+                "routes_count": existing_routes.iter().filter(|r| r.provider == "fudan.webvpn").count(),
+                "origins": origins,
+            }));
         }
         if matches!(
             method,
@@ -2822,5 +2946,324 @@ mod adapter_tests {
         ] {
             assert!(canvas_download_url(&origin, "42", &bad).is_err());
         }
+    }
+    #[cfg(feature = "webvpn")]
+    #[tokio::test]
+    async fn webvpn_configure_and_status_manages_account_routes() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = dansheng_core::store::Store::open(temp.path()).unwrap();
+        let network = Network::default();
+        let platform = dansheng_core::UnavailablePlatform;
+        let ctx = || ServiceContext {
+            store: &store,
+            network: &network,
+            platform: &platform,
+        };
+        let owner = Principal::owner();
+        let grant = Grant {
+            capabilities: ["fudan.academic.read".into()].into(),
+            account_ids: ["test-user".into()].into(),
+            allow_private_network: true,
+            ..Default::default()
+        };
+
+        let status = CampusService
+            .call(
+                ctx(),
+                &owner,
+                &grant,
+                "fudan.webvpn.status",
+                json!({"account_id": "test-user"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status["has_session"], false);
+        assert_eq!(status["mode"], "direct");
+        assert_eq!(status["enabled"], false);
+        assert_eq!(status["routes_count"], 0);
+
+        let configured = CampusService
+            .call(
+                ctx(),
+                &owner,
+                &grant,
+                "fudan.webvpn.configure",
+                json!({"account_id": "test-user", "mode": "auto"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(configured["configured"], true);
+        assert_eq!(configured["mode"], "auto");
+        assert_eq!(configured["origins"], json!(crate::webvpn::DEFAULT_ORIGINS));
+        assert_eq!(
+            configured["routes_count"],
+            crate::webvpn::DEFAULT_ORIGINS.len()
+        );
+
+        let status = CampusService
+            .call(
+                ctx(),
+                &owner,
+                &grant,
+                "fudan.webvpn.status",
+                json!({"account_id": "test-user"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status["mode"], "auto");
+        assert_eq!(status["enabled"], true);
+        assert!(status["routes_count"].as_u64().unwrap() > 0);
+
+        let client = Principal {
+            id: "client-app".into(),
+            kind: dansheng_core::PrincipalKind::Client,
+        };
+        let client_status = CampusService
+            .call(
+                ctx(),
+                &client,
+                &grant,
+                "fudan.webvpn.status",
+                json!({"account_id": "test-user"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(client_status, status);
+        let denied_account = CampusService
+            .call(
+                ctx(),
+                &client,
+                &grant,
+                "fudan.webvpn.status",
+                json!({"account_id": "another-user"}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(denied_account.code, "PermissionDenied");
+        let denied = CampusService
+            .call(
+                ctx(),
+                &client,
+                &grant,
+                "fudan.webvpn.configure",
+                json!({"account_id": "test-user", "mode": "direct"}),
+            )
+            .await;
+        assert_eq!(denied.unwrap_err().code, "PermissionDenied");
+
+        let disabled = CampusService
+            .call(
+                ctx(),
+                &owner,
+                &grant,
+                "fudan.webvpn.configure",
+                json!({"account_id": "test-user", "mode": "direct"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(disabled["mode"], "direct");
+        assert_eq!(
+            disabled["routes_count"],
+            crate::webvpn::DEFAULT_ORIGINS.len()
+        );
+        // Simulate a fresh in-memory route cache before the post-login step.
+        network.set_routes("test-user", vec![]).unwrap();
+        initialize_webvpn_routes(&ctx(), "test-user").unwrap();
+        let status = CampusService
+            .call(
+                ctx(),
+                &owner,
+                &grant,
+                "fudan.webvpn.status",
+                json!({"account_id": "test-user"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status["mode"], "direct");
+        assert_eq!(status["enabled"], false);
+        assert_eq!(status["origins"], json!(crate::webvpn::DEFAULT_ORIGINS));
+        assert!(
+            network
+                .routes("test-user")
+                .unwrap()
+                .iter()
+                .all(|route| route.mode == dansheng_core::network_routes::RouteMode::Direct)
+        );
+        assert!(network.routes("another-user").unwrap().is_empty());
+    }
+
+    #[cfg(feature = "webvpn")]
+    #[tokio::test]
+    async fn webvpn_configuration_validates_before_mutating_and_preserves_other_routes() {
+        use dansheng_core::network_routes::{GatewayRoute, RouteMode};
+        let temp = tempfile::tempdir().unwrap();
+        let store = dansheng_core::store::Store::open(temp.path()).unwrap();
+        let network = Network::default();
+        let platform = dansheng_core::UnavailablePlatform;
+        let ctx = || ServiceContext {
+            store: &store,
+            network: &network,
+            platform: &platform,
+        };
+        let owner = Principal::owner();
+        let grant = Grant::default();
+        let other = GatewayRoute {
+            provider: "other.gateway".into(),
+            origin: "https://other.example".into(),
+            gateway_prefix: "https://gateway.example/encoded".into(),
+            mode: RouteMode::Gateway,
+        };
+        store
+            .kv_set("core:network-routes", "test-user", &json!([other]))
+            .unwrap();
+        network
+            .set_routes("test-user", vec![other.clone()])
+            .unwrap();
+        let configured = CampusService
+            .call(ctx(), &owner, &grant, "fudan.webvpn.configure", json!({
+                "account_id": "test-user", "mode": "always", "origins": ["https://ecard.fudan.edu.cn"]
+            }))
+            .await
+            .unwrap();
+        assert_eq!(configured["mode"], "gateway");
+        assert_eq!(configured["routes_count"], 1);
+        let saved = store.kv_get("core:network-routes", "test-user").unwrap();
+        let routes = network.routes("test-user").unwrap();
+        assert!(routes.contains(&other));
+        for invalid in [
+            json!({"mode": false}),
+            json!({"mode": null}),
+            json!({"mode": "unknown"}),
+            json!({"origins": "https://ecard.fudan.edu.cn"}),
+            json!({"origins": null}),
+            json!({"origins": [42]}),
+            json!({"origins": ["https://ecard.fudan.edu.cn", 42]}),
+            json!({"origins": []}),
+            json!({"origins": ["https://ecard.fudan.edu.cn", "https://ecard.fudan.edu.cn"]}),
+            json!({"origins": ["https://evil.example"]}),
+            json!({"mode": "direct", "origins": ["https://evil.example"]}),
+        ] {
+            let mut params = invalid;
+            params["account_id"] = json!("test-user");
+            assert!(
+                CampusService
+                    .call(ctx(), &owner, &grant, "fudan.webvpn.configure", params)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                store.kv_get("core:network-routes", "test-user").unwrap(),
+                saved
+            );
+            assert_eq!(network.routes("test-user").unwrap(), routes);
+        }
+        for alias in ["off", "disabled"] {
+            let disabled = CampusService
+                .call(
+                    ctx(),
+                    &owner,
+                    &grant,
+                    "fudan.webvpn.configure",
+                    json!({"account_id": "test-user", "mode": alias}),
+                )
+                .await
+                .unwrap();
+            assert_eq!(disabled["mode"], "direct");
+            assert!(network.routes("test-user").unwrap().contains(&other));
+        }
+        for account in ["a".repeat(257), "invalid\naccount".into()] {
+            let error = CampusService
+                .call(
+                    ctx(),
+                    &owner,
+                    &grant,
+                    "fudan.webvpn.configure",
+                    json!({"account_id": account}),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, "InvalidInput");
+            assert!(
+                store
+                    .kv_get("core:network-routes", &account)
+                    .unwrap()
+                    .is_null()
+            );
+            assert!(network.routes(&account).unwrap().is_empty());
+        }
+    }
+
+    #[cfg(feature = "webvpn")]
+    #[tokio::test]
+    async fn webvpn_login_initializes_defaults_and_preserves_custom_routes_and_modes() {
+        use dansheng_core::network_routes::RouteMode;
+        let temp = tempfile::tempdir().unwrap();
+        let store = dansheng_core::store::Store::open(temp.path()).unwrap();
+        let network = Network::default();
+        let platform = dansheng_core::UnavailablePlatform;
+        let ctx = ServiceContext {
+            store: &store,
+            network: &network,
+            platform: &platform,
+        };
+        initialize_webvpn_routes(&ctx, "new-user").unwrap();
+        let defaults = network.routes("new-user").unwrap();
+        assert_eq!(defaults.len(), crate::webvpn::DEFAULT_ORIGINS.len());
+        assert!(defaults.iter().all(|route| route.mode == RouteMode::Auto));
+        assert!(
+            crate::webvpn::DEFAULT_ORIGINS
+                .iter()
+                .all(|origin| defaults.iter().any(|route| route.origin == *origin))
+        );
+
+        let custom =
+            crate::webvpn::gateway_route("https://library.fudan.edu.cn", RouteMode::Gateway)
+                .unwrap();
+        let direct =
+            crate::webvpn::gateway_route("https://ecard.fudan.edu.cn", RouteMode::Direct).unwrap();
+        let mut other =
+            crate::webvpn::gateway_route("https://my.fudan.edu.cn", RouteMode::Direct).unwrap();
+        other.provider = "other.gateway".into();
+        store
+            .kv_set(
+                "core:network-routes",
+                "existing-user",
+                &json!([custom, direct, other]),
+            )
+            .unwrap();
+        initialize_webvpn_routes(&ctx, "existing-user").unwrap();
+        let routes = network.routes("existing-user").unwrap();
+        assert_eq!(routes.len(), crate::webvpn::DEFAULT_ORIGINS.len() + 1);
+        assert!(routes.contains(&custom));
+        assert!(routes.contains(&direct));
+        assert!(routes.contains(&other));
+        assert!(
+            routes
+                .iter()
+                .filter(|route| route.origin != direct.origin && route.origin != other.origin)
+                .all(|route| route.mode == RouteMode::Gateway)
+        );
+        initialize_webvpn_routes(&ctx, "existing-user").unwrap();
+        assert_eq!(network.routes("existing-user").unwrap(), routes);
+        assert_eq!(
+            store
+                .kv_get("core:network-routes", "existing-user")
+                .unwrap(),
+            json!(routes)
+        );
+        assert_eq!(network.routes("new-user").unwrap(), defaults);
+        let status = CampusService
+            .call(
+                ctx,
+                &Principal::owner(),
+                &Grant::default(),
+                "fudan.webvpn.status",
+                json!({"account_id": "existing-user"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status["mode"], "mixed");
+        assert_eq!(status["enabled"], true);
+        assert_eq!(status["routes_count"], crate::webvpn::DEFAULT_ORIGINS.len());
     }
 }
