@@ -46,6 +46,8 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(45);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoginTarget {
     Academic,
+    /// The postgraduate course system, which only serves plain HTTP.
+    Postgraduate,
     Canvas,
     Ecard,
     Dorm,
@@ -58,6 +60,7 @@ impl LoginTarget {
     fn origin(self) -> &'static str {
         match self {
             Self::Academic => "https://fdjwgl.fudan.edu.cn",
+            Self::Postgraduate => "http://yjsxk.fudan.edu.cn",
             Self::Canvas => "https://elearning.fudan.edu.cn",
             Self::Ecard => "https://ecard.fudan.edu.cn",
             Self::Dorm | Self::Bus => "https://zlapp.fudan.edu.cn",
@@ -69,6 +72,9 @@ impl LoginTarget {
     fn entry(self) -> &'static str {
         match self {
             Self::Academic => "https://fdjwgl.fudan.edu.cn/student/for-std/course-table",
+            Self::Postgraduate => {
+                "http://yjsxk.fudan.edu.cn/yjsxkapp/sys/xsxkappfudan/xsxkCourse/loadKbxx.do"
+            }
             Self::Canvas => "https://elearning.fudan.edu.cn/login/cas",
             Self::Ecard => "https://ecard.fudan.edu.cn/epay",
             Self::Dorm => "https://zlapp.fudan.edu.cn/fudanelec/wap/default/info",
@@ -76,6 +82,12 @@ impl LoginTarget {
             Self::Dining => "https://my.fudan.edu.cn/simple_list/stqk",
             Self::WebVpn => "https://webvpn.fudan.edu.cn/login?cas_login=true",
         }
+    }
+
+    /// Only the target service itself may be reached over plain HTTP. Credentials
+    /// always go to the HTTPS identity provider; the service gets a one-time ticket.
+    fn plain_http(self) -> bool {
+        self.origin().starts_with("http://")
     }
 }
 
@@ -219,6 +231,7 @@ pub async fn login_with_progress(
 ) -> Result<LoginSession, LoginError> {
     validate_input(student_id, password)?;
     let client = verified_login_client()?
+        .https_only(!target.plain_http())
         .build()
         .map_err(|_| LoginError::NetworkError)?;
     let mut flow = Flow::new(target, Https { client });
@@ -650,7 +663,7 @@ impl<T: Transport> Flow<T> {
             raw.set_path(cookie.path.as_ref().to_owned());
             // Preserve cookie identity so future Set-Cookie updates/deletions
             // replace the same entry. Core binds this jar to the selected origin.
-            raw.set_secure(true);
+            raw.set_secure(!self.target.plain_http());
             raw.set_max_age(None);
             if let CookieExpiration::AtUtc(expiry) = cookie.expires {
                 raw.set_expires(expiry);
@@ -707,8 +720,11 @@ fn validate_url_depth(url: &Url, target: LoginTarget, depth: usize) -> Result<()
         return Err(LoginError::UnsafeRedirect);
     }
     if url.as_str().len() > MAX_URL
-        || url.scheme() != "https"
-        || url.port_or_known_default() != Some(443)
+        || !((url.scheme() == "https" && url.port_or_known_default() == Some(443))
+            || (target.plain_http()
+                && url.scheme() == "http"
+                && url.port_or_known_default() == Some(80)
+                && url.origin().ascii_serialization() == target.origin()))
         || !url.username().is_empty()
         || url.password().is_some()
         || ![ID, UIS, target.origin()].contains(&url.origin().ascii_serialization().as_str())
@@ -1290,6 +1306,49 @@ mod tests {
                 &LoginTarget::Canvas.entry().parse().unwrap(),
                 LoginTarget::Academic
             ),
+            Err(LoginError::UnsafeRedirect)
+        );
+    }
+
+    #[test]
+    fn login_plain_http_is_limited_to_the_postgraduate_service() {
+        let target = LoginTarget::Postgraduate;
+        for accepted in [
+            target.entry(),
+            "http://yjsxk.fudan.edu.cn/yjsxkapp/sys/xsxkappfudan/xsxkCourse/loadKbxx.do?ticket=ST-1",
+            "https://id.fudan.edu.cn/idp/authCenter/authenticate?service=http%3A%2F%2Fyjsxk.fudan.edu.cn%2Fyjsxkapp%2F",
+        ] {
+            assert!(
+                validate_url(&accepted.parse().unwrap(), target).is_ok(),
+                "{accepted}"
+            );
+        }
+        for denied in [
+            "http://id.fudan.edu.cn/",
+            "http://uis.fudan.edu.cn/authserver/login",
+            "http://yjsxk.fudan.edu.cn:8080/",
+            "https://yjsxk.fudan.edu.cn/",
+            "http://yjsxktest.fudan.sh.cn/",
+            "http://fdjwgl.fudan.edu.cn/",
+            "https://id.fudan.edu.cn/idp/authCenter/authenticate?service=http%3A%2F%2Fevil.test%2F",
+        ] {
+            assert_eq!(
+                validate_url(&denied.parse().unwrap(), target),
+                Err(LoginError::UnsafeRedirect),
+                "{denied}"
+            );
+        }
+        // Other targets keep HTTPS-only service origins.
+        assert_eq!(
+            validate_url(&target.entry().parse().unwrap(), LoginTarget::Academic),
+            Err(LoginError::UnsafeRedirect)
+        );
+        let body = Body::NeoPassword(json!({}));
+        let plain: Url = "http://yjsxk.fudan.edu.cn/idp/authn/authExecute"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            validate_body_destination(&plain, &body),
             Err(LoginError::UnsafeRedirect)
         );
     }

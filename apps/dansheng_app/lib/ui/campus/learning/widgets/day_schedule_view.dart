@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import '../learning_controller.dart';
 import '../models/canvas_models.dart';
 import '../models/timetable_models.dart';
+import 'assignment_widgets.dart';
 import 'learning_common.dart';
+
+export 'assignment_widgets.dart';
 
 /// Shows the courses and due assignments for the currently selected date,
 /// with per-source auth/error isolation and interactive summary details.
@@ -39,7 +42,7 @@ class DayScheduleView extends StatelessWidget {
     final dateStr = '${sel.month}月${sel.day}日 $weekdayStr';
 
     final courses = controller.coursesOnSelectedDate;
-    final assignments = controller.assignmentsOnSelectedDate;
+    final assignments = controller.deadlineAssignments;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -260,7 +263,7 @@ class DayScheduleView extends StatelessWidget {
             context,
             colorScheme,
             icon: Icons.assignment_turned_in_outlined,
-            text: '今日无截止作业',
+            text: '暂无截止作业',
           )
         else ...[
           if ((controller.canvasError ?? controller.assignmentError) != null)
@@ -274,7 +277,10 @@ class DayScheduleView extends StatelessWidget {
             (a) => AssignmentCard(
               assignment: a,
               colorScheme: colorScheme,
-              onTap: () => showAssignmentDetails(context, a),
+              showDate: true,
+              submission: controller.submissionFor(a),
+              statusLoading: controller.isSubmissionLoading(a),
+              onTap: () => showAssignmentDetails(context, controller, a),
             ),
           ),
         ],
@@ -390,126 +396,6 @@ class DayScheduleView extends StatelessWidget {
   }
 }
 
-/// Bottom sheet with the full details of one assignment.
-void showAssignmentDetails(BuildContext context, CanvasAssignment assignment) {
-  showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (ctx) {
-      final cs = Theme.of(ctx).colorScheme;
-      final description = (assignment.description ?? '')
-          .replaceAll(RegExp(r'<[^>]+>'), '')
-          .trim();
-      return SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                assignment.name,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: cs.onSurface,
-                ),
-              ),
-              if (assignment.courseName != null)
-                Text(
-                  assignment.courseName!,
-                  style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
-                ),
-              const Divider(height: 24),
-              _detailItem(
-                ctx,
-                Icons.schedule_rounded,
-                '截止时间',
-                assignment.fullDueFormatted,
-              ),
-              if (assignment.pointsPossible != null)
-                _detailItem(
-                  ctx,
-                  Icons.score_rounded,
-                  '满分分值',
-                  '${assignment.pointsPossible} 分',
-                ),
-              _detailItem(
-                ctx,
-                assignment.hasSubmittedSubmissions
-                    ? Icons.check_circle_rounded
-                    : Icons.pending_rounded,
-                '提交状态',
-                assignment.hasSubmittedSubmissions ? '已提交' : '待提交',
-              ),
-              if (description.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  '作业要求说明:',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: cs.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: cs.onSurfaceVariant,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      );
-    },
-  );
-}
-
-Widget _detailItem(
-  BuildContext context,
-  IconData icon,
-  String label,
-  String value,
-) {
-  final cs = Theme.of(context).colorScheme;
-  return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 16, color: cs.primary),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 70,
-          child: Text(
-            label,
-            style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: cs.onSurface,
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
 class _CourseCard extends StatelessWidget {
   final TimetableCourse course;
   final ColorScheme colorScheme;
@@ -618,140 +504,6 @@ class _CourseCard extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// One assignment row; used by the day schedule and by a course page.
-class AssignmentCard extends StatelessWidget {
-  final CanvasAssignment assignment;
-  final ColorScheme colorScheme;
-  final VoidCallback onTap;
-
-  /// Show the due date as well as the time, and drop the course name.
-  final bool inCourse;
-
-  const AssignmentCard({
-    super.key,
-    required this.assignment,
-    required this.colorScheme,
-    required this.onTap,
-    this.inCourse = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isSubmitted = assignment.hasSubmittedSubmissions;
-    final dark = colorScheme.brightness == Brightness.dark;
-    final amber = dark ? Colors.amber.shade300 : Colors.amber.shade900;
-    final green = dark ? Colors.green.shade300 : Colors.green.shade800;
-    final courseName = assignment.courseName ?? '';
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: colorScheme.surfaceContainerLow,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(
-            color: isSubmitted
-                ? colorScheme.outlineVariant.withValues(alpha: 0.4)
-                : Colors.amber.shade300.withValues(alpha: dark ? 0.5 : 1),
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  isSubmitted
-                      ? Icons.check_circle_rounded
-                      : Icons.pending_actions_rounded,
-                  size: 20,
-                  color: isSubmitted
-                      ? Colors.green.shade600
-                      : Colors.amber.shade700,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        assignment.name,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: colorScheme.onSurface,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 2,
-                        children: [
-                          if (!inCourse && courseName.isNotEmpty)
-                            Text(
-                              courseName,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          Text(
-                            inCourse
-                                ? (assignment.dueAt == null
-                                      ? '无截止时间'
-                                      : '${assignment.fullDueFormatted} 截止')
-                                : assignment.dueTimeFormatted,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: amber,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          if (assignment.pointsPossible != null)
-                            Text(
-                              '${assignment.pointsPossible}分',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: (isSubmitted ? Colors.green : Colors.amber)
-                        .withValues(alpha: dark ? 0.18 : 0.14),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    isSubmitted ? '已提交' : '待提交',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: isSubmitted ? green : amber,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

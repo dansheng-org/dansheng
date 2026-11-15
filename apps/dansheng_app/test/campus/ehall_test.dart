@@ -705,7 +705,7 @@ void main() {
         expect(find.text(undergraduateNotice), findsOneWidget);
         expect(find.text(graduateNotice), findsNothing);
 
-        await tester.tap(find.text(undergraduateNotice));
+        await tester.tap(find.byTooltip('打开公告网页').first);
         await tester.pumpAndSettle();
         expect(Uri.parse(lastOpened()).host, 'jwc.fudan.edu.cn');
 
@@ -725,7 +725,7 @@ void main() {
         expect(find.text(graduateNotice), findsOneWidget);
         expect(find.text(undergraduateNotice), findsNothing);
 
-        await tester.tap(find.text(graduateNotice));
+        await tester.tap(find.byTooltip('打开公告网页').first);
         await tester.pumpAndSettle();
         expect(Uri.parse(lastOpened()).host, 'gs.fudan.edu.cn');
 

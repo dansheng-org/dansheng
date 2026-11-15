@@ -125,6 +125,17 @@
 
 **P**：公开包版本字符串 `v4.0.16`；模板采用 Knockout 风格绑定，包内 `getBinary` 以 `application/x-protobuf` 读取 `/initinfo`、`/apps`，还存在文件属性/权限控制、下载/分享等不同操作。**不能据此断言它是 Seafile、Nextcloud、支持 WebDAV 或 S3**；本次没有查验协议 schema，没有调用文件 API、没有请求用户文件。匿名页面不证明校外登录、UIS SSO 或原生客户端 token 协议。
 
+**实现（2026-11-15）**：`crates/dansheng-connectors/src/fudan_cloud.rs` 已按只读首版接入，方法为 `fudan.cloud.login`（仅 owner）、`fudan.cloud.roots`、`fudan.cloud.list`、`fudan.cloud.download`，能力为 `fudan.cloud.read`。协议事实：
+- Proto schema 以 protobufjs JSON 描述符形式完整嵌在公开的 `packed-cc.js`（包名 `com.bjtxra.cloud.*`），连接器只手写解码用到的字段，其余字段跳过。
+- 云盘是独立账号体系：学号 + 云盘自设密码，**不是** UIS 密码，也不走 id.fudan.edu.cn。`POST /login`，正文为 `LoginInfo{username=1,password=2,isRemember=3}`，凭据以 `{BASE64}`+Base64 包装（编码而非加密，仅经 HTTPS），`Content-Type: application/logininfo`；成功返回 `RspInfo.code=1` 与 `session`/`hostid` Cookie。错误码 15 为用户名或密码错误，37/38 为频繁登录/临时锁定；连接器每次调用只尝试一次。
+- 所有请求带客户端自生成的 `csrftoken` 查询参数（`base64("tokenXY@" + base64("tokenXY"))`），不含秘密。
+- 路径为 `gtype/gpid/directory/...`：个人文件 `3/<GET /user 的 OrgItem.gpid>/directory/`，群组 `2/<gpid>/directory/`（来自 `GET /usergroup/groups`）。`GET /files/<path>` 返回 `StoreRefer.store.tree.items`（`TreeItem`），空文件夹为 200 + 空正文；`GET /download/<path>` 下载单个文件；下载权限为 `PermissionControl.control[6] == Accepted(2)`。
+- 实测（测试账号，只读）：登录、`/user`、群组列表与个人根目录列举均通过；该账号云盘为空，条目字段、群组目录与文件下载仅有基于 schema 的离线测试。
+- 列表不写入共享记录或搜索；下载走受管资产（100 MiB 上限），以路径、大小与修改时间为本地缓存键，大小不符即删除并报 `IntegrityMismatch`。
+- **写入（2026-11-15，经用户授权在测试账号的专用文件夹实测后清理）**：`fudan.cloud.mkdir`（`PUT /filesop/folders/<path>`）、`rename`（`PUT /filesop/rename/<新名>/<path>`）、`delete`（`POST /upload/default/<gtype>/<gpid>/directory/`，`TreeUpdateReq` 的 `UpdateDelete` 项，进入回收站；先重新列举父目录取条目元数据）、`upload`、`share`/`unshare`，能力 `fudan.cloud.write`。上传：内容哈希为 `hex(SHA-1(文件字节 + OrgItem.userInfo.hashSalt))`；≤128 KiB 的文件直接放进 `TreeUpdateItem.content` 随索引提交；更大的文件先 `POST /has?hash&check&size`（`check` 为按响应头 `Check-Setting` 的 `start/len` 取样窗口的同样哈希），返回 21 时 `POST /upload/default/<path>?lastmodified&hash` 上传整块，再次 `/has` 确认后提交索引（带 `check`/`checkSize`）。索引提交为 `POST /upload/default/<folder>`，`Content-Type: application/cc-update-index`。同名时按网页端规则改为 `名 (n).扩展名`。上传上限 8 MiB（宿主二进制请求上限），暂不支持 >32 MiB 的分片树。无正文的写请求必须带 `Content-Length: 0`/User-Agent，否则服务器静默忽略。
+- **分享**：`GET /permission/role/1` 取角色（优先 downloader），`POST /sharefile/create` 提交 `FileShare`（私密链接带提取码，7 天）。测试账号的条目权限不含 ManageShareFile(15)，服务器返回 16（RETURN_LESS_PERMIT），故分享仅有离线测试；界面只在条目授予该权限时提供。
+- **通知附件**：`fudan.notice.attachments` 从公开公告页提取 `/_upload/article/files/` 链接（含 `sudyfile-attr` 标题与 PDF 播放器），`fudan.notice.attachment.download` 存为受管资产后可打开或上传到任一云盘。需校园登录的 `.psp` 公告报 `AuthenticationRequired`。
+
 **H**：官方 `fudan-cloud` 连接器先由官方入口 + 用户可控认证开始，后续仅文件夹列表、元数据、手动选定下载。模型 `RemoteFile {opaque_id,parent_id,name,mime,size,modified_at,etag,downloadable}`，不用含账号的绝对远端路径充当全局键。路径、分享 URL、临时签名 URL 视为敏感信息；默认不导入全盘、不自动建立公开搜索索引。Proto schema/分页/ACL 未验证前，不实现猜测的 REST/WebDAV 客户端。上传、删除、重命名、同步回写、分享链接创建一律不属于首版。
 
 ### 校园地图

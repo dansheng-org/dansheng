@@ -7,6 +7,7 @@ import '../../widgets/campus_account_actions.dart';
 
 import '../campus_api.dart';
 import 'course_page.dart';
+import 'cloud/drive_picker.dart';
 import 'chat/learning_chat_page.dart';
 import 'models/canvas_models.dart';
 import 'learning_controller.dart';
@@ -111,6 +112,16 @@ class _LearningPageState extends State<LearningPage> {
                         icon: const Icon(Icons.event_note_outlined, size: 18),
                         label: const Text('个人日程'),
                         onPressed: _openAgenda,
+                      ),
+                      TextButton.icon(
+                        icon: const Icon(Icons.cloud_outlined, size: 18),
+                        label: const Text('云盘'),
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                DriveHubPage(api: _learningController.api),
+                          ),
+                        ),
                       ),
                     ],
                   ),

@@ -19,6 +19,8 @@ mod expanded_services;
 #[cfg(feature = "services")]
 pub mod forum_actions;
 pub mod fudan;
+#[cfg(feature = "services")]
+pub mod fudan_cloud;
 pub mod library;
 #[cfg(feature = "login")]
 pub mod login;
@@ -29,6 +31,8 @@ pub mod models;
 mod page_transport;
 pub mod postgraduate_calendar;
 pub mod transport;
+#[cfg(feature = "services")]
+pub mod webdav_drive;
 #[cfg(feature = "webvpn")]
 pub mod webvpn;
 

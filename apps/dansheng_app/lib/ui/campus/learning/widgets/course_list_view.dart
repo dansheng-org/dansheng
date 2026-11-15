@@ -104,9 +104,8 @@ class _CourseTile extends StatelessWidget {
     final tint = courseTint(course.name, scheme);
     final now = controller.currentTime();
     final pending = [
-      for (final a
-          in controller.assignments[course.id] ?? const <CanvasAssignment>[])
-        if (!a.hasSubmittedSubmissions &&
+      for (final a in controller.courseWork(course.id))
+        if (controller.isOutstanding(a) &&
             a.dueAt != null &&
             a.dueAt!.isAfter(now))
           a,

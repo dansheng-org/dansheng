@@ -40,6 +40,13 @@ pub(crate) struct WriteDispatch {
 
 tokio::task_local! {
     static WRITE_DISPATCH: Arc<WriteDispatch>;
+    static OWNER_PRIVATE_READ: OwnerPrivateRead;
+}
+
+struct OwnerPrivateRead {
+    principal_id: String,
+    account_id: String,
+    origin: String,
 }
 
 impl WriteDispatch {
@@ -343,6 +350,10 @@ pub enum CredentialKind {
     /// No backend credentials. The account may still own gateway authentication.
     Anonymous,
 }
+/// Marks an authorization slot that holds HTTP Basic credentials. Bearer
+/// tokens never contain whitespace, so the two cannot be confused.
+const BASIC_PREFIX: &str = "Basic ";
+
 type SessionCopy = (
     String,
     Option<String>,
@@ -501,6 +512,37 @@ impl Default for Network {
     }
 }
 impl Network {
+    /// Trusted adapters may preserve an owner's exact HTTPS LAN approval while
+    /// downloading into a service-owned asset. This never changes the service's
+    /// identity or grants. The exception is task-local, GET/HEAD-only, and bound
+    /// to one service, account and physical origin; redirects cannot widen it.
+    pub async fn with_owner_private_origin_read<T>(
+        &self,
+        owner: &Principal,
+        grant: &Grant,
+        delegate: &Principal,
+        account: &str,
+        origin: &str,
+        future: impl std::future::Future<Output = CoreResult<T>>,
+    ) -> CoreResult<T> {
+        if !owner.is_owner()
+            || !matches!(delegate.kind, crate::api::PrincipalKind::Client)
+            || !grant.private_network_origins.contains(origin)
+        {
+            return future.await;
+        }
+        OWNER_PRIVATE_READ
+            .scope(
+                OwnerPrivateRead {
+                    principal_id: delegate.id.clone(),
+                    account_id: account.into(),
+                    origin: origin.into(),
+                },
+                future,
+            )
+            .await
+    }
+
     fn check_write_binding(
         &self,
         principal: &Principal,
@@ -632,7 +674,55 @@ impl Network {
     ) -> CoreResult<()> {
         self.set_session_with_headers(account, origin, bearer, cookies, BTreeMap::new())
     }
+    /// HTTP Basic credentials for one exact origin (e.g. a WebDAV server). The
+    /// header value is kept in the session's authorization slot and sent only to
+    /// that origin, like a bearer token; it is never returned to callers.
+    pub fn set_session_basic(
+        &self,
+        account: &str,
+        origin: &str,
+        username: &str,
+        password: &str,
+    ) -> CoreResult<()> {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        if !origin.starts_with("https://") {
+            return Err(CoreError::invalid("basic credentials require HTTPS"));
+        }
+        if username.is_empty()
+            || username.contains(':')
+            || username.len() > 256
+            || password.len() > 1024
+            || username
+                .chars()
+                .chain(password.chars())
+                .any(char::is_control)
+        {
+            return Err(CoreError::invalid("invalid basic credentials"));
+        }
+        let value = format!(
+            "{BASIC_PREFIX}{}",
+            STANDARD.encode(format!("{username}:{password}"))
+        );
+        self.insert_session(account, origin, Some(value), Vec::new(), BTreeMap::new())
+    }
     pub fn set_session_with_headers(
+        &self,
+        account: &str,
+        origin: &str,
+        bearer: Option<String>,
+        cookies: Vec<String>,
+        secret_headers: BTreeMap<String, String>,
+    ) -> CoreResult<()> {
+        if bearer
+            .as_deref()
+            .is_some_and(|token| token.chars().any(char::is_whitespace))
+        {
+            // Only set_session_basic may store a non-bearer authorization value.
+            return Err(CoreError::invalid("invalid bearer token"));
+        }
+        self.insert_session(account, origin, bearer, cookies, secret_headers)
+    }
+    fn insert_session(
         &self,
         account: &str,
         origin: &str,
@@ -1009,7 +1099,10 @@ impl Network {
         } = transfer;
         grant.check(principal, "http.request")?;
         grant.check_account(principal, input.account_id.as_deref())?;
-        let mutating = !matches!(input.method.as_str(), "GET" | "HEAD" | "OPTIONS");
+        let mutating = !matches!(
+            input.method.as_str(),
+            "GET" | "HEAD" | "OPTIONS" | "PROPFIND"
+        );
         let authority = mutating
             .then(|| WRITE_DISPATCH.try_with(Arc::clone).ok())
             .flatten();
@@ -1045,10 +1138,15 @@ impl Network {
             Url::parse(&input.url).map_err(|_| CoreError::invalid("invalid request URL"))?;
         let mut method = Method::from_bytes(input.method.as_bytes())
             .map_err(|_| CoreError::invalid("invalid HTTP method"))?;
-        let mutating_request = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
+        let propfind = Method::from_bytes(b"PROPFIND").expect("constant method");
+        // PROPFIND only reads metadata; the other WebDAV methods change the remote.
+        let mutating_request =
+            !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS) && method != propfind;
         if mutating_request {
             grant.check(principal, "http.write")?;
         }
+        let webdav = ["PROPFIND", "MKCOL", "MOVE"]
+            .map(|name| Method::from_bytes(name.as_bytes()).expect("constant method"));
         if ![
             Method::GET,
             Method::HEAD,
@@ -1059,6 +1157,7 @@ impl Network {
             Method::OPTIONS,
         ]
         .contains(&method)
+            && !webdav.contains(&method)
         {
             return Err(CoreError::invalid("unsupported HTTP method"));
         }
@@ -1221,7 +1320,18 @@ impl Network {
             if !grant.allow_private_network
                 && addrs.iter().any(|addr| {
                     !public_address(addr.ip())
-                        && !permitted_lan_address(principal, grant, &physical, addr.ip())
+                        && !permitted_lan_address(
+                            principal,
+                            grant,
+                            &physical,
+                            addr.ip(),
+                            delegated_private_read(
+                                principal,
+                                input.account_id.as_deref(),
+                                &method,
+                                &physical,
+                            ),
+                        )
                 })
             {
                 return Err(CoreError::new(
@@ -1287,7 +1397,14 @@ impl Network {
                 && matches!(credentials, CredentialKind::Any | CredentialKind::Bearer)
                 && *origin == url.origin().ascii_serialization()
             {
-                request = request.bearer_auth(token);
+                request = match token.strip_prefix(BASIC_PREFIX) {
+                    Some(basic) => request.header(
+                        reqwest::header::AUTHORIZATION,
+                        HeaderValue::from_str(&format!("Basic {basic}"))
+                            .map_err(|_| CoreError::invalid("invalid basic credentials"))?,
+                    ),
+                    None => request.bearer_auth(token),
+                };
             }
             if credentials == CredentialKind::SecretHeaders
                 && let Some((_, _, _, values)) = &native
@@ -1320,7 +1437,7 @@ impl Network {
                 }
             }
             let mut response = request.send().await.map_err(|e| {
-                let code = if !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS) {
+                let code = if mutating_request {
                     "NeedsReconciliation"
                 } else if e.is_connect() {
                     "NetworkUnreachable"
@@ -1623,8 +1740,31 @@ fn validate_url(url: &Url, principal: &Principal, grant: &Grant) -> CoreResult<(
     }
     Ok(())
 }
-fn permitted_lan_address(principal: &Principal, grant: &Grant, target: &Url, ip: IpAddr) -> bool {
-    if !principal.is_owner()
+fn delegated_private_read(
+    principal: &Principal,
+    account: Option<&str>,
+    method: &Method,
+    target: &Url,
+) -> bool {
+    matches!(*method, Method::GET | Method::HEAD)
+        && matches!(principal.kind, crate::api::PrincipalKind::Client)
+        && OWNER_PRIVATE_READ
+            .try_with(|binding| {
+                binding.principal_id == principal.id
+                    && account == Some(binding.account_id.as_str())
+                    && binding.origin == target.origin().ascii_serialization()
+            })
+            .unwrap_or(false)
+}
+
+fn permitted_lan_address(
+    principal: &Principal,
+    grant: &Grant,
+    target: &Url,
+    ip: IpAddr,
+    delegated_read: bool,
+) -> bool {
+    if (!principal.is_owner() && !delegated_read)
         || target.scheme() != "https"
         || !grant
             .private_network_origins
@@ -1681,6 +1821,35 @@ fn public_address(ip: IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn basic_credentials_are_https_only_and_cannot_be_forged_as_bearer() {
+        let network = Network::default();
+        let origin = "https://dav.example";
+        assert!(
+            network
+                .set_session_basic("a", "http://dav.example", "u", "p")
+                .is_err()
+        );
+        assert!(network.set_session_basic("a", origin, "u:x", "p").is_err());
+        assert!(network.set_session_basic("a", origin, "", "p").is_err());
+        assert!(network.set_session_basic("a", origin, "u", "p\n").is_err());
+        // A caller-supplied bearer cannot smuggle in another authorization scheme.
+        assert!(
+            network
+                .set_session("a", origin, Some("Basic dTpw".into()), Vec::new())
+                .is_err()
+        );
+        network
+            .set_session_basic("a", origin, "user", "pa ss:word")
+            .unwrap();
+        assert!(network.credential_available("a", origin, CredentialKind::Bearer));
+        assert!(!network.credential_available("b", origin, CredentialKind::Bearer));
+        let exported = network.export_sessions("a").unwrap();
+        let restored = Network::default();
+        restored.restore_sessions("a", &exported).unwrap();
+        assert!(restored.credential_available("a", origin, CredentialKind::Bearer));
+    }
+
     #[test]
     fn secret_header_validation_never_echoes_rejected_values() {
         let header = secret_header_value("SYNTHETIC-DO-NOT-ECHO").unwrap();
@@ -1911,6 +2080,7 @@ mod tests {
                 &grant,
                 &Url::parse(target).unwrap(),
                 addr.parse().unwrap(),
+                false,
             )
         };
         let owner = Principal::owner();
@@ -1933,6 +2103,108 @@ mod tests {
             kind: PrincipalKind::Plugin,
         };
         assert!(!permitted(&plugin, "https://campus.example/", "10.1.2.3"));
+    }
+
+    #[tokio::test]
+    async fn owner_private_origin_read_is_bound_and_cannot_elevate_clients() {
+        use crate::api::PrincipalKind;
+        let network = Network::default();
+        let owner = Principal::owner();
+        let service = Principal {
+            id: "service:webdav".into(),
+            kind: PrincipalKind::Client,
+        };
+        let other = Principal {
+            id: "service:other".into(),
+            kind: PrincipalKind::Client,
+        };
+        let mcp = Principal {
+            id: service.id.clone(),
+            kind: PrincipalKind::Mcp,
+        };
+        let origin = "https://nas.example";
+        let target = Url::parse(&format!("{origin}/files/a")).unwrap();
+        let grant = Grant {
+            private_network_origins: [origin.to_owned()].into(),
+            ..Default::default()
+        };
+        let allowed = |who: &Principal, account: &str, method: &Method, url: &Url, ip: &str| {
+            permitted_lan_address(
+                who,
+                &grant,
+                url,
+                ip.parse().unwrap(),
+                delegated_private_read(who, Some(account), method, url),
+            )
+        };
+        assert!(!allowed(&service, "a", &Method::GET, &target, "10.1.2.3"));
+        network
+            .with_owner_private_origin_read(&owner, &grant, &service, "a", origin, async {
+                for method in [Method::GET, Method::HEAD] {
+                    assert!(allowed(&service, "a", &method, &target, "10.1.2.3"));
+                    assert!(allowed(&service, "a", &method, &target, "fd00::2"));
+                }
+                for ip in ["127.0.0.1", "169.254.169.254", "::1", "fe80::2"] {
+                    assert!(!allowed(&service, "a", &Method::GET, &target, ip));
+                }
+                for method in [Method::POST, Method::PUT, Method::DELETE] {
+                    assert!(!allowed(&service, "a", &method, &target, "10.1.2.3"));
+                }
+                assert!(!allowed(&other, "a", &Method::GET, &target, "10.1.2.3"));
+                assert!(!allowed(&mcp, "a", &Method::GET, &target, "10.1.2.3"));
+                assert!(!allowed(&service, "b", &Method::GET, &target, "10.1.2.3"));
+                for url in [
+                    "https://redirect.example/a",
+                    "https://nas.example:444/a",
+                    "http://nas.example/a",
+                ] {
+                    assert!(!allowed(
+                        &service,
+                        "a",
+                        &Method::GET,
+                        &Url::parse(url).unwrap(),
+                        "10.1.2.3"
+                    ));
+                }
+                // An unrelated spawned request cannot inherit the task-local scope.
+                let p = service.clone();
+                let u = target.clone();
+                assert!(
+                    !tokio::spawn(async move {
+                        delegated_private_read(&p, Some("a"), &Method::GET, &u)
+                    })
+                    .await
+                    .unwrap()
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(!allowed(&service, "a", &Method::GET, &target, "10.1.2.3"));
+        // Merely placing an origin in a Client/MCP grant cannot mint owner authority.
+        for caller in [&service, &mcp] {
+            network
+                .with_owner_private_origin_read(caller, &grant, &service, "a", origin, async {
+                    assert!(!allowed(&service, "a", &Method::GET, &target, "10.1.2.3"));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        network
+            .with_owner_private_origin_read(
+                &owner,
+                &Grant::default(),
+                &service,
+                "a",
+                origin,
+                async {
+                    assert!(!allowed(&service, "a", &Method::GET, &target, "10.1.2.3"));
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
     }
     #[test]
     fn declared_legacy_text_encoding_is_decoded_without_guessing_binary_payloads() {

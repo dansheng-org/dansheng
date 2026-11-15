@@ -1,28 +1,105 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../../bridge.g.dart';
 import '../core/dansheng_client.dart';
+import '../core/dansheng_state.dart';
+
+/// One account lifetime. Once invalidated it stays invalid, even after A→B→A.
+class CampusAccountScope extends ChangeNotifier {
+  CampusAccountScope(this.controller)
+    : accountId = controller.activeAccountId,
+      generation = controller.accountGeneration {
+    _invalid = controller.isChangingAccount;
+    controller.addListener(_changed);
+  }
+
+  final DanshengController controller;
+  final String? accountId;
+  final int generation;
+  bool _invalid = false;
+
+  bool get isCurrent =>
+      !_invalid &&
+      !controller.isChangingAccount &&
+      accountId == controller.activeAccountId &&
+      generation == controller.accountGeneration;
+
+  void _changed() {
+    if (!isCurrent) invalidate();
+  }
+
+  void invalidate() {
+    if (_invalid) return;
+    _invalid = true;
+    notifyListeners();
+  }
+
+  void check() {
+    if (!isCurrent) throw PlatformException(code: 'AccountChanged');
+    if (accountId == null || accountId!.isEmpty) {
+      throw PlatformException(code: 'AccountRequired');
+    }
+  }
+
+  @override
+  void dispose() {
+    controller.removeListener(_changed);
+    invalidate();
+    super.dispose();
+  }
+}
+
+bool isAccountChange(Object error) =>
+    error is PlatformException &&
+    const {
+      'AccountChanged',
+      'AccountMismatch',
+      'AccountRequired',
+    }.contains(error.code);
 
 /// The native host binds the account and accepts only named campus operations.
 class CampusApi {
-  const CampusApi(this.client);
+  const CampusApi(this.client, {this.accountScope});
+  factory CampusApi.forAccount(DanshengController controller) => CampusApi(
+    controller.client,
+    accountScope: CampusAccountScope(controller),
+  );
   final DanshengClient client;
+  final CampusAccountScope? accountScope;
+  bool get isCurrent => accountScope?.isCurrent ?? true;
   Future<dynamic> call(
     String method, [
     Map<String, dynamic> params = const {},
-  ]) async => jsonDecode(
-    await client.bridge.invoke(
-      HostCommand.campus,
-      jsonEncode({'method': method, 'params': params}),
-    ),
-  );
+  ]) async {
+    accountScope?.check();
+    String result;
+    try {
+      result = await client.bridge.invoke(
+        HostCommand.campus,
+        jsonEncode({
+          'method': method,
+          'params': {
+            ...params,
+            if (accountScope != null) 'account_id': accountScope!.accountId,
+          },
+        }),
+      );
+    } catch (_) {
+      accountScope?.check();
+      rethrow;
+    }
+    accountScope?.check();
+    return jsonDecode(result);
+  }
 }
 
 String campusError(Object error) {
   final code = error is PlatformException ? error.code : error.toString();
   bool any(List<String> keys) => keys.any(code.contains);
+  if (any(['LocalUploadTooLarge'])) return '本地文件超过 5 MiB，暂不支持上传';
   if (any(['ForumConsentRequired'])) return '请前往论坛页面登录，阅读风险提示并明确确认承担风险。';
   if (any(['CourseAccessDenied'])) return '这门课程未开放此项内容';
   if (any(['InteractiveLoginRequired'])) return '学校要求在登录页完成验证';
