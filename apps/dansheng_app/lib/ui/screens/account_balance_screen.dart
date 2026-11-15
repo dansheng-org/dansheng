@@ -189,7 +189,6 @@ class _AccountBalanceScreenState extends State<AccountBalanceScreen> {
                         children: [
                           for (final (service, title) in const [
                             ('ecard', '统一认证'),
-                            ('forum', '树洞账号'),
                             ('canvas', 'Canvas'),
                           ])
                             TextButton(

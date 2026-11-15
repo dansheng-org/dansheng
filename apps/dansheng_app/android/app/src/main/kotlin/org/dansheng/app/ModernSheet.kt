@@ -12,6 +12,10 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputFilter
 import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.method.LinkMovementMethod
+import android.text.style.URLSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -23,6 +27,7 @@ import androidx.core.widget.NestedScrollView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import kotlinx.coroutines.CancellableContinuation
@@ -55,7 +60,9 @@ class ModernSheet(private val activity: Activity) {
     suspend fun confirm(
         title: String,
         message: String,
-        positive: String = "确认"
+        positive: String = "确认",
+        acknowledgement: String? = null,
+        link: Pair<String, String>? = null,
     ): Unit = showCancellableDialog { cont, dialog, palette ->
         val (root, _) = createSheetScaffold(palette)
 
@@ -79,7 +86,29 @@ class ModernSheet(private val activity: Activity) {
             textSize = 14f
             setLineSpacing(dp(2f), 1.25f)
         }
-        scrollView.addView(messageView)
+        val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(messageView)
+        link?.let { (label, url) ->
+            content.addView(TextView(activity).apply {
+                text = SpannableString(label).apply {
+                    setSpan(URLSpan(url), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                movementMethod = LinkMovementMethod.getInstance()
+                setLinkTextColor(palette.primaryTeal)
+                textSize = 14f
+                setPadding(0, dp(12f).toInt(), 0, dp(12f).toInt())
+            })
+        }
+        val acknowledgementBox = acknowledgement?.let { label ->
+            MaterialCheckBox(themed).apply {
+                text = label
+                isChecked = false
+                setTextColor(palette.textPrimary)
+                textSize = 14f
+                content.addView(this)
+            }
+        }
+        scrollView.addView(content)
         root.addView(scrollView)
 
         // Button bar
@@ -99,12 +128,20 @@ class ModernSheet(private val activity: Activity) {
         }
 
         val confirmButton = createPrimaryButton(positive, palette).apply {
+            isEnabled = acknowledgementBox == null
+            alpha = if (isEnabled) 1f else 0.45f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginStart = dp(8f).toInt()
             }
             setOnClickListener {
-                cont.resume(Unit)
+                if (cont.isActive && (acknowledgementBox == null || acknowledgementBox.isChecked)) {
+                    cont.resume(Unit)
+                }
             }
+        }
+        acknowledgementBox?.setOnCheckedChangeListener { _, checked ->
+            confirmButton.isEnabled = checked
+            confirmButton.alpha = if (checked) 1f else 0.45f
         }
 
         buttonBar.addView(cancelButton)

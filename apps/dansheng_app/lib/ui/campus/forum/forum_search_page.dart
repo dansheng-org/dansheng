@@ -5,6 +5,7 @@ import '../campus_api.dart';
 import '../../core/dansheng_state.dart';
 import 'forum_format.dart';
 import 'forum_models.dart';
+import 'forum_pagination.dart';
 import 'forum_service.dart';
 import 'hole_detail_page.dart';
 
@@ -29,7 +30,7 @@ class _ForumSearchPageState extends State<ForumSearchPage> {
   bool _hasMore = false;
   String? _errorMessage;
 
-  static const int _pageSize = 20;
+  static const int _pageSize = forumPageSize;
 
   @override
   void initState() {
@@ -55,7 +56,11 @@ class _ForumSearchPageState extends State<ForumSearchPage> {
     });
 
     try {
-      final items = await _service.search(query: query, offset: 0);
+      final items = await _service.search(
+        query: query,
+        offset: 0,
+        size: _pageSize,
+      );
       if (mounted) {
         setState(() {
           _results = items;
@@ -82,6 +87,7 @@ class _ForumSearchPageState extends State<ForumSearchPage> {
       final items = await _service.search(
         query: query,
         offset: _results.length,
+        size: _pageSize,
       );
       if (mounted) {
         setState(() {

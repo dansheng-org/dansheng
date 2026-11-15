@@ -5,6 +5,7 @@ import '../campus_api.dart';
 import '../../core/dansheng_state.dart';
 import 'forum_editor_dialog.dart';
 import 'forum_models.dart';
+import 'forum_pagination.dart';
 import 'forum_search_page.dart';
 import 'forum_service.dart';
 import 'hole_card.dart';
@@ -30,11 +31,12 @@ class _ForumPageState extends State<ForumPage> {
   List<TeaHole> _holes = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
+  bool _isLoggingIn = false;
   bool _hasMore = true;
   String? _errorMessage;
   bool _authRequired = false;
 
-  static const int _pageSize = 20;
+  static const int _pageSize = forumPageSize;
 
   @override
   void initState() {
@@ -58,7 +60,8 @@ class _ForumPageState extends State<ForumPage> {
         divisions = await _service.fetchDivisions();
       } catch (e) {
         // Divisions might fail or require login
-        if (e.toString().contains('AuthenticationRequired') ||
+        if (e.toString().contains('ForumConsentRequired') ||
+            e.toString().contains('AuthenticationRequired') ||
             e.toString().contains('AccountRequired')) {
           _authRequired = true;
           rethrow;
@@ -182,6 +185,8 @@ class _ForumPageState extends State<ForumPage> {
 
   /// Trigger forum login flow via campus.login.
   Future<void> _handleLogin() async {
+    if (_isLoggingIn) return;
+    setState(() => _isLoggingIn = true);
     try {
       await _service.login();
       if (mounted) {
@@ -190,10 +195,12 @@ class _ForumPageState extends State<ForumPage> {
         await _loadInitialData();
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !e.toString().contains('Cancelled')) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('登录失败: ${campusError(e)}')));
       }
+    } finally {
+      if (mounted) setState(() => _isLoggingIn = false);
     }
   }
 
@@ -258,7 +265,7 @@ class _ForumPageState extends State<ForumPage> {
         leading: IconButton(
           tooltip: '登录树洞账号',
           icon: const Icon(Icons.account_circle_outlined),
-          onPressed: _handleLogin,
+          onPressed: _isLoggingIn ? null : _handleLogin,
         ),
         actions: [
           // Sort order toggle
@@ -390,15 +397,15 @@ class _ForumPageState extends State<ForumPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                '登录后即可浏览树洞、参与讨论与匿名互动。',
+                _errorMessage ?? '登录后即可浏览树洞、参与讨论与匿名互动。',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: colorScheme.onSurfaceVariant),
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: _handleLogin,
+                onPressed: _isLoggingIn ? null : _handleLogin,
                 icon: const Icon(Icons.login_rounded),
-                label: const Text('登录论坛'),
+                label: Text(_isLoggingIn ? '正在登录…' : '登录论坛'),
               ),
             ],
           ),

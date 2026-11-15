@@ -23,6 +23,10 @@ pub const TEA_ORIGIN: &str = "https://forum.fduhole.com";
 pub const TEA_ORIGIN_LEGACY: &str = "https://www.fduhole.com";
 pub const DANKE_ORIGIN: &str = "https://danke.fduhole.com";
 
+/// DanXi POST_COUNT_PER_PAGE and the upstream /api/holes size/length limit.
+/// Search and floor endpoints have separate limits.
+pub const TEA_HOLES_PAGE_SIZE: u16 = 10;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TeaTag {
     pub tag_id: u64,
@@ -370,6 +374,9 @@ impl<T: ConnectorTransport> CommunityClient<T> {
         tag: Option<&str>,
     ) -> Result<SourceBatch<TeaHole>, CampusError> {
         PageWindow { offset: 0, size }.validate()?;
+        // Older hosts requested 20. Bound the wire request before the server rejects
+        // it with HTTP 400, and check the response against this effective limit.
+        let size = size.min(TEA_HOLES_PAGE_SIZE);
         if let Some(id) = division {
             positive_id(id)?;
         }

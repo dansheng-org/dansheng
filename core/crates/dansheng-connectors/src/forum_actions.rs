@@ -900,8 +900,8 @@ async fn tea_holes(
         .or_else(|| params.get("size"))
         .or_else(|| params.get("page_size"))
         .and_then(Value::as_u64)
-        .unwrap_or(20)
-        .clamp(1, 50);
+        .unwrap_or(u64::from(crate::community::TEA_HOLES_PAGE_SIZE))
+        .clamp(1, u64::from(crate::community::TEA_HOLES_PAGE_SIZE));
 
     // Preferred algorithm: DanXi defaults to LAST_REPLIED ("time_updated")
     let order_raw = params
@@ -933,6 +933,7 @@ async fn tea_holes(
         .map_err(|_| CoreError::invalid("invalid holes URL"))?;
     url.query_pairs_mut()
         .append_pair("start_time", &start_time.to_rfc3339())
+        .append_pair("size", &length.to_string())
         .append_pair("length", &length.to_string())
         .append_pair("order", order);
 
@@ -2256,7 +2257,8 @@ mod tests {
                 )
             } else if path.starts_with("/api/holes") {
                 assert!(path.contains("division_id=1"));
-                assert!(path.contains("length=20"));
+                assert!(path.contains("length=10"));
+                assert!(path.contains("size=10"));
                 assert!(path.contains("order=time_updated"));
                 (
                     200,

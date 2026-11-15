@@ -27,6 +27,15 @@ internal class CampusLogins(private val rt: RuntimeHost) {
             check(edit.commit())
         },
     )
+    private val forumConsent = ForumRiskConsent(
+        readVersion = { account -> rt.prefs.getInt(ForumRiskConsent.key(account), 0) },
+        writeVersion = { account, version ->
+            val editor = rt.prefs.edit()
+            if (version == null) editor.remove(ForumRiskConsent.key(account))
+            else editor.putInt(ForumRiskConsent.key(account), version)
+            if (!editor.commit()) throw PortError("StorageUnavailable")
+        },
+    )
     private fun suspendKey(account:String)="venue-password-suspended/$account"
     // The school locks an account after a few wrong passwords. Once a hidden login fails after the
     // saved password went out, nothing submits it automatically until a person or the school vouches
@@ -45,12 +54,17 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     private fun checkAccount(account:String, epoch:Long) {
         if(rt.account()!=account || epoch!=rt.accountEpoch) throw PortError("AccountChanged")
     }
+    internal fun requireForumConsent(account:String) = synchronized(rt.authGuard) {
+        if(rt.account()!=account)throw PortError("AccountChanged")
+        forumConsent.requireAccepted(account)
+    }
     // The caller holds the same lock as authenticate(). Explicit logout forgets the
     // saved secrets; switching accounts keeps each profile's credentials separate.
     fun accountChanged(previous:String?,forget:Boolean) {
         recovered.clear(); recentFailures.clear(); rt.visiblePage.clearSilentFailures()
         if(forget && previous!=null) {
             savedLogins.forgetAccount(previous)
+            forumConsent.forget(previous)
             clearVenueSuspension(previous)
         }
     }
@@ -78,9 +92,17 @@ internal class CampusLogins(private val rt: RuntimeHost) {
         }
     }
     suspend fun connect(service:String,account:String,replace:Boolean=false,
+        confirmForumRisk:(suspend ()->Unit)?=null,
         epoch:Long=rt.accountEpoch,
         prompt:(suspend (String)->Pair<String,String>)?=null):Any? = serial.withLock {
         if(service !in services && !isWebdav(service))throw PortError("MethodUnavailable")
+        checkAccount(account,epoch)
+        if(service=="forum")forumConsent.authorize(account,confirmForumRisk) { action ->
+            synchronized(rt.authGuard) {
+                checkAccount(account,epoch)
+                action()
+            }
+        }
         val id=account to service
         val group=kind(service)
         val saved=synchronized(rt.authGuard) {
@@ -94,6 +116,7 @@ internal class CampusLogins(private val rt: RuntimeHost) {
         }
         fun attempt(email:String, secret:String, save:Boolean):Any? = synchronized(rt.authGuard) {
             checkAccount(account,epoch)
+            if(service=="forum")forumConsent.requireAccepted(account)
             val result=authenticate(service,account,email,secret)
             checkAccount(account,epoch)
             if(save)savedLogins.set(account,group,JSONObject().put("email",email).put("secret",secret).toString())

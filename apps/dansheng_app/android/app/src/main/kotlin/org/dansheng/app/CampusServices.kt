@@ -64,6 +64,9 @@ internal class CampusServices(
         }
         if(supplied.has("account_id") && supplied.optString("account_id")!=account)throw PortError("AccountMismatch")
         val p=JSONObject(supplied.toString()).put("account_id",account)
+        // A restored native session or saved password must not bypass the login notice.
+        if(method.startsWith("community.tea.") || method.startsWith("forum."))
+            rt.campusLogins.requireForumConsent(account)
         if(method.startsWith("powerAlert.")){
             return when(method.removePrefix("powerAlert.")){
                 "get"->rt.powerAlerts.status()
@@ -115,6 +118,7 @@ internal class CampusServices(
         if(method.startsWith("venues."))return venues.call(method.removePrefix("venues."),p).also{checked(account,epoch)}
         if(method=="campus.cached") {
             val source=p.getString("method"); require(source in reads);p.remove("method")
+            if(source.startsWith("community.tea."))rt.campusLogins.requireForumConsent(account)
             return rt.request("storage.get",JSONObject().put("key",cacheKey(source,p))).also{checked(account,epoch)}
         }
         if(method in reads){

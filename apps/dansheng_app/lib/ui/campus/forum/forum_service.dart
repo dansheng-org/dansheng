@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import '../campus_api.dart';
 import 'forum_models.dart';
+import 'forum_pagination.dart';
 
 /// Service adapter for Forum operations on CampusApi.
 class ForumService {
@@ -20,12 +21,13 @@ class ForumService {
   Future<List<TeaHole>> fetchHoles({
     int? divisionId,
     DateTime? before,
-    int pageSize = 20,
+    int pageSize = forumPageSize,
     ForumSortOrder order = ForumSortOrder.lastReplied,
   }) async {
+    final size = pageSize.clamp(1, forumHolesMaxPageSize);
     final params = <String, dynamic>{
-      'page_size': pageSize,
-      'size': pageSize,
+      'page_size': size,
+      'size': size,
       'order': order.value,
     };
     if (divisionId != null && divisionId > 0) {
@@ -55,7 +57,7 @@ class ForumService {
   Future<List<TeaFloor>> fetchFloors({
     required int holeId,
     int offset = 0,
-    int size = 20,
+    int size = forumPageSize,
   }) async {
     final response = await api.call('community.tea.floors', {
       'hole_id': holeId,
@@ -72,7 +74,7 @@ class ForumService {
   Future<List<ForumSearchResult>> search({
     required String query,
     int offset = 0,
-    int size = 20,
+    int size = forumPageSize,
   }) async {
     final response = await api.call('forum.search', {
       'query': query,
@@ -179,7 +181,7 @@ class ForumService {
 
   /// Trigger forum login flow via parent CampusApi.
   Future<void> login() async {
-    await api.call('campus.login', {'service': 'forum'});
+    await api.call('campus.login', {'service': 'forum', 'replace': true});
   }
 
   static int? _extractHoleId(dynamic response) {

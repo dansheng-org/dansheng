@@ -6,6 +6,7 @@ import '../../core/dansheng_state.dart';
 import 'forum_editor_dialog.dart';
 import 'forum_format.dart';
 import 'forum_models.dart';
+import 'forum_pagination.dart';
 import 'forum_service.dart';
 
 /// Post detail page showing the full hole, its floors, pagination, and reply capabilities.
@@ -35,7 +36,7 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
   bool _hasMore = true;
   String? _errorMessage;
 
-  static const int _pageSize = 20;
+  static const int _pageSize = forumPageSize;
 
   @override
   void initState() {
