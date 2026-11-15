@@ -32,7 +32,7 @@ runner 父进程必须注入绝对路径 `DANSHENG_CI_ROOT`。公开 workflow �
 | PATH | Git、PowerShell 7；按 job 提供 Python 3、Node 22/npm、Rust、Flutter、Java、Gradle、gh。Linux 另需 bash、chmod、sha256sum |
 | RUSTUP_HOME / RUSTUP_TOOLCHAIN | 独立预装工具根；rustc 1.99.1。Windows 选择 `stable-x86_64-pc-windows-gnu`，Linux 选择预装的 1.99.1 GNU Linux toolchain。不能借用开发工作树的 Cargo 配置或凭据 |
 | JAVA_HOME / GRADLE_HOME | Linux Android：Java 21、Gradle 9.7.1 安装根；不是缓存目录 |
-| ANDROID_HOME / ANDROID_SDK_ROOT | 同一预装 SDK；NDK 30.0.16138531、platform android-37.0、build-tools 37.0.0、cmdline-tools/latest、CMake 3.22.1；Rust 预装两个 Android targets |
+| ANDROID_HOME / ANDROID_SDK_ROOT | 同一预装 SDK；NDK 30.0.16138531、platform android-37.0、build-tools 36.0.0（AGP 编译）及 37.0.0（审计）、cmdline-tools/latest、CMake 3.22.1；Rust 预装两个 Android targets |
 | RUNNER_TOOL_CACHE | CI 专用工具缓存；由 runner 父进程部署配置提供，不尝试通过 GITHUB_ENV 覆写 GitHub 默认变量 |
 | 其他工具环境 | 需要时提供 LIBCLANG_PATH、GNU compiler PATH / linker 变量、Flutter mirror 变量；初始化保留并导出到后续步骤 |
 

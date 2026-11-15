@@ -121,7 +121,7 @@ if ($Role -in @('AndroidSource','Release')) {
     Check-Tool java @('-XshowSettings:properties','-version') $homePattern
     if (-not $env:GRADLE_HOME) { throw 'Runner environment must supply preinstalled GRADLE_HOME.' }
     Check-Tool gradle @('--version') '(?m)^Gradle 9\.7\.1\s*$'
-    foreach ($path in @('platforms/android-37.0/android.jar','build-tools/37.0.0/source.properties','cmdline-tools/latest/bin/sdkmanager','cmake/3.22.1/source.properties')) {
+    foreach ($path in @('platforms/android-37.0/android.jar','build-tools/36.0.0/source.properties','build-tools/37.0.0/source.properties','cmdline-tools/latest/bin/sdkmanager','cmake/3.22.1/source.properties')) {
         if (-not (Test-Path -LiteralPath (Join-Path $env:ANDROID_SDK_ROOT $path) -PathType Leaf)) { throw "Preinstalled Android tool missing: $path" }
     }
 }
