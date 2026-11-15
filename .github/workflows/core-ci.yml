@@ -23,6 +23,10 @@ jobs:
           - os: windows-latest
             labels: [self-hosted, windows, x64, dansheng-win]
     runs-on: ${{ matrix.labels }}
+    env:
+      # Keep native test binaries small; test assertions remain enabled.
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
     defaults:
       run:
         shell: pwsh
