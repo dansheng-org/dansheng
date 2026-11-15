@@ -89,6 +89,15 @@ internal class CampusServices(
         }
         if(method.startsWith("agenda."))return CampusAgenda.call(rt,account,method.removePrefix("agenda."),p).also{checked(account,epoch)}
         if(method=="campus.login")return login(p.getString("service"),account,p.optBoolean("replace"))
+        // WebVPN switch from settings: only the mode is chosen here; the routed
+        // campus origins stay the adapter's fixed defaults.
+        if(method=="fudan.webvpn.status")return rt.request(method,JSONObject().put("account_id",account)).also{checked(account,epoch)}
+        if(method=="fudan.webvpn.configure"){
+            val mode=p.optString("mode","auto")
+            if(mode !in setOf("auto","gateway","direct"))throw PortError("InvalidInput")
+            checked(account,epoch)
+            return rt.request(method,JSONObject().put("account_id",account).put("mode",mode)).also{checked(account,epoch)}
+        }
         // Private inbox data bypasses the generic persistent UI cache. Only reads
         // may restore login and retry; sends run exactly once after the UI action.
         if(method in setOf("canvas.conversations.sync","canvas.conversation.read","canvas.recipients.search","canvas.course_users.sync")){

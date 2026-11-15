@@ -783,9 +783,9 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
     }
 
     return Tooltip(
-      message: '第$period节: $statusText',
+      message: '第$period节：$statusText',
       child: Semantics(
-        label: '第$period节: $statusText',
+        label: '第$period节：$statusText',
         container: true,
         child: Container(
           width: 19,

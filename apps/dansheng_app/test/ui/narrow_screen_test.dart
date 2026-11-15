@@ -105,8 +105,8 @@ void main() {
       // 3. Open Settings from eHall toolbar
       await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
-      expect(find.text('系统设置与权限'), findsOneWidget);
-      expect(find.text('精确闹钟权限 (Exact Alarm)'), findsOneWidget);
+      expect(find.text('设置'), findsOneWidget);
+      expect(find.text('准时提醒'), findsOneWidget);
       navigator.pop();
       await tester.pumpAndSettle();
 

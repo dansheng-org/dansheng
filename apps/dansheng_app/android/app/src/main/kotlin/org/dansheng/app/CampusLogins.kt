@@ -91,10 +91,30 @@ internal class CampusLogins(private val rt: RuntimeHost) {
                 else throw PortError("MethodUnavailable")
         }
     }
+    /** With WebVPN switched on, a drive or Canvas-token sign-in runs inside the WebVPN session;
+     *  when that session is missing, WebVPN is signed into once with the saved UIS password and
+     *  the sign-in retried. Without a saved UIS password the error stays WebVpnLoginRequired, so
+     *  an interactive caller can ask for it under its own label. UIS services handle this in Core. */
     suspend fun connect(service:String,account:String,replace:Boolean=false,
         confirmForumRisk:(suspend ()->Unit)?=null,
         epoch:Long=rt.accountEpoch,
-        prompt:(suspend (String)->Pair<String,String>)?=null):Any? = serial.withLock {
+        prompt:(suspend (String)->Pair<String,String>)?=null):Any? {
+        try { return connectOnce(service,account,replace,confirmForumRisk,epoch,prompt) }
+        catch(e:PortError) {
+            if(e.code!="WebVpnLoginRequired" || service=="webvpn")throw e
+        }
+        try { connectOnce("webvpn",account,false,null,epoch,null) }
+        catch(e:PortError) {
+            if(e.code=="AuthenticationRequired")throw PortError("WebVpnLoginRequired")
+            throw e
+        }
+        synchronized(rt.authGuard){ checkAccount(account,epoch); recentFailures.remove(account to service) }
+        return connectOnce(service,account,replace,confirmForumRisk,epoch,prompt)
+    }
+    private suspend fun connectOnce(service:String,account:String,replace:Boolean,
+        confirmForumRisk:(suspend ()->Unit)?,
+        epoch:Long,
+        prompt:(suspend (String)->Pair<String,String>)?):Any? = serial.withLock {
         if(service !in services && !isWebdav(service))throw PortError("MethodUnavailable")
         checkAccount(account,epoch)
         if(service=="forum")forumConsent.authorize(account,confirmForumRisk) { action ->

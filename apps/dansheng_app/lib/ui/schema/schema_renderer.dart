@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../campus/campus_api.dart' show campusError;
 import '../core/dansheng_client.dart';
 import 'schema_models.dart';
 
@@ -146,7 +147,7 @@ class _SchemaRendererState extends State<SchemaRenderer> {
       if (mounted && _optionVersions[field.id] == generation) {
         setState(() {
           _fieldLoading[field.id] = false;
-          _fieldErrors[field.id] = '加载选项失败: $e';
+          _fieldErrors[field.id] = '加载选项失败：${campusError(e)}';
         });
       }
     }
@@ -281,7 +282,7 @@ class _SchemaRendererState extends State<SchemaRenderer> {
           msg = '[${e.code}] ${e.message ?? e.toString()}';
         }
         setState(() {
-          _globalError = '执行失败: $msg';
+          _globalError = '执行失败：$msg';
           _isActionRunning = false;
         });
       }
@@ -305,7 +306,7 @@ class _SchemaRendererState extends State<SchemaRenderer> {
       barrierDismissible: false,
       builder: (ctx) {
         return AlertDialog(
-          title: Text('操作确认: ${button.label}'),
+          title: Text('操作确认：${button.label}'),
           content: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -496,7 +497,7 @@ class _SchemaRendererState extends State<SchemaRenderer> {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          '类型: ${widget.declaration.type}',
+                          '类型：${widget.declaration.type}',
                           style: TextStyle(
                             fontSize: 12,
                             color: Theme.of(context)
@@ -507,7 +508,7 @@ class _SchemaRendererState extends State<SchemaRenderer> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '时区: ${widget.declaration.timeZone}',
+                        '时区：${widget.declaration.timeZone}',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
@@ -969,9 +970,9 @@ class _SchemaRendererState extends State<SchemaRenderer> {
                 item['wake_scheduled'] == true;
 
             final subtitleParts = <String>[];
-            if (action.isNotEmpty) subtitleParts.add('动作: $action');
-            if (runAt.toString().isNotEmpty) subtitleParts.add('计划: $runAt');
-            if (wakeUp != null) subtitleParts.add('唤醒: $wakeUp');
+            if (action.isNotEmpty) subtitleParts.add('动作：$action');
+            if (runAt.toString().isNotEmpty) subtitleParts.add('计划：$runAt');
+            if (wakeUp != null) subtitleParts.add('唤醒：$wakeUp');
 
             String badgeText = state;
             if (state == 'scheduled' || state == 'waiting_wake') {

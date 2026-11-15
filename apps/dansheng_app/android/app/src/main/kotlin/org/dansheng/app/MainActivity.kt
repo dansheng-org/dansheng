@@ -184,6 +184,16 @@ class MainActivity : FlutterActivity(), DanshengApi {
         serviceLogin("ecard",account,false)
     }
     private suspend fun serviceLogin(service:String,account:String,replace:Boolean):Any? {
+        try { return serviceLoginOnce(service,account,replace) }
+        catch(e:PortError) {
+            // WebVPN is on and needs the UIS password, which was not saved: ask for it under
+            // its own label, then sign in to the service again.
+            if(e.code!="WebVpnLoginRequired" || service=="webvpn")throw e
+        }
+        serviceLoginOnce("webvpn",account,false)
+        return serviceLoginOnce(service,account,replace)
+    }
+    private suspend fun serviceLoginOnce(service:String,account:String,replace:Boolean):Any? {
         val confirmForumRisk: (suspend () -> Unit)? = if(service=="forum") ({
             sheet.confirm(ForumRiskConsent.TITLE,ForumRiskConsent.MESSAGE,"同意并继续",
                 acknowledgement=ForumRiskConsent.ACKNOWLEDGEMENT,
@@ -193,7 +203,7 @@ class MainActivity : FlutterActivity(), DanshengApi {
             val forum=service=="forum"
             val emails=if(forum)CampusLogins.forumEmails(account) else emptyList()
             val webdav=service.startsWith("webdav:")
-            val title=when { forum->"登录树洞"; webdav->"连接 WebDAV"; service=="canvas"->"连接 Canvas"; service=="cloud"->"登录复旦云盘"; else->"统一身份认证" }
+            val title=when { forum->"登录树洞"; webdav->"连接 WebDAV"; service=="canvas"->"连接 Canvas"; service=="cloud"->"登录复旦云盘"; service=="webvpn"->"登录 WebVPN（统一身份认证）"; else->"统一身份认证" }
             val secret=when { forum->"树洞密码"; webdav->"密码或应用专用密码"; service=="canvas"->"Canvas 访问令牌"; service=="cloud"->"云盘密码（非统一身份认证密码）"; else->"统一身份认证密码" }
             sheet.credentials(title,"登录后加密保存在本机",if(forum)"注册邮箱" else if(webdav)"用户名" else null,secret,
                 previous.ifBlank { emails.firstOrNull().orEmpty() }, emails)

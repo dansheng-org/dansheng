@@ -57,12 +57,13 @@ class _AccountBalanceScreenState extends State<AccountBalanceScreen> {
         await widget.controller.switchAccount(newId);
         if (mounted) {
           ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('已切换到账号: $newId')));
+              .showSnackBar(SnackBar(content: Text('已切换到账号：$newId')));
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('切换账号失败: $e')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('切换账号失败：${campusError(e)}')));
         }
       }
     }

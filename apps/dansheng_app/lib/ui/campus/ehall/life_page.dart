@@ -524,11 +524,11 @@ class _LifeState extends State<_CampusDetail> {
         final creditStr = r['credits'] ?? r['XF'] ?? '—';
         final gpStr = r['grade_point'] ?? r['JDZ'];
         sub =
-            '成绩: $gradeStr · $creditStr 学分${gpStr != null ? ' · 绩点: $gpStr' : ''}';
+            '成绩：$gradeStr · $creditStr 学分${gpStr != null ? ' · 绩点：$gpStr' : ''}';
         break;
 
       case LifeService.gpa:
-        title = '绩点: ${r['gpa'] ?? '—'}';
+        title = '绩点：${r['gpa'] ?? '—'}';
         final gpaParts = [
           r['name'],
           r['major'] ?? r['department'],

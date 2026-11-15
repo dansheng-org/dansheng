@@ -6,7 +6,7 @@ import '../core/dansheng_state.dart';
 
 /// Flagship modern Material 3 extension import modal sheet.
 ///
-/// Presents a warm paper & teal aesthetic with an extension icon, concise
+/// Uses the app theme colours, with an extension icon, concise
 /// Chinese guidance, a selected .dspack file affordance, and a prominent CTA.
 /// Launches [controller.importPackage()] using native SAF and handles
 /// cancellation gracefully without duplicate prompts.
@@ -14,17 +14,12 @@ Future<void> showPluginImporter(
   BuildContext context,
   DanshengController controller,
 ) async {
-  final isDark = Theme.of(context).brightness == Brightness.dark;
-  final surfaceColor = isDark
-      ? const Color(0xFF1A1C1E)
-      : const Color(0xFFFAF8F5);
-
   final shouldImport = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
-    backgroundColor: surfaceColor,
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
@@ -66,29 +61,15 @@ class ImportPanelSheet extends StatelessWidget {
     required this.onCancel,
   });
 
-  // Palette: Warm paper and deep/accessible teal
-  static const Color tealLight = Color(0xFF006A72);
-  static const Color tealDark = Color(0xFF4DD0E1);
-  static const Color tealContainerLight = Color(0xFFCCE8E8);
-  static const Color tealContainerDark = Color(0xFF004F55);
-
-  static const Color cardBgLight = Color(0xFFF3EFEA);
-  static const Color cardBgDark = Color(0xFF242729);
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    final primaryTeal = isDark ? tealDark : tealLight;
-    final containerTeal = isDark ? tealContainerDark : tealContainerLight;
-    final cardColor = isDark ? cardBgDark : cardBgLight;
-    final textPrimary = isDark
-        ? const Color(0xFFE1E3E3)
-        : const Color(0xFF191C1D);
-    final textSecondary = isDark
-        ? const Color(0xFFBFC8C7)
-        : const Color(0xFF404848);
+    final scheme = theme.colorScheme;
+    final accent = scheme.primary;
+    final accentContainer = scheme.primaryContainer;
+    final cardColor = scheme.surfaceContainer;
+    final textPrimary = scheme.onSurface;
+    final textSecondary = scheme.onSurfaceVariant;
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -104,14 +85,10 @@ class ImportPanelSheet extends StatelessWidget {
                   width: 52,
                   height: 52,
                   decoration: BoxDecoration(
-                    color: containerTeal,
+                    color: accentContainer,
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Icon(
-                    Icons.extension_rounded,
-                    size: 30,
-                    color: primaryTeal,
-                  ),
+                  child: Icon(Icons.extension_rounded, size: 30, color: accent),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -145,25 +122,20 @@ class ImportPanelSheet extends StatelessWidget {
               decoration: BoxDecoration(
                 color: cardColor,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: isDark
-                      ? const Color(0xFF3F4948)
-                      : const Color(0xFFDDE4E3),
-                  width: 1,
-                ),
+                border: Border.all(color: scheme.outlineVariant, width: 1),
               ),
               child: Row(
                 children: [
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: containerTeal,
+                      color: accentContainer,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
                       Icons.file_present_rounded,
                       size: 24,
-                      color: primaryTeal,
+                      color: accent,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -190,14 +162,10 @@ class ImportPanelSheet extends StatelessWidget {
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: isDark
-                                    ? const Color(0xFF00363A)
-                                    : const Color(0xFFE0F2F1),
+                                color: scheme.primaryContainer,
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(
-                                  color: isDark
-                                      ? const Color(0x664DD0E1)
-                                      : const Color(0x66006A72),
+                                  color: scheme.primary.withValues(alpha: 0.4),
                                   width: 0.8,
                                 ),
                               ),
@@ -206,7 +174,7 @@ class ImportPanelSheet extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
-                                  color: primaryTeal,
+                                  color: accent,
                                 ),
                               ),
                             ),
@@ -236,10 +204,8 @@ class ImportPanelSheet extends StatelessWidget {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
               style: FilledButton.styleFrom(
-                backgroundColor: primaryTeal,
-                foregroundColor: isDark
-                    ? const Color(0xFF002022)
-                    : Colors.white,
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
                 minimumSize: const Size.fromHeight(50),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),

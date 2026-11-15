@@ -385,7 +385,7 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('电量登录失败: ${campusError(e)}')));
+            .showSnackBar(SnackBar(content: Text('电量登录失败：${campusError(e)}')));
       }
     } finally {
       if (mounted) setState(() => _loggingInPower = false);
@@ -483,7 +483,7 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('2FA 验证失败: ${campusError(e)}')));
+        ).showSnackBar(SnackBar(content: Text('2FA 验证失败：${campusError(e)}')));
       }
     } finally {
       if (mounted) setState(() => _verifying2Fa = false);

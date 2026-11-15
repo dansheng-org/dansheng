@@ -178,7 +178,7 @@ class _ForumPageState extends State<ForumPage> {
       if (mounted) {
         setState(() => _isLoadingMore = false);
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('加载更多失败: ${campusError(e)}')));
+            .showSnackBar(SnackBar(content: Text('加载更多失败：${campusError(e)}')));
       }
     }
   }
@@ -197,7 +197,7 @@ class _ForumPageState extends State<ForumPage> {
     } catch (e) {
       if (mounted && !e.toString().contains('Cancelled')) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('登录失败: ${campusError(e)}')));
+            .showSnackBar(SnackBar(content: Text('登录失败：${campusError(e)}')));
       }
     } finally {
       if (mounted) setState(() => _isLoggingIn = false);

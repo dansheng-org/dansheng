@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../campus/campus_api.dart' show campusError;
 import '../core/dansheng_state.dart';
 import '../schema/schema_models.dart';
 import 'schema_screen.dart';
@@ -21,7 +22,7 @@ class _PluginsScreenState extends State<PluginsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('操作未完成：$e')));
+            .showSnackBar(SnackBar(content: Text('操作未完成：${campusError(e)}')));
       }
     }
   }

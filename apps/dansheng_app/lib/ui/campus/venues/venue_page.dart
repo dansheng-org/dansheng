@@ -344,7 +344,7 @@ class _VenuePageState extends State<VenuePage>
     } catch (e) {
       if (mounted && current()) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('登录未完成: ${campusError(e)}')));
+            .showSnackBar(SnackBar(content: Text('登录未完成：${campusError(e)}')));
       }
     } finally {
       if (mounted && current()) {
@@ -422,7 +422,7 @@ class _VenuePageState extends State<VenuePage>
     } catch (e) {
       if (mounted && current()) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('核对异常: ${campusError(e)}')));
+            .showSnackBar(SnackBar(content: Text('核对异常：${campusError(e)}')));
       }
     }
   }
@@ -483,7 +483,7 @@ class _VenuePageState extends State<VenuePage>
               : '取消未成功';
           ScaffoldMessenger.of(context).clearSnackBars();
           ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('取消失败: $msg')));
+              .showSnackBar(SnackBar(content: Text('取消失败：$msg')));
         }
       }
 
@@ -507,8 +507,8 @@ class _VenuePageState extends State<VenuePage>
         SnackBar(
           content: Text(
             isReconcile
-                ? '取消状态待核对: ${campusError(e)}'
-                : '取消失败: ${campusError(e)}',
+                ? '取消状态待核对：${campusError(e)}'
+                : '取消失败：${campusError(e)}',
           ),
           action: isReconcile
               ? SnackBarAction(
@@ -558,17 +558,17 @@ class _VenuePageState extends State<VenuePage>
           _uncertainCancelIds.remove(appointmentId);
         });
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('核对完成: 预约已取消')));
+            .showSnackBar(const SnackBar(content: Text('核对完成：预约已取消')));
       } else if (isStillUncertain) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('核对状态: 取消结果仍未确认，稍后重试')));
+            .showSnackBar(const SnackBar(content: Text('核对状态：取消结果仍未确认，稍后重试')));
       } else {
         setState(() {
           _uncertainCancelIds.remove(appointmentId);
         });
         final msg = res is Map ? (res['message'] ?? '预约仍有效或未取消') : '未取消';
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('核对结果: $msg')));
+            .showSnackBar(SnackBar(content: Text('核对结果：$msg')));
       }
 
       await _loadAppointments();
@@ -576,7 +576,7 @@ class _VenuePageState extends State<VenuePage>
       if (mounted && current()) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('核对异常: ${campusError(e)}')));
+            .showSnackBar(SnackBar(content: Text('核对异常：${campusError(e)}')));
       }
     }
   }
@@ -707,7 +707,7 @@ class _VenuePageState extends State<VenuePage>
               FilledButton.icon(
                 onPressed: _authenticating ? null : _handleVisibleLogin,
                 icon: const Icon(Icons.login),
-                label: Text(_authenticating ? '正在登录...' : '统一身份认证登录'),
+                label: Text(_authenticating ? '正在登录…' : '统一身份认证登录'),
               ),
               const SizedBox(height: 8),
               TextButton(onPressed: _loadVenues, child: const Text('重试')),
@@ -824,7 +824,7 @@ class _VenuePageState extends State<VenuePage>
           children: [
             Expanded(
               child: Text(
-                '预约日期: ${_formatDate(_selectedDate)}',
+                '预约日期：${_formatDate(_selectedDate)}',
                 style: Theme.of(context).textTheme.titleSmall
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
@@ -1035,7 +1035,7 @@ class _VenuePageState extends State<VenuePage>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '已选: ${venue.name} · ${_selection.length} 个时段',
+                      '已选：${venue.name} · ${_selection.length} 个时段',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1050,16 +1050,18 @@ class _VenuePageState extends State<VenuePage>
                   child: FilledButton.icon(
                     onPressed: !_canReserve ? null : _handleManualReserve,
                     icon: _reserving
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 18,
                             height: 18,
+                            // The button's own foreground: white on the light
+                            // theme, dark on the dark theme's pale green.
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.onPrimary,
                             ),
                           )
                         : const Icon(Icons.check_circle_outline),
-                    label: Text(_reserving ? '正在预约...' : '立即预约'),
+                    label: Text(_reserving ? '正在预约…' : '立即预约'),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
@@ -1226,9 +1228,9 @@ class _VenuePageState extends State<VenuePage>
             );
           } catch (e) {
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('查看详情失败: ${campusError(e)}')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('查看详情失败：${campusError(e)}')));
           }
         },
         child: Padding(
@@ -1358,7 +1360,7 @@ class _VenuePageState extends State<VenuePage>
                                   ),
                                 )
                               : const Icon(Icons.cancel_outlined, size: 16),
-                          label: Text(isCancelling ? '正在取消...' : '取消这条预约'),
+                          label: Text(isCancelling ? '正在取消…' : '取消这条预约'),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Theme.of(context)
                                 .colorScheme

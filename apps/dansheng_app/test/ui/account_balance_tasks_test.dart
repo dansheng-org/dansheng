@@ -77,7 +77,7 @@ void main() {
         (l) => l['command'] == HostCommand.setAccount,
       );
       expect(setAccountCall['params']['account_id'], 'student_2026');
-      expect(find.text('已切换到账号: student_2026'), findsOneWidget);
+      expect(find.text('已切换到账号：student_2026'), findsOneWidget);
 
       // Return back to eHall
       final navigator = tester.state<NavigatorState>(
@@ -96,7 +96,7 @@ void main() {
       expect(find.text('任务调度中心'), findsOneWidget);
       expect(find.text('job_alpha'), findsOneWidget);
       expect(find.text('已设闹钟 (待唤醒)'), findsOneWidget);
-      expect(find.text('所属: org.example.job'), findsOneWidget);
+      expect(find.text('所属：org.example.job'), findsOneWidget);
 
       // Tap sync events
       await tester.tap(find.byIcon(Icons.sync));
@@ -118,8 +118,8 @@ void main() {
       await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
 
-      expect(find.text('系统设置与权限'), findsOneWidget);
-      expect(find.text('精确闹钟权限 (Exact Alarm)'), findsOneWidget);
+      expect(find.text('设置'), findsOneWidget);
+      expect(find.text('准时提醒'), findsOneWidget);
       expect(find.text('前往设置'), findsOneWidget);
 
       // Tap exact alarm setting

@@ -330,13 +330,13 @@ void main() {
         // Periods 3, 4: occupied (占用) -> red
         // Period 5: free (空闲) -> green
         // Periods 6..13: missing -> MUST be unknown (未知), NOT free (green)!
-        expect(find.byTooltip('第1节: 空闲'), findsWidgets);
-        expect(find.byTooltip('第2节: 空闲'), findsWidgets);
-        expect(find.byTooltip('第3节: 占用'), findsWidgets);
-        expect(find.byTooltip('第4节: 占用'), findsWidgets);
-        expect(find.byTooltip('第5节: 空闲'), findsWidgets);
-        expect(find.byTooltip('第6节: 未知'), findsWidgets);
-        expect(find.byTooltip('第13节: 未知'), findsWidgets);
+        expect(find.byTooltip('第1节：空闲'), findsWidgets);
+        expect(find.byTooltip('第2节：空闲'), findsWidgets);
+        expect(find.byTooltip('第3节：占用'), findsWidgets);
+        expect(find.byTooltip('第4节：占用'), findsWidgets);
+        expect(find.byTooltip('第5节：空闲'), findsWidgets);
+        expect(find.byTooltip('第6节：未知'), findsWidgets);
+        expect(find.byTooltip('第13节：未知'), findsWidgets);
 
         // Verify H3104 (no busy_units at all) has summary '时段未公布'
         expect(find.text('H3104'), findsOneWidget);

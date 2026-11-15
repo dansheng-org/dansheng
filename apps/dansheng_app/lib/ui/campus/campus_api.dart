@@ -103,6 +103,7 @@ String campusError(Object error) {
   if (any(['ForumConsentRequired'])) return '请前往论坛页面登录，阅读风险提示并明确确认承担风险。';
   if (any(['CourseAccessDenied'])) return '这门课程未开放此项内容';
   if (any(['InteractiveLoginRequired'])) return '学校要求在登录页完成验证';
+  if (any(['WebVpnLoginRequired'])) return '已开启 WebVPN，请先在设置中登录 WebVPN';
   if (any(['AccountMismatch'])) return '登录身份与当前账号不符';
   if (any(['InvalidCredentials'])) return '账号或密码错误，请核对后重试，多次错误可能被学校锁定';
   if (any([

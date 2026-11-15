@@ -268,7 +268,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // Confirmation dialog is shown with SHA-256 fingerprint
-        expect(find.text('操作确认: 确认预约定时'), findsOneWidget);
+        expect(find.text('操作确认：确认预约定时'), findsOneWidget);
         expect(
           find.textContaining('mock_sha256_schedule_hash'),
           findsOneWidget,
@@ -279,7 +279,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // Dialog closed, no execution occurred
-        expect(find.text('操作确认: 确认预约定时'), findsNothing);
+        expect(find.text('操作确认：确认预约定时'), findsNothing);
         expect(find.text('执行结果'), findsNothing);
 
         // 2. Tap again and Confirm execution

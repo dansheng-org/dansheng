@@ -134,7 +134,7 @@ void main() {
       final row = find.byKey(const Key('venue_date_row'));
       final text = find.descendant(
         of: row,
-        matching: find.textContaining('预约日期:'),
+        matching: find.textContaining('预约日期：'),
       );
       final button = find.byTooltip('选择更多日期');
       expect(

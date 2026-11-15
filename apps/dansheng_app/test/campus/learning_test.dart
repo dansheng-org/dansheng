@@ -709,7 +709,7 @@ void main() {
         expect(openFileCalls.last['course_id'], equals('81001'));
 
         // Verify SnackBar feedback shown
-        expect(find.textContaining('已打开文件: 课程大纲.pdf'), findsOneWidget);
+        expect(find.textContaining('已打开文件：课程大纲.pdf'), findsOneWidget);
       },
     );
 

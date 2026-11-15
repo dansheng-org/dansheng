@@ -441,7 +441,7 @@ void main() {
         expect(find.text('H3101'), findsOneWidget);
         expect(find.text('80 座'), findsOneWidget);
         expect(find.text('3 节空闲'), findsOneWidget);
-        expect(find.byTooltip('第1节: 空闲'), findsOneWidget);
+        expect(find.byTooltip('第1节：空闲'), findsOneWidget);
 
         // H3102 with 120 seats and all occupied
         expect(find.text('H3102'), findsOneWidget);
@@ -494,7 +494,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('绩点: 3.88'), findsOneWidget);
+        expect(find.text('绩点：3.88'), findsOneWidget);
         expect(find.textContaining('计算机科学与技术'), findsOneWidget);
         expect(find.textContaining('已获 118.5 学分'), findsOneWidget);
         expect(find.textContaining('排名第 5 名'), findsOneWidget);

@@ -21,7 +21,8 @@ class _Bridge implements DanshengBridge {
     final params = request['params'] as Map;
     calls.add((method, params));
     if (method == 'campus.cached') {
-      return jsonEncode(cache[params['method']]);
+      final hit = cache[params['method']];
+      return jsonEncode(hit is Function ? hit(params) : hit);
     }
     final respond = responses[method];
     if (respond == null) throw PlatformException(code: 'SourceHttpError');
@@ -244,6 +245,59 @@ void main() {
       expect(
         bridge.calls.where((c) => c.$1 == 'canvas.submission.self'),
         hasLength(1),
+      );
+      ctrl.dispose();
+      app.dispose();
+    },
+  );
+
+  test(
+    'old assignments get their status and a cached hand-in survives restart',
+    () async {
+      final bridge = _Bridge();
+      bridge.responses['canvas.courses.sync'] = (_) => [
+        {
+          'id': '10',
+          'name': '课程',
+          'term': {
+            'start_at': '2026-09-01T00:00:00Z',
+            'end_at': '2027-01-31T00:00:00Z',
+          },
+        },
+      ];
+      bridge.responses['canvas.assignments.sync'] = (_) => [
+        for (final (id, due) in [
+          ('1', '2026-10-10T00:00:00Z'),
+          ('2', '2026-10-20T00:00:00Z'),
+          ('3', '2026-11-12T00:00:00Z'),
+        ])
+          {'id': id, 'course_id': '10', 'name': '作业$id', 'due_at': due},
+      ];
+      bridge.responses['canvas.announcements.sync'] = (_) => [];
+      Map<String, dynamic> submitted(Map p) => {
+        'assignment_id': p['assignment_id'],
+        'workflow_state': 'submitted',
+        'submitted_at': '2026-10-01T00:00:00Z',
+      };
+      // Earlier session: assignment 1 was seen handed in.
+      bridge.cache['canvas.submission.self'] = (Map p) =>
+          p['assignment_id'] == '1' ? [submitted(p)] : null;
+      bridge.responses['canvas.submission.self'] = (p) => [submitted(p)];
+      final app = _App(bridge, '24300000000');
+      final ctrl = LearningController(
+        appController: app,
+        now: () => DateTime.utc(2026, 11, 14),
+      );
+      await ctrl.loadCanvas();
+      for (final work in ctrl.courseWork('10')) {
+        expect(ctrl.isOutstanding(work), isFalse, reason: work.name);
+      }
+      // Known-done old work is not re-read; the rest is.
+      expect(
+        bridge.calls
+            .where((c) => c.$1 == 'canvas.submission.self')
+            .map((c) => c.$2['assignment_id']),
+        unorderedEquals(['2', '3']),
       );
       ctrl.dispose();
       app.dispose();

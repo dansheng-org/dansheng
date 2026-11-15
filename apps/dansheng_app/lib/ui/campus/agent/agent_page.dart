@@ -389,7 +389,7 @@ class _AgentPageState extends State<AgentPage> {
                       const SizedBox(width: 6.0),
                       Text(
                         isRunning
-                            ? '服务已就绪 (端口: ${_mcpStatus.port})'
+                            ? '服务已就绪 (端口：${_mcpStatus.port})'
                             : '已停止 (未监听端口)',
                         style: theme.textTheme.labelMedium?.copyWith(
                           fontWeight: FontWeight.w600,
@@ -573,8 +573,8 @@ class _AgentPageState extends State<AgentPage> {
               controller: _queryController,
               decoration: InputDecoration(
                 hintText: _modeIndex == 0
-                    ? '向助手提问（如：饭卡余额、日程、下节课...）'
-                    : '输入关键字检索本地缓存记录...',
+                    ? '向助手提问（如：饭卡余额、日程、下节课…）'
+                    : '输入关键字检索本地缓存记录…',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _queryController.text.isNotEmpty
                     ? IconButton(

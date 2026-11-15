@@ -190,7 +190,7 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
       if (mounted) {
         setState(() => _isLoadingMore = false);
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('加载更多失败: ${campusError(e)}')));
+            .showSnackBar(SnackBar(content: Text('加载更多失败：${campusError(e)}')));
       }
     }
   }
