@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Preview extraction follows DanXi-Dev/DanXi lib/page/subpage_forum.dart (GPL-3.0-or-later).
+import 'package:markdown/markdown.dart' as md;
+
+import 'forum_syntax.dart';
 
 /// Formats an ISO8601/RFC3339 timestamp into human-readable Chinese relative time.
 String formatFriendlyTime(String? timeStr) {
@@ -32,31 +36,52 @@ String _twoDigits(int n) => n >= 10 ? '$n' : '0$n';
 /// - Removes HTML tags
 String cleanPreviewText(String? content) {
   if (content == null || content.isEmpty) return '';
-  var text = content;
+  final nodes = md.Document(
+    encodeHtml: false,
+    inlineSyntaxes: forumInlineSyntaxes(),
+    extensionSet: md.ExtensionSet.gitHubFlavored,
+  ).parseLines(content.split('\n'));
+  String extract(md.Node node, {required bool mentions}) {
+    if (node is md.Text) return node.text;
+    if (node is! md.Element) return '';
+    if (node.tag.startsWith('forum-math')) return '[公式]';
+    if (node.tag == 'img') {
+      final src = node.attributes['src'] ?? '';
+      return src.startsWith('dx_') || src.startsWith('danxi_')
+          ? '[表情]'
+          : '[图片]';
+    }
+    if (node.tag == 'a' &&
+        (node.attributes['href'] ?? '').startsWith('dansheng-') &&
+        !mentions) {
+      return '';
+    }
+    final text = (node.children ?? const <md.Node>[])
+        .map((child) => extract(child, mentions: mentions))
+        .join();
+    return const {
+          'p',
+          'li',
+          'blockquote',
+          'pre',
+          'h1',
+          'h2',
+          'h3',
+          'tr',
+        }.contains(node.tag)
+        ? '$text\n'
+        : text;
+  }
 
-  // LaTeX tags
-  text = text.replaceAll(
-    RegExp(r'<(tex|texLine)>.*?</(tex|texLine)>', dotAll: true),
-    '[公式]',
-  );
-  text = text.replaceAll(RegExp(r'\$\$.*?\$\$', dotAll: true), '[公式]');
-
-  // Markdown images and HTML img
-  text = text.replaceAll(RegExp(r'!\[.*?\]\(.*?\)'), '[图片]');
-  text = text.replaceAll(RegExp(r'<img[^>]*>'), '[图片]');
-
-  // Mentions
-  text = text.replaceAll(
-    RegExp(r'<(floor|hole)Mention>.*?</(floor|hole)Mention>'),
-    '',
-  );
-
-  // HTML tags
-  text = text.replaceAll(RegExp(r'<[^>]+>'), '');
-
-  // Truncate redundant whitespace
-  text = text.replaceAll(RegExp(r'\n{2,}'), '\n');
-  return text.trim();
+  String flatten(bool mentions) => nodes
+      .map((node) => extract(node, mentions: mentions))
+      .join()
+      .replaceAll(RegExp(r'<img\b[^>]*>', caseSensitive: false), '[图片]')
+      .replaceAll(RegExp(r'<[^>]+>'), '')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
+  final text = flatten(false);
+  return text.isEmpty ? flatten(true) : text;
 }
 
 /// Resolves anonymous display name for a floor.

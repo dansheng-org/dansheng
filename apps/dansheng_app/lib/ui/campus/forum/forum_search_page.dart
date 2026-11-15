@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../campus_api.dart';
 import '../../core/dansheng_state.dart';
-import 'forum_format.dart';
+import 'forum_floor_tile.dart';
 import 'forum_models.dart';
 import 'forum_pagination.dart';
 import 'forum_service.dart';
@@ -221,105 +221,61 @@ class _ForumSearchPageState extends State<ForumSearchPage> {
   }
 
   Widget _buildResultCard(ForumSearchResult item) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: colorScheme.outlineVariant.withAlpha(100)),
+    return ForumFloorTile(
+      key: ValueKey((item.holeId, item.floorId)),
+      floor: TeaFloor(
+        floorId: item.floorId ?? 0,
+        holeId: item.holeId,
+        content: item.content,
+        anonyname: item.anonyname,
+        timeCreated: item.timeCreated,
+        deleted: item.deleted,
+        fold: item.fold,
+        ranking: item.ranking,
+        replyTo: item.replyTo,
+        specialTag: item.specialTag,
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (ctx) => HoleDetailPage(
-                controller: widget.controller,
-                holeId: item.holeId,
-              ),
-            ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    '#${item.holeId}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.primary,
-                      fontSize: 13,
-                    ),
-                  ),
-                  if (item.floorId != null) ...[
-                    const SizedBox(width: 6),
-                    Text(
-                      '(${item.floorId}楼)',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  if (item.anonyname != null) ...[
-                    const SizedBox(width: 8),
-                    Text(
-                      resolveAnonyname(item.anonyname, item.floorId ?? 1),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  const Spacer(),
-                  Text(
-                    formatFriendlyTime(item.timeCreated),
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                item.deleted ? '该楼层已被删除' : cleanPreviewText(item.content),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.4,
-                  fontStyle: item.deleted ? FontStyle.italic : FontStyle.normal,
-                  color: item.deleted
-                      ? colorScheme.outline
-                      : colorScheme.onSurface,
-                ),
-              ),
-              if (item.tags.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 4,
-                  children: item.tags.map((t) {
-                    return Text(
-                      '#$t ',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.primary,
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ],
+      showHoleId: true,
+      tags: item.tags,
+      onTapHole: (holeId) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) =>
+                HoleDetailPage(controller: widget.controller, holeId: holeId),
           ),
-        ),
-      ),
+        );
+      },
+      onTapFloor: (floorId) {
+        // A search result is not a complete thread and supplies no floor map.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('引用楼层 ##$floorId 尚未加载，请打开帖子详情后定位。'),
+            action: SnackBarAction(
+              label: '打开帖子',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => HoleDetailPage(
+                      controller: widget.controller,
+                      holeId: item.holeId,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (ctx) => HoleDetailPage(
+              controller: widget.controller,
+              holeId: item.holeId,
+            ),
+          ),
+        );
+      },
     );
   }
 }

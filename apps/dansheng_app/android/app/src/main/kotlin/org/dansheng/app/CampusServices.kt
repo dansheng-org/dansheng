@@ -67,6 +67,17 @@ internal class CampusServices(
         // A restored native session or saved password must not bypass the login notice.
         if(method.startsWith("community.tea.") || method.startsWith("forum."))
             rt.campusLogins.requireForumConsent(account)
+        if(method=="forum.openLink") {
+            val uri=android.net.Uri.parse(p.getString("url"))
+            if(uri.scheme !in setOf("http","https") || uri.host.isNullOrBlank() || uri.userInfo!=null)
+                throw PortError("UntrustedOrigin")
+            withContext(Dispatchers.Main) {
+                checked(account,epoch)
+                try { activity.startActivity(Intent(Intent.ACTION_VIEW,uri).addCategory(Intent.CATEGORY_BROWSABLE)) }
+                catch(_:android.content.ActivityNotFoundException){throw PortError("ViewerUnavailable")}
+            }
+            return JSONObject().put("opened",true)
+        }
         if(method.startsWith("powerAlert.")){
             return when(method.removePrefix("powerAlert.")){
                 "get"->rt.powerAlerts.status()
