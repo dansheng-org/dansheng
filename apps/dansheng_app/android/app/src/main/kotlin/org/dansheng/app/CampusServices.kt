@@ -41,6 +41,14 @@ internal class CampusServices(
             }
             return JSONObject().put("opened",true)
         }
+        // The eHall arrangement is a device-level interface preference: readable signed out, shared
+        // by every account, holding no campus data, and kept out of Core's account-bound cache.
+        if(method=="ehall.layout.get")return BoardLayoutStore.read(rt.prefs.getString(BoardLayoutStore.KEY,null))
+        if(method=="ehall.layout.set"){
+            val text=BoardLayoutStore.validate(supplied.optJSONObject("layout"))
+            check(rt.prefs.edit().putString(BoardLayoutStore.KEY,text).commit())
+            return JSONObject().put("saved",true)
+        }
         if(method.startsWith("agent."))return CampusAgent.call(rt,method.removePrefix("agent."),supplied)
         val account=rt.account() ?: throw PortError("AccountRequired")
         if(supplied.has("account_id") && supplied.optString("account_id")!=account)throw PortError("AccountMismatch")

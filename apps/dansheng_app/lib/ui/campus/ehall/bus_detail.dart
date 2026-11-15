@@ -241,12 +241,100 @@ class BusScheduleItem implements Comparable<BusScheduleItem> {
   }
 }
 
+/// Bus rows from a fudan.bus result or its cached copy, whatever envelope
+/// the result arrived in.
+Iterable<Map<String, dynamic>> busRows(dynamic data) sync* {
+  if (data == null) return;
+  if (data is List) {
+    for (final item in data) {
+      yield* busRows(item);
+    }
+    return;
+  }
+  if (data is Map<String, dynamic>) {
+    if (data['records'] is List) {
+      yield* busRows(data['records']);
+      return;
+    }
+    if (data['buses'] is List) {
+      yield* busRows(data['buses']);
+      return;
+    }
+    if (data['data'] is List) {
+      yield* busRows(data['data']);
+      return;
+    }
+    if (data['lists'] is List) {
+      yield* busRows(data['lists']);
+      return;
+    }
+    if (data['list'] is List) {
+      yield* busRows(data['list']);
+      return;
+    }
+    if (data['payload'] != null) {
+      yield* busRows(data['payload']);
+      return;
+    }
+    if (data.containsKey('from') ||
+        data.containsKey('start') ||
+        data.containsKey('starts_at') ||
+        data.containsKey('stime')) {
+      yield data;
+    }
+  } else if (data is Map) {
+    yield* busRows(Map<String, dynamic>.from(data));
+  }
+}
+
+/// The departures from [from] to [to], earliest first, as the bus page lists
+/// them (matching DanXi bus.dart): backward rows run reversed, and a
+/// two-way row also serves the reverse trip. [Campus.NONE] matches any campus.
+List<BusScheduleItem> directedBuses(
+  Iterable<BusScheduleItem> items,
+  Campus from,
+  Campus to,
+) {
+  return items
+      .map((element) {
+        // Backward direction means physical vehicle runs in reverse of raw start->end
+        if (element.direction == BusDirection.BACKWARD) {
+          return BusScheduleItem.reversed(element);
+        }
+        // Dual (bidirectional) entries reversed when user requests reverse direction
+        if (element.direction == BusDirection.DUAL &&
+            from != Campus.NONE &&
+            to != Campus.NONE &&
+            element.start == to &&
+            element.end == from) {
+          return BusScheduleItem.reversed(element);
+        }
+        return element;
+      })
+      .where((element) {
+        final matchesStart = from == Campus.NONE || element.start == from;
+        final matchesEnd = to == Campus.NONE || element.end == to;
+        return matchesStart && matchesEnd;
+      })
+      .toList()
+    ..sort((a, b) => a.compareTo(b));
+}
+
 /// Campus bus inquiry page matching DanXi BusPage and repository.
 class BusDetailPage extends StatefulWidget {
-  const BusDetailPage({super.key, required this.controller, this.initialDate});
+  const BusDetailPage({
+    super.key,
+    required this.controller,
+    this.initialDate,
+    this.initialFrom,
+    this.initialTo,
+  });
 
   final DanshengController controller;
   final DateTime? initialDate;
+
+  /// The route to show first; Handan to Jiangwan when not given.
+  final Campus? initialFrom, initialTo;
 
   @override
   State<BusDetailPage> createState() => BusDetailPageState();
@@ -264,8 +352,8 @@ class BusDetailPageState extends State<BusDetailPage> {
 
   /// Start and Destination campuses.
   /// Default to Handan -> Jiangwan as sensible defaults.
-  Campus _startSelectItem = Campus.HANDAN_CAMPUS;
-  Campus _endSelectItem = Campus.JIANGWAN_CAMPUS;
+  late Campus _startSelectItem = widget.initialFrom ?? Campus.HANDAN_CAMPUS;
+  late Campus _endSelectItem = widget.initialTo ?? Campus.JIANGWAN_CAMPUS;
 
   /// Whether to display all buses or only upcoming ones.
   bool _showAll = false;
@@ -392,49 +480,7 @@ class BusDetailPageState extends State<BusDetailPage> {
     }
   }
 
-  Iterable<Map<String, dynamic>> _extractRows(dynamic data) sync* {
-    if (data == null) return;
-    if (data is List) {
-      for (final item in data) {
-        yield* _extractRows(item);
-      }
-      return;
-    }
-    if (data is Map<String, dynamic>) {
-      if (data['records'] is List) {
-        yield* _extractRows(data['records']);
-        return;
-      }
-      if (data['buses'] is List) {
-        yield* _extractRows(data['buses']);
-        return;
-      }
-      if (data['data'] is List) {
-        yield* _extractRows(data['data']);
-        return;
-      }
-      if (data['lists'] is List) {
-        yield* _extractRows(data['lists']);
-        return;
-      }
-      if (data['list'] is List) {
-        yield* _extractRows(data['list']);
-        return;
-      }
-      if (data['payload'] != null) {
-        yield* _extractRows(data['payload']);
-        return;
-      }
-      if (data.containsKey('from') ||
-          data.containsKey('start') ||
-          data.containsKey('starts_at') ||
-          data.containsKey('stime')) {
-        yield data;
-      }
-    } else if (data is Map) {
-      yield* _extractRows(Map<String, dynamic>.from(data));
-    }
-  }
+  Iterable<Map<String, dynamic>> _extractRows(dynamic data) => busRows(data);
 
   void _onLocationSwapped() {
     setState(() {
@@ -444,36 +490,8 @@ class BusDetailPageState extends State<BusDetailPage> {
     });
   }
 
-  /// Filters bus schedule matching DanXi bus.dart:
-  /// Normalizes backward entries and reverse dual entries.
-  List<BusScheduleItem> _filterBus(List<BusScheduleItem> origList) {
-    return origList
-        .map((element) {
-          // Backward direction means physical vehicle runs in reverse of raw start->end
-          if (element.direction == BusDirection.BACKWARD) {
-            return BusScheduleItem.reversed(element);
-          }
-          // Dual (bidirectional) entries reversed when user requests reverse direction
-          if (element.direction == BusDirection.DUAL &&
-              _startSelectItem != Campus.NONE &&
-              _endSelectItem != Campus.NONE &&
-              element.start == _endSelectItem &&
-              element.end == _startSelectItem) {
-            return BusScheduleItem.reversed(element);
-          }
-          return element;
-        })
-        .where((element) {
-          final matchesStart =
-              _startSelectItem == Campus.NONE ||
-              element.start == _startSelectItem;
-          final matchesEnd =
-              _endSelectItem == Campus.NONE || element.end == _endSelectItem;
-          return matchesStart && matchesEnd;
-        })
-        .toList()
-      ..sort((a, b) => a.compareTo(b));
-  }
+  List<BusScheduleItem> _filterBus(List<BusScheduleItem> origList) =>
+      directedBuses(origList, _startSelectItem, _endSelectItem);
 
   List<DropdownMenuItem<Campus>> _getItems() =>
       Campus.allCampusesWithNone.map((c) {
