@@ -54,3 +54,4 @@ Reject { & (Join-Path $scripts 'prerelease-sdk.ps1') -Action Install -Archive $a
 if ([IO.File]::ReadAllText($sentinel) -cne 'existing SDK') { throw 'Existing SDK was changed.' }
 [pscustomobject]@{passed=$checks.Count;checks=@($checks);synthetic_archives_only=$true;fixture=$root} | ConvertTo-Json -Depth 4
 $global:LASTEXITCODE = 0
+& (Join-Path $PSScriptRoot 'prerelease-source.tests.ps1')

@@ -10,19 +10,46 @@ function Resolve-DanshengPrereleaseManifest {
     Join-Path $root '.github/prerelease-sdk.json'
 }
 
+function Assert-DanshengPrereleaseCheckout {
+    param([string]$AppRoot, [string]$CoreRoot, [string]$Commit, [switch]$RequireClean)
+    $root = [IO.Path]::GetFullPath((Join-Path $AppRoot '../..')).TrimEnd('\','/')
+    if ([IO.Path]::GetFullPath($CoreRoot).TrimEnd('\','/') -ine (Join-Path $root 'core')) {
+        throw 'Pre-release Core must be the same monorepo checkout as App.'
+    }
+    $head = & git --no-optional-locks -C $root rev-parse HEAD
+    if ($LASTEXITCODE -ne 0 -or $head -cne $Commit -or $Commit -notmatch '^[a-f0-9]{40}$') {
+        throw 'Pre-release requires the exact checkout commit.'
+    }
+    if ($RequireClean) {
+        $changes = @(& git --no-optional-locks -C $root status --porcelain --untracked-files=all)
+        if ($LASTEXITCODE -ne 0 -or $changes.Count) { throw 'Pre-release requires clean committed source inputs.' }
+    }
+}
+
 function Test-DanshengPrereleaseSdk {
-    param([string]$AppRoot, [string]$ArtifactDirectory, [string]$CoreToolsRoot)
-    $lock = Get-Content -LiteralPath (Join-Path $AppRoot 'core.lock.json') -Raw | ConvertFrom-Json
+    param([string]$AppRoot, [string]$ArtifactDirectory, [string]$CoreToolsRoot, [string]$LockFile, [string]$CoreRoot)
+    if (-not $LockFile) { $LockFile = Join-Path $AppRoot 'core.lock.json' }
+    $lock = Get-Content -LiteralPath $LockFile -Raw | ConvertFrom-Json
     if ($lock.core.commit -notmatch '^[a-f0-9]{40}$') { throw 'Pre-release requires a real locked Core commit.' }
-    $acquisition = Get-Content -LiteralPath (Resolve-DanshengPrereleaseManifest -AppRoot $AppRoot) -Raw | ConvertFrom-Json
-    if ($acquisition.validator.core_commit -cne $lock.core.commit -or
-        @($acquisition.validator.files).Count -ne 2 -or
-        @($acquisition.validator.files.name | Sort-Object -Unique).Count -ne 2) { throw 'Validation tool provenance differs from the exact locked Core commit.' }
-    foreach ($tool in $acquisition.validator.files) {
-        if ($tool.name -cnotin @('Test-DanshengCoreDependency.ps1','Dansheng.Workspace.psm1') -or
-            $tool.sha256 -notmatch '^[a-f0-9]{64}$' -or
-            (Get-FileHash -LiteralPath (Join-Path $CoreToolsRoot $tool.name)).Hash -ine $tool.sha256) {
-            throw 'Validation tool bytes differ from the pinned Core export.'
+    $validatorArguments = @{ LockFile=$LockFile; ArtifactDirectory=$ArtifactDirectory }
+    if ($CoreRoot) {
+        Assert-DanshengPrereleaseCheckout -AppRoot $AppRoot -CoreRoot $CoreRoot -Commit $lock.core.commit -RequireClean:($env:GITHUB_ACTIONS -eq 'true')
+        if ([IO.Path]::GetFullPath($CoreToolsRoot).TrimEnd('\','/') -ine [IO.Path]::GetFullPath((Join-Path $CoreRoot 'tools/workspace'))) {
+            throw 'Source SDK validation must use tools from the exact Core checkout.'
+        }
+        $validatorArguments.CoreRoot = $CoreRoot
+        $validatorArguments.AppRoot = $AppRoot
+    } else {
+        $acquisition = Get-Content -LiteralPath (Resolve-DanshengPrereleaseManifest -AppRoot $AppRoot) -Raw | ConvertFrom-Json
+        if ($acquisition.validator.core_commit -cne $lock.core.commit -or
+            @($acquisition.validator.files).Count -ne 2 -or
+            @($acquisition.validator.files.name | Sort-Object -Unique).Count -ne 2) { throw 'Validation tool provenance differs from the exact locked Core commit.' }
+        foreach ($tool in $acquisition.validator.files) {
+            if ($tool.name -cnotin @('Test-DanshengCoreDependency.ps1','Dansheng.Workspace.psm1') -or
+                $tool.sha256 -notmatch '^[a-f0-9]{64}$' -or
+                (Get-FileHash -LiteralPath (Join-Path $CoreToolsRoot $tool.name)).Hash -ine $tool.sha256) {
+                throw 'Validation tool bytes differ from the pinned Core export.'
+            }
         }
     }
     $validator = Join-Path $CoreToolsRoot 'Test-DanshengCoreDependency.ps1'
@@ -32,8 +59,8 @@ function Test-DanshengPrereleaseSdk {
         throw 'Flutter/Pigeon dependency lock differs.'
     }
     if (Test-Path -LiteralPath (Join-Path $AppRoot 'pubspec_overrides.yaml')) { throw 'Pre-release does not accept local Pub overrides.' }
-    # SDK-only consumption: never claim that the newer in-tree Core produced this SDK.
-    $validation = (& $validator -LockFile (Join-Path $AppRoot 'core.lock.json') -ArtifactDirectory $ArtifactDirectory | Out-String) | ConvertFrom-Json
+    # Source mode also checks actual Core/adapter/resource bytes, not just SDK self-consistency.
+    $validation = (& $validator @validatorArguments | Out-String) | ConvertFrom-Json
     if (-not $validation.verified) { throw 'Core SDK validation failed.' }
     $receipt = Get-Content -LiteralPath (Join-Path $ArtifactDirectory 'receipt.json') -Raw | ConvertFrom-Json
     if ($receipt.aar_sha256 -ine $lock.artifact.sha256 -or

@@ -28,7 +28,7 @@ jobs:
        github.event.workflow_run.head_repository.full_name == github.repository) ||
        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.checks.result == 'success'))
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
       commit: ${{ steps.identity.outputs.commit }}
@@ -53,12 +53,12 @@ jobs:
           . ./scripts/prerelease-common.ps1
           $commit = git rev-parse HEAD
           $identity = Get-DanshengPrereleaseIdentity -AppRoot $PWD.Path -Commit $commit
-          $lock = Get-Content core.lock.json -Raw | ConvertFrom-Json
-          if ($lock.core.commit -notmatch '^[a-f0-9]{40}$') { throw 'Missing exact Core commit.' }
           "commit=$commit" >> $env:GITHUB_OUTPUT
           "tag=$($identity.tag)" >> $env:GITHUB_OUTPUT
           "version=$($identity.version)" >> $env:GITHUB_OUTPUT
-          "core=$($lock.core.commit)" >> $env:GITHUB_OUTPUT
+          "core=$commit" >> $env:GITHUB_OUTPUT
+      - name: Test prerelease source and artifact safeguards
+        run: ./scripts/tests/prerelease.tests.ps1
       - name: Verify existing release before building
         env:
           GH_TOKEN: ${{ github.token }}
@@ -95,34 +95,37 @@ jobs:
       - name: Prepare pinned Android tools
         run: |
           $manager = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest/bin/sdkmanager.bat'
-          & $manager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;30.0.16138531'
+          & $manager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;30.0.16138531' 'cmake;3.22.1'
           if ($LASTEXITCODE -ne 0) { throw 'Cannot install pinned Android SDK/NDK.' }
-      - name: Acquire and verify exact development SDK
-        env:
-          GH_TOKEN: ${{ github.token }}
+          "ANDROID_SDK_ROOT=$env:ANDROID_HOME" >> $env:GITHUB_ENV
+      - name: Prepare pinned Rust compiler and Android targets
         run: |
-          . ./scripts/prerelease-common.ps1
-          $sdk = Get-Content (Resolve-DanshengPrereleaseManifest -AppRoot $PWD.Path) -Raw | ConvertFrom-Json
-          $url = [Uri]$sdk.uri
-          if ($url.Scheme -ne 'https' -or $url.Host -ne 'github.com' -or $url.UserInfo -or $url.Query -or $url.Fragment -or
-              $url.AbsolutePath -notmatch '^/([^/]+/[^/]+)/releases/download/([^/]+)/([^/]+)$') { throw 'Expected a pinned GitHub release asset URL.' }
-          $repo = $Matches[1]; $tag = $Matches[2]; $asset = $Matches[3]
-          if ($repo -cne $env:GITHUB_REPOSITORY -or $asset -notmatch '^[A-Za-z0-9._-]+\.zip$') { throw 'SDK mirror must belong to this repository.' }
-          $downloads = Join-Path $env:DANSHENG_TASK_RUNTIME 'downloads'
-          New-Item -ItemType Directory -Force -Path $downloads | Out-Null
-          gh release download $tag --repo $repo --pattern $asset --dir $downloads
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot download the locked SDK mirror.' }
-          $native = Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk'
-          ./scripts/prerelease-sdk.ps1 -Action Install `
-            -Archive (Join-Path $downloads $asset) -ArtifactDirectory $native `
-            -CoreToolsRoot (Join-Path $native 'validation-tools') -Sha256 $sdk.sha256
+          rustup toolchain install 1.99.1-x86_64-pc-windows-msvc --profile minimal --target aarch64-linux-android --target x86_64-linux-android
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot install pinned Rust compiler/targets.' }
+          "RUSTUP_TOOLCHAIN=1.99.1-x86_64-pc-windows-msvc" >> $env:GITHUB_ENV
+      - name: Build and verify SDK from exact checkout
+        env:
+          SOURCE_COMMIT: ${{ steps.identity.outputs.commit }}
+        run: |
+          ./scripts/prerelease-source-sdk.ps1 -RuntimeRoot $env:DANSHENG_TASK_RUNTIME -Commit $env:SOURCE_COMMIT
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-sdk-${{ steps.identity.outputs.commit }}
+          path: |
+            ${{ env.DANSHENG_TASK_RUNTIME }}/native-sdk/*.aar
+            ${{ env.DANSHENG_TASK_RUNTIME }}/native-sdk/core.lock.json
+            ${{ env.DANSHENG_TASK_RUNTIME }}/native-sdk/receipt.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Build, sign and audit ARM64 release APK
         env:
           DANSHENG_BETA_PASSWORD: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_PASSWORD }}
         run: |
           ./scripts/build-prerelease.ps1 -RuntimeRoot $env:DANSHENG_TASK_RUNTIME `
             -ArtifactDirectory (Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk') `
-            -CoreToolsRoot (Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk/validation-tools')
+            -CoreToolsRoot (Resolve-Path '../../core/tools/workspace').Path `
+            -CoreRoot (Resolve-Path '../../core').Path `
+            -LockFile (Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk/core.lock.json')
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-prerelease-${{ steps.identity.outputs.commit }}
@@ -156,9 +159,9 @@ jobs:
           set -euo pipefail
           cd release
           sha256sum --check SHA256SUMS
-          for asset in ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt release-notes.md; do test -s "$asset"; done
+          for asset in ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt release-notes.md core.lock.json core-receipt.json; do test -s "$asset"; done
           gh api "repos/$GH_REPO/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$APP_COMMIT" >/dev/null
-          gh release create "$RELEASE_TAG" ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt \
+          gh release create "$RELEASE_TAG" ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt core.lock.json core-receipt.json release-notes.md \
             --verify-tag --title "Android $APP_VERSION Pre-release (${APP_COMMIT:0:12})" \
             --notes-file release-notes.md --draft --prerelease --latest=false
           gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
