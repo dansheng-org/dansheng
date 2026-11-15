@@ -5,6 +5,7 @@ import '../../screens/account_balance_screen.dart';
 import '../campus_api.dart';
 import 'bus_detail.dart';
 import 'ecard_detail.dart';
+import 'notice_sheet.dart';
 import 'power_detail.dart';
 import 'room_detail.dart';
 
@@ -170,6 +171,15 @@ class _LifeState extends State<_CampusDetail> {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(campusError(e))));
       }
+    }
+  }
+
+  Future<void> _showNotice(String title, String url) async {
+    final noticeApi = CampusApi.forAccount(widget.controller);
+    try {
+      await showNoticeSheet(context, noticeApi, title: title, url: url);
+    } finally {
+      noticeApi.accountScope?.dispose();
     }
   }
 
@@ -553,7 +563,7 @@ class _LifeState extends State<_CampusDetail> {
               )
             : null,
         onTap: s == LifeService.notices && r['url'] is String
-            ? () => openNotice(r['url'] as String)
+            ? () => _showNotice(title, r['url'] as String)
             : null,
       ),
     );

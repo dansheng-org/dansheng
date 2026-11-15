@@ -123,6 +123,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Locked Pub resolution failed.' }
           flutter build apk --debug --target-platform android-arm64 --no-pub
           if ($LASTEXITCODE -ne 0) { throw 'App Kotlin/Pigeon ARM64 compile failed.' }
+          gradle -p android :app:testDebugUnitTest
+          if ($LASTEXITCODE -ne 0) { throw 'Android host unit tests failed.' }
           . ./scripts/prerelease-common.ps1
           $null = Test-DanshengPrereleaseSdk -AppRoot $PWD.Path -CoreRoot $core -CoreToolsRoot (Join-Path $core 'tools/workspace') -ArtifactDirectory $native -LockFile $lock
           ./scripts/audit-apk.ps1 -Apk (Join-Path $PWD.Path 'build/app/outputs/flutter-apk/app-debug.apk') -Abi arm64-v8a `

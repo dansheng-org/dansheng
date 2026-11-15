@@ -211,7 +211,11 @@ void main() {
         .where((c) => c['method'] == 'canvas.conversation.reply')
         .toList();
     expect(sends.length, 1);
-    expect(sends.single['params'], {'conversation_id': '20', 'body': '我的回复'});
+    expect(sends.single['params'], {
+      'conversation_id': '20',
+      'body': '我的回复',
+      'account_id': app.account,
+    });
     pending.complete(record(conversation()));
     await tester.pumpAndSettle();
     expect(find.text('回复后'), findsOneWidget);
@@ -242,6 +246,7 @@ void main() {
       'recipients': ['30'],
       'subject': '请教',
       'body': '你好',
+      'account_id': app.account,
     });
     expect(find.text('课程问题'), findsOneWidget);
   });
@@ -265,7 +270,11 @@ void main() {
     expect(find.textContaining('校园账号登录仅支持读取'), findsNothing);
     await tester.tap(find.text('绑定 Canvas 令牌'));
     await tester.pumpAndSettle();
-    expect(bridge.calls.last['params'], {'service': 'canvas', 'replace': true});
+    expect(bridge.calls.last['params'], {
+      'service': 'canvas',
+      'replace': true,
+      'account_id': app.account,
+    });
     expect(
       bridge.calls
           .where((c) => c['method'] == 'canvas.conversation.reply')
@@ -316,7 +325,10 @@ void main() {
       await tester.tap(find.text('刷新 Canvas 统一登录'));
       await tester.pumpAndSettle();
       expect(bridge.calls.last['method'], 'campus.login');
-      expect(bridge.calls.last['params'], {'service': 'canvas'});
+      expect(bridge.calls.last['params'], {
+        'service': 'canvas',
+        'account_id': app.account,
+      });
       expect(
         bridge.calls
             .where((c) => c['method'] == 'canvas.conversation.create')
@@ -337,6 +349,7 @@ void main() {
         'recipients': ['30'],
         'subject': '保留主题',
         'body': '保留正文',
+        'account_id': app.account,
       });
     },
   );

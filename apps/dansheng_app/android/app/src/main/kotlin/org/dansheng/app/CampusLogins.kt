@@ -11,9 +11,22 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     private val serial = Mutex()
     private val recovered = mutableMapOf<Pair<String,String>,Long>()
     private val recentFailures = mutableMapOf<Pair<String,String>,Pair<Long,String>>()
-    private val services=setOf("ecard","academic","power","bus","dining","forum","canvas","webvpn")
-    private fun kind(service:String)=when(service) { "forum","canvas" -> service; else -> "uis" }
-    private fun key(account:String,group:String)="campus-login/v1/$group/$account"
+    private val services=setOf("ecard","academic","power","bus","dining","forum","canvas","webvpn","cloud")
+    // The cloud drive keeps its own password, so it is saved apart from the UIS one.
+    private fun kind(service:String)=when { service in setOf("forum","canvas","cloud") -> service
+        // Each WebDAV server keeps its own credentials.
+        isWebdav(service) -> "webdav-"+service.removePrefix("webdav:"); else -> "uis" }
+    private fun isWebdav(service:String)=service.matches(Regex("webdav:[0-9a-f]{12}"))
+    private fun webdavIdsKey(account:String)="webdav-ids/$account"
+    private val savedLogins = CampusLoginStore(
+        { rt.vault.get(it) }, { k,v -> rt.vault.set(k,v) }, { rt.vault.delete(it) },
+        { rt.prefs.getStringSet(webdavIdsKey(it),emptySet()).orEmpty().toSet() },
+        { account,ids ->
+            val edit=rt.prefs.edit()
+            if(ids.isEmpty())edit.remove(webdavIdsKey(account)) else edit.putStringSet(webdavIdsKey(account),ids)
+            check(edit.commit())
+        },
+    )
     private fun suspendKey(account:String)="venue-password-suspended/$account"
     // The school locks an account after a few wrong passwords. Once a hidden login fails after the
     // saved password went out, nothing submits it automatically until a person or the school vouches
@@ -22,11 +35,11 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     internal fun suspendVenuePassword(account:String){rt.prefs.edit().putBoolean(suspendKey(account),true).commit()}
     internal fun clearVenueSuspension(account:String){rt.prefs.edit().remove(suspendKey(account)).commit()}
     internal fun venueAccountActive(account:String)=rt.account()==account
-    internal fun canRestoreVenue(account:String)=rt.account()==account && rt.vault.contains(key(account,"uis")) && !venuePasswordSuspended(account)
+    internal fun canRestoreVenue(account:String)=rt.account()==account && savedLogins.get(account,"uis")!=null && !venuePasswordSuspended(account)
     internal fun savedUisForVenue(account:String):String? {
         val epoch=rt.accountEpoch
         if(!canRestoreVenue(account))return null
-        val secret=rt.vault.get(key(account,"uis"))?.let { JSONObject(it).getString("secret") }
+        val secret=savedLogins.get(account,"uis")?.let { JSONObject(it).getString("secret") }
         return secret.takeIf { rt.account()==account && rt.accountEpoch==epoch }
     }
     private fun checkAccount(account:String, epoch:Long) {
@@ -37,27 +50,39 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     fun accountChanged(previous:String?,forget:Boolean) {
         recovered.clear(); recentFailures.clear(); rt.visiblePage.clearSilentFailures()
         if(forget && previous!=null) {
-            for(g in listOf("uis","forum","canvas"))rt.vault.delete(key(previous,g))
+            savedLogins.forgetAccount(previous)
             clearVenueSuspension(previous)
         }
+    }
+    /** Called under authGuard together with server removal; never targets the new account. */
+    fun forgetWebdav(account:String,id:String,epoch:Long) = synchronized(rt.authGuard) {
+        checkAccount(account,epoch)
+        savedLogins.forgetWebdav(account,id)
+        recovered.remove(account to "webdav:$id")
+        recentFailures.remove(account to "webdav:$id")
     }
     private fun authenticate(service:String,account:String,email:String,secret:String):Any? {
         val p=JSONObject().put("account_id",account)
         return when(service){
             "ecard" -> rt.request("fudan.ecard.login",p.put("password",secret))
-            "academic" -> rt.request("fudan.academic.login",p.put("password",secret))
+            // Postgraduate numbers (third digit 1 or 2) use the separate yjsxk course system.
+            "academic" -> rt.request("fudan.academic.login",p.put("password",secret)
+                .put("service",if(account.length>=3 && account[2] in "12") "postgraduate" else "undergraduate"))
             "power","bus","dining","webvpn" -> rt.request("fudan.life.login",p.put("service",service).put("password",secret))
             "canvas" -> rt.request("canvas.token.bind",p.put("token",secret.trim()).put("persist",false))
             "forum" -> rt.request("community.tea.login",p.put("email",email).put("password",secret))
-            else -> throw PortError("MethodUnavailable")
+            "cloud" -> rt.request("fudan.cloud.login",p.put("password",secret))
+            else -> if(isWebdav(service))
+                rt.request("webdav.login",p.put("id",service.removePrefix("webdav:")).put("username",email.trim()).put("password",secret))
+                else throw PortError("MethodUnavailable")
         }
     }
     suspend fun connect(service:String,account:String,replace:Boolean=false,
+        epoch:Long=rt.accountEpoch,
         prompt:(suspend (String)->Pair<String,String>)?=null):Any? = serial.withLock {
-        if(service !in services)throw PortError("MethodUnavailable")
-        val epoch=rt.accountEpoch
+        if(service !in services && !isWebdav(service))throw PortError("MethodUnavailable")
         val id=account to service
-        val k=key(account,kind(service))
+        val group=kind(service)
         val saved=synchronized(rt.authGuard) {
             checkAccount(account,epoch)
             val now=SystemClock.elapsedRealtime()
@@ -65,13 +90,13 @@ internal class CampusLogins(private val rt: RuntimeHost) {
                 recentFailures[id]?.let { if(now-it.first<30_000)throw PortError(it.second) }
                 if(recovered[id]?.let { now-it<8_000 }==true)return@withLock JSONObject().put("connected",true)
             }
-            rt.vault.get(k)?.let(::JSONObject)
+            savedLogins.get(account,group)?.let(::JSONObject)
         }
         fun attempt(email:String, secret:String, save:Boolean):Any? = synchronized(rt.authGuard) {
             checkAccount(account,epoch)
             val result=authenticate(service,account,email,secret)
             checkAccount(account,epoch)
-            if(save)rt.vault.set(k,JSONObject().put("email",email).put("secret",secret).toString())
+            if(save)savedLogins.set(account,group,JSONObject().put("email",email).put("secret",secret).toString())
             // The school just accepted this UIS password; a forum or Canvas secret says nothing about it.
             if(kind(service)=="uis"){rt.visiblePage.clearSilentFailure(account);clearVenueSuspension(account)}
             recovered[id]=SystemClock.elapsedRealtime();recentFailures.remove(id)
@@ -80,7 +105,7 @@ internal class CampusLogins(private val rt: RuntimeHost) {
         fun canvasViaCampus():Any? = synchronized(rt.authGuard) {
             checkAccount(account,epoch)
             if(venuePasswordSuspended(account))return@synchronized null
-            val uis=rt.vault.get(key(account,"uis"))?.let { JSONObject(it).getString("secret") } ?: return@synchronized null
+            val uis=savedLogins.get(account,"uis")?.let { JSONObject(it).getString("secret") } ?: return@synchronized null
             try {
                 val result=rt.request("canvas.uis.login",JSONObject().put("account_id",account).put("password",uis))
                 checkAccount(account,epoch); recovered[id]=SystemClock.elapsedRealtime();recentFailures.remove(id)
@@ -100,7 +125,7 @@ internal class CampusLogins(private val rt: RuntimeHost) {
                     checkAccount(account,epoch)
                     recentFailures[id]=SystemClock.elapsedRealtime() to e.code
                     if(e.code=="InvalidCredentials" || ((service=="forum" || service=="canvas") && e.code=="AuthenticationRequired"))
-                        rt.vault.delete(k)
+                        savedLogins.delete(account,group)
                     else throw e
                 }
                 if(service!="canvas" && prompt==null)throw e
