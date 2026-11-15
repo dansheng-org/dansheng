@@ -73,7 +73,7 @@ class TileFace extends StatelessWidget {
     return theme.textTheme.bodySmall!.copyWith(
       height: 16 / 12,
       color: alert
-          ? theme.colorScheme.onTertiaryContainer
+          ? theme.colorScheme.error
           : theme.colorScheme.onSurfaceVariant,
     );
   }
@@ -95,9 +95,13 @@ class TileFace extends StatelessWidget {
   Widget _heading(BuildContext context, {String? trailing, double? width}) {
     final style = _titleStyle(context);
     // The age only joins the title when both fit comfortably.
-    if (width != null &&
-        width < 70 + MediaQuery.textScalerOf(context).scale(13) * 7) {
-      trailing = null;
+    if (width != null && trailing != null) {
+      final scaler = MediaQuery.textScalerOf(context);
+      final titleW = scaler.scale(13) * tile.title.length;
+      final trailW = scaler.scale(11) * trailing.length;
+      if (width < 32 + titleW + trailW) {
+        trailing = null;
+      }
     }
     return Row(
       children: [
@@ -134,16 +138,40 @@ class TileFace extends StatelessWidget {
     Alignment alignment = Alignment.centerLeft,
   }) {
     final style = _figureStyle(context, fontSize);
+    final val = facts!.value ?? '';
+    final unit = facts!.unit;
+    final isCurrency = val.startsWith('¥') || val.startsWith('\$');
+    final currencySymbol = isCurrency ? val.substring(0, 1) : '';
+    final numberPart = isCurrency ? val.substring(1) : val;
+
+    final unitNeedsSpace =
+        unit != null &&
+        unit.isNotEmpty &&
+        !unit.startsWith('%') &&
+        !unit.startsWith('‰');
+    final formattedUnit = unit != null && unit.isNotEmpty
+        ? '${unitNeedsSpace ? ' ' : ''}$unit'
+        : '';
+
     return FittedBox(
       fit: BoxFit.scaleDown,
       alignment: alignment,
       child: Text.rich(
         TextSpan(
-          text: facts!.value,
           children: [
-            if (facts!.unit != null)
+            if (isCurrency)
               TextSpan(
-                text: ' ${facts!.unit}',
+                text: currencySymbol,
+                style: style.copyWith(
+                  fontSize: math.max(12, fontSize * 0.72),
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0,
+                ),
+              ),
+            TextSpan(text: numberPart),
+            if (formattedUnit.isNotEmpty)
+              TextSpan(
+                text: formattedUnit,
                 style: style.copyWith(
                   fontSize: math.max(11, fontSize * 0.5),
                   fontWeight: FontWeight.w600,
@@ -169,18 +197,19 @@ class TileFace extends StatelessWidget {
   Widget _icon(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(tile.icon, size: 24, color: theme.colorScheme.primary),
-          const SizedBox(height: 5),
+          Icon(tile.icon, size: 26, color: theme.colorScheme.primary),
+          const SizedBox(height: 6),
           Flexible(
             child: Text(
               tile.title,
               style: theme.textTheme.labelMedium!.copyWith(
                 fontSize: 11.5,
                 height: 1.2,
+                fontWeight: FontWeight.w500,
                 color: theme.colorScheme.onSurface,
               ),
               maxLines: 2,
@@ -194,32 +223,49 @@ class TileFace extends StatelessWidget {
   }
 
   Widget _small(BuildContext context, BoxConstraints box) {
-    const pad = EdgeInsets.fromLTRB(12, 9, 12, 9);
+    const pad = EdgeInsets.fromLTRB(12, 8, 12, 8);
     final inner = box.maxHeight - pad.vertical;
     final title = _line(context, _titleStyle(context));
-    // Room left for one more line under the title.
     final second = inner - title - 2;
+    final noteStyle = _noteStyle(context).copyWith(fontSize: 11);
+    final noteLine = _line(context, noteStyle);
+    final hasNote = _note != null && _note!.isNotEmpty;
+
+    // Check if both figure and a compact note can fit
+    final canFitBoth =
+        _hasFigure &&
+        hasNote &&
+        second >= _line(context, _figureStyle(context, 18.5)) + noteLine + 2;
+
     return Padding(
       padding: pad,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _heading(context),
-          if (_hasFigure)
-            Expanded(
-              child: Align(
-                alignment: Alignment.bottomLeft,
-                child: _figure(context, math.min(21, math.max(15, second))),
-              ),
-            )
-          else if (_note != null &&
-              second >= _line(context, _noteStyle(context)))
-            Expanded(
-              child: Align(
-                alignment: Alignment.bottomLeft,
-                child: _noteText(context),
-              ),
+          const Spacer(),
+          if (_hasFigure) ...[
+            _figure(
+              context,
+              canFitBoth ? 18.5 : math.min(21, math.max(15, second)),
             ),
+            if (canFitBoth) ...[
+              const SizedBox(height: 1),
+              Text(
+                _note!,
+                style: noteStyle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ] else if (hasNote && second >= noteLine) ...[
+            Text(
+              _note!,
+              style: _noteStyle(context),
+              maxLines: second >= noteLine * 2 ? 2 : 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ],
       ),
     );
@@ -230,13 +276,14 @@ class TileFace extends StatelessWidget {
     final titleStyle = theme.textTheme.titleMedium!.copyWith(
       fontSize: 15,
       height: 20 / 15,
+      fontWeight: FontWeight.w600,
     );
     final twoLines =
         _note != null &&
         box.maxHeight >=
             _line(context, titleStyle) +
                 _line(context, _noteStyle(context)) +
-                8;
+                6;
     final badge = math.min(40.0, box.maxHeight - 16);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -273,15 +320,35 @@ class TileFace extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (twoLines) Flexible(child: _noteText(context)),
+                if (twoLines) ...[
+                  const SizedBox(height: 2),
+                  Flexible(child: _noteText(context)),
+                ],
               ],
             ),
           ),
           if (_hasFigure) ...[
             const SizedBox(width: 10),
             ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: box.maxWidth * 0.42),
+              constraints: BoxConstraints(
+                maxWidth: math.max(130.0, box.maxWidth * 0.48),
+              ),
               child: _figure(context, 22, alignment: Alignment.centerRight),
+            ),
+          ] else if (age != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              age!,
+              style: _noteStyle(context).copyWith(fontSize: 11),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ] else ...[
+            const SizedBox(width: 6),
+            Icon(
+              Icons.chevron_right,
+              size: 20,
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
             ),
           ],
         ],
@@ -295,12 +362,16 @@ class TileFace extends StatelessWidget {
     final noteLine = _line(context, _noteStyle(context));
     var left = inner - _line(context, _titleStyle(context)) - 6;
     final figure = _hasFigure && left >= 24;
-    if (figure) left -= _line(context, _figureStyle(context, 28));
-    final noteLines = _note == null
+    if (figure) left -= _line(context, _figureStyle(context, 26));
+    final hasNote = _note != null && _note!.isNotEmpty;
+    final noteGap = figure && hasNote ? 3.0 : 0.0;
+    left -= noteGap;
+    final noteLines = !hasNote
         ? 0
         : math.min(figure ? 1 : 3, (left / noteLine).floor());
     left -= noteLines * noteLine;
     final rows = _fitRows(context, left - 8);
+
     return Padding(
       padding: pad,
       child: Column(
@@ -312,7 +383,8 @@ class TileFace extends StatelessWidget {
             width: box.maxWidth - pad.horizontal,
           ),
           const SizedBox(height: 6),
-          if (figure) _figure(context, 28),
+          if (figure) _figure(context, 26),
+          if (noteGap > 0) SizedBox(height: noteGap),
           if (noteLines > 0) _noteText(context, maxLines: noteLines),
           if (rows.isNotEmpty) ...[const Spacer(), ...rows],
         ],
@@ -326,13 +398,19 @@ class TileFace extends StatelessWidget {
     final noteLine = _line(context, _noteStyle(context));
     var left = inner - _line(context, _titleStyle(context)) - 6;
     final figure = _hasFigure && left >= 24;
-    if (figure) left -= _line(context, _figureStyle(context, 30));
-    final noteLines = _note == null
+    if (figure) left -= _line(context, _figureStyle(context, 28));
+    final hasNote = _note != null && _note!.isNotEmpty;
+    final noteGap = figure && hasNote ? 4.0 : 0.0;
+    left -= noteGap;
+    if (age != null) {
+      left -= _line(context, _noteStyle(context).copyWith(fontSize: 11));
+    }
+    final noteLines = !hasNote
         ? 0
         : math.min(figure ? 2 : 4, (left / noteLine).floor());
     final bars = facts?.bars ?? const <TileBar>[];
     final chart = bars.length >= 2 && inner >= 96;
-    final chartHeight = chart ? math.min(92.0, inner * 0.62) : 0.0;
+    final chartHeight = chart ? math.min(88.0, inner * 0.60) : 0.0;
     final rows = _fitRows(context, chart ? inner - chartHeight - 6 : inner);
     final detail = chart || rows.isNotEmpty;
     final summary = Column(
@@ -340,17 +418,17 @@ class TileFace extends StatelessWidget {
       children: [
         _heading(context, trailing: detail ? null : age),
         const SizedBox(height: 6),
-        if (figure) _figure(context, 30),
+        if (figure) _figure(context, 28),
+        if (noteGap > 0) SizedBox(height: noteGap),
         if (noteLines > 0) _noteText(context, maxLines: noteLines),
-        if (detail && age != null) ...[
-          const Spacer(),
+        const Spacer(),
+        if (age != null)
           Text(
             age!,
             style: _noteStyle(context).copyWith(fontSize: 11),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-        ],
       ],
     );
     return Padding(
@@ -396,28 +474,35 @@ class TileFace extends StatelessWidget {
     const gap = 5.0;
     final rows = <Widget>[];
     var used = 0.0;
-    for (final fact in all) {
-      final needed = line + (fact.level == null ? 0 : 6) + gap;
-      if (used + needed - gap > height) break;
+    for (var i = 0; i < all.length; i++) {
+      final fact = all[i];
+      final levelHeight = fact.level == null ? 0.0 : 7.0;
+      final rowGap = i == 0 ? 0.0 : gap;
+      final needed = line + levelHeight + rowGap;
+      if (used + needed > height) break;
       used += needed;
-      rows.add(_FactRow(fact: fact, style: style, gap: gap));
+      rows.add(_FactRow(fact: fact, style: style, topPadding: rowGap));
     }
     return rows;
   }
 }
 
 class _FactRow extends StatelessWidget {
-  const _FactRow({required this.fact, required this.style, required this.gap});
+  const _FactRow({
+    required this.fact,
+    required this.style,
+    this.topPadding = 5.0,
+  });
   final TileFact fact;
   final TextStyle style;
-  final double gap;
+  final double topPadding;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final level = fact.level;
     return Padding(
-      padding: EdgeInsets.only(top: gap),
+      padding: EdgeInsets.only(top: topPadding),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -453,12 +538,12 @@ class _FactRow extends StatelessWidget {
           ),
           if (level != null)
             Padding(
-              padding: const EdgeInsets.only(top: 3),
+              padding: const EdgeInsets.only(top: 3.5),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(2),
                 child: LinearProgressIndicator(
                   value: level.clamp(0.0, 1.0),
-                  minHeight: 3,
+                  minHeight: 3.5,
                   backgroundColor: colors.surfaceContainerHigh,
                   color: level >= 0.85 ? colors.error : colors.primary,
                 ),
@@ -491,18 +576,27 @@ class MiniBars extends StatelessWidget {
         builder: (context, box) {
           final line = MediaQuery.textScalerOf(context).scale(10) * 1.2;
           final showCaption = caption != null && box.maxHeight >= line * 2 + 30;
-          // Label every bar when there is room, else only the ends.
-          final every = box.maxWidth / bars.length >= 22;
+          // Determine if every bar label fits comfortably without colliding:
+          // date labels like '11/14' require ~28px; single digits require ~16px
+          final maxLabelLen = bars.fold<int>(
+            0,
+            (m, b) => math.max(m, b.label.length),
+          );
+          final minSlotWidth = maxLabelLen >= 4 ? 28.0 : 16.0;
+          final every = box.maxWidth / bars.length >= minSlotWidth;
+
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (showCaption)
+              if (showCaption) ...[
                 Text(
                   caption!,
                   style: label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+                const SizedBox(height: 3),
+              ],
               Expanded(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -532,13 +626,16 @@ class MiniBars extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 3),
               Row(
                 children: [
                   for (var i = 0; i < bars.length; i++)
                     Expanded(
                       child: Text(
-                        every || i == 0 || i == bars.length - 1
+                        every ||
+                                i == 0 ||
+                                i == bars.length - 1 ||
+                                bars[i].marked
                             ? bars[i].label
                             : '',
                         style: bars[i].marked
@@ -549,7 +646,7 @@ class MiniBars extends StatelessWidget {
                             : label,
                         maxLines: 1,
                         softWrap: false,
-                        overflow: TextOverflow.visible,
+                        overflow: TextOverflow.clip,
                         textAlign: TextAlign.center,
                       ),
                     ),
