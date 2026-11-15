@@ -34,7 +34,7 @@ runner 父进程必须注入绝对路径 `DANSHENG_CI_ROOT`。公开 workflow �
 | JAVA_HOME / GRADLE_HOME | Linux Android：Java 21、Gradle 9.7.1 安装根；不是缓存目录 |
 | ANDROID_HOME / ANDROID_SDK_ROOT | 同一预装 SDK；NDK 30.0.16138531、platform android-37.0、build-tools 36.0.0（AGP 编译）及 37.0.0（审计）、cmdline-tools/latest、CMake 3.22.1；Rust 预装两个 Android targets |
 | RUNNER_TOOL_CACHE | CI 专用工具缓存；由 runner 父进程部署配置提供，不尝试通过 GITHUB_ENV 覆写 GitHub 默认变量 |
-| CARGO_BUILD_JOBS / DANSHENG_GRADLE_WORKERS | 每个 job 的并发预算；1402 配置为 24 / 12，三个 worker 同时运行最多分配 72 个 Cargo 编译任务。取值必须为 1 至 256 的整数；未配置时保留本地脚本 3 / 2 的默认值 |
+| CARGO_BUILD_JOBS / DANSHENG_GRADLE_WORKERS | 每个 job 的并发预算；1402 当前可见 112 逻辑 CPU，配置为 32 / 16，三个 worker 同时最多分配 96 个 Cargo 编译任务。取值必须为 1 至 256 的整数；未配置时保留本地脚本 3 / 2 的默认值 |
 | 其他工具环境 | 需要时提供 LIBCLANG_PATH、GNU compiler PATH / linker 变量、Flutter mirror 变量；初始化保留并导出到后续步骤 |
 
 入口只选择已安装的工具。workflow 不执行 setup-*、rustup install、sdkmanager 安装或每次下载工具链；初始化验证工具版本/文件，缺失时失败。依赖解析仍通过锁定的 cargo fetch、npm ci、flutter pub get 和 Gradle 执行。

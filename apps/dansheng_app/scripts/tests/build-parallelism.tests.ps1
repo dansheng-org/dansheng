@@ -10,9 +10,9 @@ try {
     foreach ($name in $names) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
     $defaults = Get-DanshengBuildParallelism
     Check ($defaults.cargo -eq 3 -and $defaults.gradle -eq 2)
-    $env:CARGO_BUILD_JOBS='24'; $env:DANSHENG_GRADLE_WORKERS='12'
+    $env:CARGO_BUILD_JOBS='32'; $env:DANSHENG_GRADLE_WORKERS='16'
     $remote = Get-DanshengBuildParallelism
-    Check ($remote.cargo -eq 24 -and $remote.gradle -eq 12)
+    Check ($remote.cargo -eq 32 -and $remote.gradle -eq 16)
     foreach ($name in $names) {
         foreach ($bad in @('0','-1','257','all','12 --scan',' 12','1.5')) {
             [Environment]::SetEnvironmentVariable($name, $bad)
