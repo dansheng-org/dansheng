@@ -752,6 +752,8 @@ mod tests {
             client.list(&source(), "/").await,
             Err(ConnectorError::AuthRequired(_))
         ));
+        // The root itself can never be deleted.
+        assert!(client.delete(&source(), "/", true).await.is_err());
         let seen = client.transport.seen.lock().unwrap();
         assert_eq!(seen[0].method, HttpMethod::Propfind);
         assert!(seen[0].headers.contains(&("Depth".into(), "1".into())));
@@ -782,9 +784,6 @@ mod tests {
             seen.iter()
                 .all(|r| matches!(r.auth, TransportAuth::HostToken { .. }))
         );
-        drop(seen);
-        // The root itself can never be deleted.
-        assert!(client.delete(&source(), "/", true).await.is_err());
     }
 
     #[tokio::test]
