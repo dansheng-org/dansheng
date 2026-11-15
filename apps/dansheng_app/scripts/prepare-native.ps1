@@ -1,5 +1,8 @@
 param([string]$CoreRoot,[string]$CoreToolsRoot,[string]$ArtifactDirectory,[string]$RuntimeRoot,[string]$LockFile,[switch]$UpdateLock)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'build-parallelism.ps1')
+$nativeParallelism = Get-DanshengBuildParallelism
+Write-Host "Native build concurrency: Cargo $($nativeParallelism.cargo), Gradle $($nativeParallelism.gradle)."
 $app = (Resolve-Path -LiteralPath (Split-Path $PSScriptRoot)).Path
 . (Join-Path $PSScriptRoot 'core-dependency.ps1')
 $CoreRoot=Resolve-DanshengCoreRoot -AppRoot $app -CoreRoot $CoreRoot
@@ -72,14 +75,14 @@ try {
     $env:SOURCE_DATE_EPOCH = '0'
     $env:CFLAGS_aarch64_linux_android = Get-DanshengNativePrefixFlags -TargetDirectory $env:CARGO_TARGET_DIR
     $env:CC_SHELL_ESCAPED_FLAGS = '1'
-    cargo build -p dansheng-ffi --target aarch64-linux-android --release --features campus-webvpn --locked --offline -j 3
+    cargo build -p dansheng-ffi --target aarch64-linux-android --release --features campus-webvpn --locked --offline -j $nativeParallelism.cargo
     if($LASTEXITCODE -ne 0){throw 'Rust ARM64 build failed'}
     $armSo = Join-Path $armDir.FullName 'libdansheng_ffi.so'
     Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'aarch64-linux-android/release/libdansheng_ffi.so') -Destination $armSo
     . ./scripts/android-env.ps1 -Architecture x86_64
     $env:CARGO_HOME=$nativeCargoHome
     $env:CARGO_TARGET_DIR = Join-Path $RuntimeRoot 'cargo-x86'
-    cargo build -p dansheng-ffi --target x86_64-linux-android --features campus-webvpn --locked --offline -j 3
+    cargo build -p dansheng-ffi --target x86_64-linux-android --features campus-webvpn --locked --offline -j $nativeParallelism.cargo
     if($LASTEXITCODE -ne 0){throw 'Rust x86_64 build failed'}
     $debug = Join-Path $env:CARGO_TARGET_DIR 'x86_64-linux-android/debug/libdansheng_ffi.so'
     $target = Join-Path $staging.FullName 'libdansheng_ffi.so'
@@ -87,7 +90,7 @@ try {
     if($LASTEXITCODE -ne 0){throw 'Cannot stage emulator library'}
     # The Core launcher supplies its checked task project-cache directory.
     # Older launchers keep their .gradle metadata in this runtime-owned copy.
-    $gradleArguments=@('--init-script',$coreGradleInit,'-PandroidAbis=arm64-v8a,x86_64',"-PrustJniDir=$($jni.Replace('\','/'))",':adapter:assembleRelease','--offline','--max-workers=2','--console=plain')
+    $gradleArguments=@('--init-script',$coreGradleInit,'-PandroidAbis=arm64-v8a,x86_64',"-PrustJniDir=$($jni.Replace('\','/'))",':adapter:assembleRelease','--offline',"--max-workers=$($nativeParallelism.gradle)",'--parallel','--console=plain')
     & (Join-Path $coreBuildProject 'gradlew.ps1') -GradleArguments $gradleArguments
     if($LASTEXITCODE -ne 0){throw 'Adapter build failed'}
     if((Get-DanshengBuildSource -Root $CoreRoot).sha256 -ne $fingerprint){throw 'Core inputs changed during build'}

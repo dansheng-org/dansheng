@@ -56,7 +56,7 @@ Put (Join-Path $app 'pubspec.yaml') "name: fixture`nversion: 0.1.0+1`n"
 Put (Join-Path $app 'pubspec.lock') "packages:`n  pigeon:`n    version: `"29.1.1`"`n"
 # A deliberately unusable tracked lock proves the runtime lock is selected.
 Put (Join-Path $app 'core.lock.json') '{}'
-foreach ($name in @('prerelease-source-sdk.ps1','prerelease-common.ps1','core-dependency.ps1')) {
+foreach ($name in @('prerelease-source-sdk.ps1','prerelease-common.ps1','core-dependency.ps1','build-parallelism.ps1')) {
     Put (Join-Path $app "scripts/$name") ([IO.File]::ReadAllText((Join-Path $scripts $name)))
 }
 [void](Invoke-DsGit $mono @('init','--initial-branch=main'))

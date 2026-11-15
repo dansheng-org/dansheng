@@ -16,6 +16,7 @@ jobs:
     # Preserve required-check names; os is a display identity, not a runner label.
     name: native (${{ matrix.os }})
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
