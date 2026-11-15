@@ -107,7 +107,7 @@ if ($Role -in @('Workspace','AndroidSource','Release')) { Check-Tool python @('-
 if ($Role -in @('Android','AndroidSource','Release')) {
     if (-not $env:ANDROID_HOME -or -not $env:ANDROID_SDK_ROOT -or $env:ANDROID_HOME -cne $env:ANDROID_SDK_ROOT) { throw 'Select one preinstalled Android SDK in ANDROID_HOME and ANDROID_SDK_ROOT.' }
     $ndk = Join-Path $env:ANDROID_SDK_ROOT 'ndk/30.0.16138531'
-    if ((Get-Content -LiteralPath (Join-Path $ndk 'source.properties') -Raw) -notmatch '(?m)^Pkg.Revision\s*=\s*30\.0\.16138531\s*$') { throw 'Pinned NDK 30 is missing.' }
+    if (-not (Test-CiPinnedNdk (Get-Content -LiteralPath (Join-Path $ndk 'source.properties') -Raw))) { throw 'Pinned NDK 30 is missing.' }
     foreach ($name in @('ANDROID_NDK_HOME','ANDROID_NDK_ROOT','ANDROID_NDK_PATH','NDK_HOME')) {
         [Environment]::SetEnvironmentVariable($name, $ndk)
         Add-Content -LiteralPath $env:GITHUB_ENV -Value "$name=$ndk" -Encoding utf8

@@ -1,6 +1,11 @@
 #Requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 
+function Test-CiPinnedNdk([string]$Properties) {
+    # Google's r30 beta3 archive uses a prerelease suffix in Pkg.Revision.
+    [regex]::IsMatch($Properties, '(?m)^Pkg\.Revision\s*=\s*30\.0\.16138531(?:-beta3)?\s*$')
+}
+
 function Assert-CiPlainPath([string]$Path) {
     if (-not [IO.Path]::IsPathFullyQualified($Path)) { throw 'CI paths must be absolute.' }
     $full = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')

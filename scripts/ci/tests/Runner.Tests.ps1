@@ -55,6 +55,11 @@ try {
         Assert ($javaExit -eq 0 -and $properties -match $javaHomePattern) 'Actual JVM did not isolate user.home (including path spaces).'
     }
     . (Join-Path $scripts 'Common.ps1')
+    $ndkProperties = "Pkg.Desc = Android NDK`nPkg.Revision = 30.0.16138531-beta3`nPkg.BaseRevision = 30.0.16138531`nPkg.ReleaseName = r30-beta3`n"
+    Assert (Test-CiPinnedNdk $ndkProperties) 'Rejected the pinned official r30-beta3 metadata.'
+    Assert (Test-CiPinnedNdk 'Pkg.Revision = 30.0.16138531') 'Rejected the pinned base revision.'
+    Assert (-not (Test-CiPinnedNdk ($ndkProperties.Replace('30.0.16138531-beta3','30.0.16138530-beta3')))) 'Accepted a different NDK build.'
+    Assert (-not (Test-CiPinnedNdk 'Pkg.Revision = 30.0.16138531-beta4')) 'Accepted a different NDK prerelease.'
     $global:ciPermissionCalls = [Collections.Generic.List[object]]::new()
     function global:chmod { $global:ciPermissionCalls.Add(@($args)); $global:LASTEXITCODE = 0 }
     $layout = Get-DanshengCiLayout
@@ -191,7 +196,10 @@ try {
 } finally {
     foreach ($name in @('git','gh','dart','chmod','flutter')) { Remove-Item -LiteralPath "Function:\$name" -ErrorAction SilentlyContinue }
     foreach ($name in @('ciFormatCalls','ciPermissionCalls')) { Remove-Variable $name -Scope Global -ErrorAction SilentlyContinue }
-    Get-ChildItem Env: | Where-Object { -not $saved.ContainsKey($_.Name) } | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name, $null) }
+    # PowerShell string conversion can turn $null into an empty environment
+    # value on recent .NET; Git treats an empty GIT_CONFIG_GLOBAL as an override.
+    $addedNames = @(Get-ChildItem Env: | Where-Object { -not $saved.ContainsKey($_.Name) } | Select-Object -ExpandProperty Name)
+    foreach ($name in $addedNames) { Remove-Item -LiteralPath "Env:$name" }
     foreach ($name in $saved.Keys | Where-Object { $_ -notin @('HOME','USERPROFILE') }) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
 }
 $global:LASTEXITCODE = 0
