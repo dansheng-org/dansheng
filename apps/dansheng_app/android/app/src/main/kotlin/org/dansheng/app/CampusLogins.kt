@@ -11,6 +11,15 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     private val serial = Mutex()
     private val recovered = mutableMapOf<Pair<String,String>,Long>()
     private val recentFailures = mutableMapOf<Pair<String,String>,Pair<Long,String>>()
+    private val forumConsent = ForumRiskConsent(
+        readVersion = { account -> rt.prefs.getInt(ForumRiskConsent.key(account), 0) },
+        writeVersion = { account, version ->
+            val editor = rt.prefs.edit()
+            if (version == null) editor.remove(ForumRiskConsent.key(account))
+            else editor.putInt(ForumRiskConsent.key(account), version)
+            if (!editor.commit()) throw PortError("StorageUnavailable")
+        },
+    )
     private val services=setOf("ecard","academic","power","bus","dining","forum","canvas","webvpn")
     private fun kind(service:String)=when(service) { "forum","canvas" -> service; else -> "uis" }
     private fun key(account:String,group:String)="campus-login/v1/$group/$account"
@@ -32,12 +41,17 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     private fun checkAccount(account:String, epoch:Long) {
         if(rt.account()!=account || epoch!=rt.accountEpoch) throw PortError("AccountChanged")
     }
+    internal fun requireForumConsent(account:String) = synchronized(rt.authGuard) {
+        if(rt.account()!=account)throw PortError("AccountChanged")
+        forumConsent.requireAccepted(account)
+    }
     // The caller holds the same lock as authenticate(). Explicit logout forgets the
     // saved secrets; switching accounts keeps each profile's credentials separate.
     fun accountChanged(previous:String?,forget:Boolean) {
         recovered.clear(); recentFailures.clear(); rt.visiblePage.clearSilentFailures()
         if(forget && previous!=null) {
             for(g in listOf("uis","forum","canvas"))rt.vault.delete(key(previous,g))
+            forumConsent.forget(previous)
             clearVenueSuspension(previous)
         }
     }
@@ -53,9 +67,16 @@ internal class CampusLogins(private val rt: RuntimeHost) {
         }
     }
     suspend fun connect(service:String,account:String,replace:Boolean=false,
+        confirmForumRisk:(suspend ()->Unit)?=null,
         prompt:(suspend (String)->Pair<String,String>)?=null):Any? = serial.withLock {
         if(service !in services)throw PortError("MethodUnavailable")
         val epoch=rt.accountEpoch
+        if(service=="forum")forumConsent.authorize(account,confirmForumRisk) { action ->
+            synchronized(rt.authGuard) {
+                checkAccount(account,epoch)
+                action()
+            }
+        }
         val id=account to service
         val k=key(account,kind(service))
         val saved=synchronized(rt.authGuard) {
@@ -69,6 +90,7 @@ internal class CampusLogins(private val rt: RuntimeHost) {
         }
         fun attempt(email:String, secret:String, save:Boolean):Any? = synchronized(rt.authGuard) {
             checkAccount(account,epoch)
+            if(service=="forum")forumConsent.requireAccepted(account)
             val result=authenticate(service,account,email,secret)
             checkAccount(account,epoch)
             if(save)rt.vault.set(k,JSONObject().put("email",email).put("secret",secret).toString())

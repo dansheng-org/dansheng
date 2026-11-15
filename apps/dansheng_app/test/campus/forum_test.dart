@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dansheng_app/bridge.g.dart';
+import 'package:dansheng_app/ui/campus/campus_api.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_page.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_search_page.dart';
+import 'package:dansheng_app/ui/campus/forum/forum_service.dart';
 import 'package:dansheng_app/ui/campus/forum/hole_detail_page.dart';
 import 'package:dansheng_app/ui/core/dansheng_client.dart';
 import 'package:dansheng_app/ui/core/dansheng_state.dart';
 import 'package:dansheng_app/ui/theme/app_theme.dart';
+import 'package:dansheng_app/ui/screens/account_balance_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,8 +19,12 @@ import 'package:flutter_test/flutter_test.dart';
 /// Test mock bridge for offline verification of campus forum features.
 class MockForumDanshengBridge implements DanshengBridge {
   final List<Map<String, dynamic>> invocationLog = [];
+  final Map<String, List<Map<String, dynamic>>> responsePages = {};
   bool simulateUncertainPublish = false;
   bool simulateAuthRequired = false;
+  bool consentRequired = false;
+  String? loginError;
+  Completer<void>? loginPending;
   String? reconcileOutcome; // 'success' | 'unresolved' | 'empty'
 
   @override
@@ -31,11 +39,19 @@ class MockForumDanshengBridge implements DanshengBridge {
       final method = params['method']?.toString() ?? '';
       final methodParams = params['params'] as Map<String, dynamic>? ?? {};
 
+      if (consentRequired && method != 'campus.login') {
+        throw PlatformException(code: 'ForumConsentRequired');
+      }
       if (simulateAuthRequired && method != 'campus.login') {
         throw PlatformException(
           code: 'AuthenticationRequired',
           message: 'Forum authentication required',
         );
+      }
+
+      final pages = responsePages[method];
+      if (pages != null) {
+        return jsonEncode(pages.removeAt(0));
       }
 
       switch (method) {
@@ -318,6 +334,9 @@ class MockForumDanshengBridge implements DanshengBridge {
           }
 
         case 'campus.login':
+          await loginPending?.future;
+          if (loginError != null) throw PlatformException(code: loginError!);
+          consentRequired = false;
           simulateAuthRequired = false;
           return jsonEncode({'status': 'ok'});
 
@@ -351,10 +370,121 @@ Widget _wrapTestWidget(Widget child) {
   return MaterialApp(theme: AppTheme.lightTheme, home: child);
 }
 
+Map<String, dynamic> _paginationPage(String method, int offset, int count) {
+  final items = List.generate(count, (index) {
+    final id = offset + index + 1;
+    final timestamp = DateTime.utc(
+      2026,
+      11,
+      1,
+      12,
+    ).subtract(Duration(minutes: id)).toIso8601String();
+    final floor = <String, dynamic>{
+      'floor_id': 2000 + id,
+      'hole_id': 1000 + id,
+      'content': 'Synthetic pagination item $id',
+      'time_created': timestamp,
+      'deleted': false,
+    };
+    if (method == 'forum.search') return floor;
+    return <String, dynamic>{
+      'payload': method == 'community.tea.holes'
+          ? {
+              'hole_id': 1000 + id,
+              'division_id': 1,
+              'time_created': timestamp,
+              'time_updated': timestamp,
+              'floors': {'first_floor': floor},
+            }
+          : floor,
+    };
+  });
+  return {method == 'forum.search' ? 'items' : 'records': items};
+}
+
+List<Map<String, dynamic>> _methodParams(
+  MockForumDanshengBridge bridge,
+  String method,
+) => bridge.invocationLog
+    .where((entry) => entry['params']['method'] == method)
+    .map((entry) => entry['params']['params'] as Map<String, dynamic>)
+    .toList();
+
 void main() {
   late MockForumDanshengBridge mockBridge;
   late DanshengClient client;
   late DanshengController controller;
+
+  testWidgets('Account page keeps UIS and Canvas but no forum login', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrapTestWidget(AccountBalanceScreen(controller: controller)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('统一认证'), findsOneWidget);
+    expect(find.text('Canvas'), findsOneWidget);
+    expect(find.text('树洞账号'), findsNothing);
+    expect(find.byTooltip('登录树洞账号'), findsNothing);
+  });
+
+  testWidgets(
+    'Consent gate stops reads and login is single flight and replaceable',
+    (tester) async {
+      mockBridge.consentRequired = true;
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('登录论坛'), findsOneWidget);
+      expect(find.textContaining('明确确认承担风险'), findsOneWidget);
+      expect(
+        _methodParams(mockBridge, 'community.tea.divisions'),
+        hasLength(1),
+      );
+      expect(_methodParams(mockBridge, 'community.tea.holes'), isEmpty);
+
+      mockBridge.loginPending = Completer<void>();
+      await tester.tap(find.text('登录论坛'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('登录树洞账号'));
+      await tester.pump();
+      expect(find.text('正在登录…'), findsOneWidget);
+      expect(_methodParams(mockBridge, 'campus.login'), [
+        {'service': 'forum', 'replace': true},
+      ]);
+      mockBridge.loginPending!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('已连接树洞账号'), findsOneWidget);
+      expect(_methodParams(mockBridge, 'community.tea.holes'), hasLength(1));
+      expect(find.text('需要登录论坛服务'), findsNothing);
+      await tester.tap(find.byTooltip('登录树洞账号'));
+      await tester.pumpAndSettle();
+      expect(_methodParams(mockBridge, 'campus.login'), hasLength(2));
+      expect(_methodParams(mockBridge, 'campus.login').last['replace'], isTrue);
+    },
+  );
+
+  testWidgets(
+    'Cancelled native risk or credentials dialog stays quiet and allows retry',
+    (tester) async {
+      mockBridge.consentRequired = true;
+      mockBridge.loginError = 'Cancelled';
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+      for (var attempt = 0; attempt < 2; attempt++) {
+        await tester.tap(find.text('登录论坛'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('登录失败'), findsNothing);
+        expect(find.byType(SnackBar), findsNothing);
+        expect(find.text('登录论坛'), findsOneWidget);
+        expect(_methodParams(mockBridge, 'community.tea.holes'), isEmpty);
+      }
+      expect(_methodParams(mockBridge, 'campus.login'), hasLength(2));
+    },
+  );
 
   setUp(() async {
     mockBridge = MockForumDanshengBridge();
@@ -362,6 +492,95 @@ void main() {
     controller = DanshengController(client: client);
     await controller.initialize();
   });
+
+  test('ForumService: defaults to ten and clamps only holes', () async {
+    final service = ForumService(CampusApi(client));
+    await service.fetchHoles();
+    await service.fetchHoles(pageSize: 20);
+    await service.fetchHoles(pageSize: 2);
+    await service.fetchFloors(holeId: 101);
+    await service.fetchFloors(holeId: 101, size: 20);
+    await service.search(query: 'pagination');
+    await service.search(query: 'pagination', size: 20);
+
+    final holes = _methodParams(mockBridge, 'community.tea.holes');
+    expect(holes.map((params) => params['page_size']), [10, 10, 2]);
+    expect(holes.map((params) => params['size']), [10, 10, 2]);
+    final floors = _methodParams(mockBridge, 'community.tea.floors');
+    expect(floors.map((params) => params['size']), [10, 20]);
+    expect(floors.map((params) => params['page_size']), [10, 20]);
+    expect(
+      _methodParams(mockBridge, 'forum.search').map((params) => params['size']),
+      [10, 20],
+    );
+  });
+
+  for (final method in [
+    'community.tea.holes',
+    'community.tea.floors',
+    'forum.search',
+  ]) {
+    testWidgets('$method: ten items allow next page, short page stops', (
+      tester,
+    ) async {
+      mockBridge.responsePages[method] = [
+        _paginationPage(method, 0, 10),
+        _paginationPage(method, 10, 2),
+      ];
+      final Widget page = switch (method) {
+        'community.tea.holes' => ForumPage(controller: controller),
+        'community.tea.floors' => HoleDetailPage(
+          controller: controller,
+          holeId: 101,
+        ),
+        _ => ForumSearchPage(controller: controller),
+      };
+      await tester.pumpWidget(_wrapTestWidget(page));
+      await tester.pumpAndSettle();
+      if (method == 'forum.search') {
+        await tester.enterText(find.byType(TextField), 'pagination');
+        await tester.tap(find.byTooltip('搜索'));
+        await tester.pumpAndSettle();
+      }
+
+      expect(_methodParams(mockBridge, method), hasLength(1));
+      final more = find.text(
+        method == 'community.tea.floors' ? '加载更多楼层' : '加载更多',
+      );
+      final list = find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      );
+      await tester.scrollUntilVisible(more, 300, scrollable: list);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(more);
+      await tester.pumpAndSettle();
+      await tester.tap(more);
+      await tester.pumpAndSettle();
+
+      final calls = _methodParams(mockBridge, method);
+      expect(calls, hasLength(2));
+      expect(calls.map((params) => params['size']), [10, 10]);
+      if (method == 'community.tea.holes') {
+        expect(calls.first['before'], isNull);
+        expect(calls.last['before'], '2026-11-01T11:50:00.000Z');
+      } else {
+        expect(calls.map((params) => params['offset']), [0, 10]);
+      }
+      await tester.scrollUntilVisible(
+        find.textContaining('Synthetic pagination item 12'),
+        300,
+        scrollable: list,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Synthetic pagination item 12'),
+        findsOneWidget,
+      );
+      expect(more, findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets(
     'ForumPage: loads divisions, pinned posts, holes and handles division filter',
@@ -477,7 +696,7 @@ void main() {
             entry['params']['method'] == 'community.tea.floors',
       );
       expect(floorsCall['params']['params']['hole_id'], 101);
-      expect(floorsCall['params']['params']['page_size'], 20);
+      expect(floorsCall['params']['params']['page_size'], 10);
 
       // 6. Anonymity check: verify no token leaked
       expect(find.textContaining('LEAK_TOKEN'), findsNothing);
