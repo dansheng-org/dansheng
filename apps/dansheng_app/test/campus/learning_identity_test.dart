@@ -20,6 +20,7 @@ const _semester = {
 class _Bridge implements DanshengBridge {
   final calls = <String>[];
   bool calendarUnavailable = false;
+  Map<String, dynamic> semester = _semester;
   @override
   Future<String> invoke(HostCommand command, String payload) async {
     if (command != HostCommand.campus) return '{}';
@@ -30,12 +31,12 @@ class _Bridge implements DanshengBridge {
       throw PlatformException(code: 'SemesterCalendarUnavailable');
     }
     return jsonEncode(switch (method) {
-      'fudan.postgraduate.semester' => _semester,
+      'fudan.postgraduate.semester' => semester,
       'fudan.semesters' => {
-        'semesters': [_semester],
+        'semesters': [semester],
       },
       'fudan.timetable.sync' ||
-      'fudan.postgraduate.sync' => {'semester': _semester, 'courses': []},
+      'fudan.postgraduate.sync' => {'semester': semester, 'courses': []},
       _ => [],
     });
   }
@@ -51,6 +52,32 @@ class _App extends DanshengController {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'PG week zero loads the validated current semester before teaching starts',
+    () async {
+      final bridge = _Bridge()
+        ..semester = {
+          'external_id': '2',
+          'name': '2026-2027学年2学期',
+          'starts_on': '2027-02-22',
+        };
+      final app = _App(bridge, '26100000000');
+      final ctrl = LearningController(
+        appController: app,
+        now: () => DateTime.utc(2027, 2, 15),
+      );
+      await ctrl.loadAcademic();
+      expect(ctrl.currentSemester?.externalId, '2');
+      expect(ctrl.academicError, isNull);
+      expect(bridge.calls, [
+        'fudan.postgraduate.semester',
+        'fudan.postgraduate.sync',
+      ]);
+      expect(ctrl.timetableData?.semester?.startsOn, DateTime(2027, 2, 22));
+      ctrl.dispose();
+      app.dispose();
+    },
+  );
   test(
     'an unverified PG semester cannot be replaced with an old cached calendar',
     () async {

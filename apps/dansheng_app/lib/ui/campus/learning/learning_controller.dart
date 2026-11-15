@@ -492,7 +492,11 @@ class LearningController extends ChangeNotifier {
       _semesters = isUndergraduate
           ? SemesterCatalog.fromJson(response).semesters
           : [Semester.fromJson(response as Map<String, dynamic>)];
-      _currentSemester = _semesterForToday(_semesters);
+      // PG metadata already validates the full semester, including week zero
+      // before teaching week one's Monday. Do not reject that future Monday.
+      _currentSemester = isUndergraduate
+          ? _semesterForToday(_semesters)
+          : _semesters.single;
       final previousId = _selectedSemester?.externalId;
       _selectedSemester =
           _semesters.where((s) => s.externalId == previousId).firstOrNull ??
