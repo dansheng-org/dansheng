@@ -158,7 +158,7 @@ android {
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("official-campus-assets").get().asFile)
     sourceSets["androidTest"].assets.srcDir(layout.buildDirectory.dir("qa-plugins").get().asFile)
 
-    val betaKey = providers.environmentVariable("DANSHENG_BETA_STORE")
+    val betaKey = providers.environmentVariable("DANSHENG_BETA_STORE").filter { it.isNotBlank() }
     if (betaKey.isPresent) signingConfigs.create("internalBeta") {
         storeFile = file(betaKey.get())
         storePassword = providers.environmentVariable("DANSHENG_BETA_PASSWORD").get()

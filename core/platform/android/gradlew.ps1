@@ -2,18 +2,20 @@
 [CmdletBinding()]
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$GradleArguments)
 $ErrorActionPreference = 'Stop'
+$DanshengGradleName=if($IsWindows){'gradle.bat'}else{'gradle'}
+$DanshengUserHome=if($env:HOME){$env:HOME}else{[Environment]::GetFolderPath('UserProfile')}
 $DanshengGradle = if ($env:GRADLE_HOME) {
-    Join-Path $env:GRADLE_HOME 'bin/gradle.bat'
+    Join-Path $env:GRADLE_HOME "bin/$DanshengGradleName"
 } else {
     $DanshengGradleRoots=@(
         $env:DANSHENG_GRADLE_INSTALL_ROOT,
         $(if($env:DANSHENG_CACHE_ROOT){Join-Path $env:DANSHENG_CACHE_ROOT 'gradle/wrapper/dists/gradle-9.7.1-bin'}),
         $(if($env:GRADLE_USER_HOME){Join-Path $env:GRADLE_USER_HOME 'wrapper/dists/gradle-9.7.1-bin'}),
-        'D:/DevCache/gradle/wrapper/dists/gradle-9.7.1-bin',
-        (Join-Path $env:USERPROFILE '.gradle/wrapper/dists/gradle-9.7.1-bin')
+        $(if($DanshengUserHome){Join-Path $DanshengUserHome '.gradle/wrapper/dists/gradle-9.7.1-bin'}),
+        $(if($IsWindows){'D:/DevCache/gradle/wrapper/dists/gradle-9.7.1-bin'})
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique
     foreach($DanshengGradleRoot in $DanshengGradleRoots){
-        $DanshengCandidate=Get-ChildItem -LiteralPath $DanshengGradleRoot -Filter gradle.bat -File -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -First 1 -ExpandProperty FullName
+        $DanshengCandidate=Get-ChildItem -LiteralPath $DanshengGradleRoot -Filter $DanshengGradleName -File -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -First 1 -ExpandProperty FullName
         if($DanshengCandidate){$DanshengCandidate;break}
     }
 }
@@ -26,7 +28,9 @@ $DanshengGradle=Get-DanshengCheckedPath $DanshengGradle
 if(-not(Test-Path -LiteralPath (Join-Path (Split-Path -Parent (Split-Path -Parent $DanshengGradle)) 'lib/gradle-launcher-9.7.1.jar'))){
     throw 'The selected Gradle installation must be version 9.7.1'
 }
-if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = if($env:ANDROID_SDK_ROOT){$env:ANDROID_SDK_ROOT}else{'C:/Android/Sdk'} }
+if (-not $env:ANDROID_HOME) {
+    $env:ANDROID_HOME = if($env:ANDROID_SDK_ROOT){$env:ANDROID_SDK_ROOT}elseif($IsWindows){'C:/Android/Sdk'}elseif($DanshengUserHome){Join-Path $DanshengUserHome 'Android/Sdk'}else{throw 'Set ANDROID_SDK_ROOT or ANDROID_HOME to the Android SDK installation.'}
+}
 # The installation stays read-only; Gradle's cache/project cache is task-owned.
 $DanshengRuntime=if($env:DANSHENG_TASK_RUNTIME){Resolve-DanshengRuntimeRoot -Root $DanshengAndroidSourceRoot -RuntimeRoot $env:DANSHENG_TASK_RUNTIME}else{$null}
 $DanshengSavedGradleHome=$env:GRADLE_USER_HOME

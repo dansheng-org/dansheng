@@ -25,6 +25,8 @@ App 包含锁定 Pub 解析、手写格式、analyze、test、Pigeon 生成及�
 
 Core 包含 `cargo fmt --all -- --check`、`cargo test --workspace --all-features --all-targets --locked` 和 strict Clippy。插件 SDK 使用自身 npm lock、类型检查和 Node tests。精确 CI 命令见 [app-ci.yml](../../.github/workflows/app-ci.yml) 和 [core-ci.yml](../../.github/workflows/core-ci.yml)。
 
+自托管 Windows/Linux runner 的分工、预装环境接口、缓存/签名隔离与 smoke 验收见 [自托管 CI](self-hosted-ci.md)。CI 手写 Dart 格式检查使用相对路径、每批最多 32 个文件，并排除 Pigeon 生成的 `lib/bridge.g.dart`。
+
 本地共享检查使用 `git ls-files`、`git check-ignore -v`、链接目标和双向读取。没有第二个授权 worktree 时不能声称跨工作树已实测。Claude 配置语法与实际加载结果也应分开报告。
 
 ## 分层验收
