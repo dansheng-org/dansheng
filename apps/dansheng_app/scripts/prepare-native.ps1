@@ -83,7 +83,7 @@ try {
     if($LASTEXITCODE -ne 0){throw 'Rust x86_64 build failed'}
     $debug = Join-Path $env:CARGO_TARGET_DIR 'x86_64-linux-android/debug/libdansheng_ffi.so'
     $target = Join-Path $staging.FullName 'libdansheng_ffi.so'
-    & (Join-Path $DanshengNdkRoot 'bin/llvm-strip.exe') --strip-debug -o $target $debug
+    & $DanshengAndroidStrip --strip-debug -o $target $debug
     if($LASTEXITCODE -ne 0){throw 'Cannot stage emulator library'}
     # The Core launcher supplies its checked task project-cache directory.
     # Older launchers keep their .gradle metadata in this runtime-owned copy.

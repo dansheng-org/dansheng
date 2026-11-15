@@ -10,6 +10,7 @@ param(
     [switch]$ReviewSigning
 )
 $ErrorActionPreference = 'Stop'
+if ($ReviewSigning -and -not $IsWindows) { throw 'ReviewSigning requires Windows DPAPI. On Linux supply DANSHENG_BETA_STORE and DANSHENG_BETA_PASSWORD for a persistent signing identity.' }
 $app = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'core-dependency.ps1')
 . (Join-Path $PSScriptRoot 'prerelease-common.ps1')
@@ -32,7 +33,7 @@ $identity = Get-DanshengPrereleaseIdentity -AppRoot $app -Commit $commit
 $lock = Get-Content -LiteralPath $LockFile -Raw | ConvertFrom-Json
 $lockHash = (Get-FileHash -LiteralPath $LockFile).Hash
 $saved = @{}
-$names = @('DANSHENG_CORE_ROOT','DANSHENG_CORE_SDK_DIR','DANSHENG_CORE_LOCK_FILE','DANSHENG_BETA_STORE','DANSHENG_BETA_PASSWORD','ORG_GRADLE_PROJECT_danshengStableRelease','PUB_CACHE','GRADLE_USER_HOME','ANDROID_USER_HOME','TEMP','TMP')
+$names = @('DANSHENG_CORE_ROOT','DANSHENG_CORE_SDK_DIR','DANSHENG_CORE_LOCK_FILE','DANSHENG_BETA_STORE','DANSHENG_BETA_PASSWORD','ORG_GRADLE_PROJECT_danshengStableRelease','PUB_CACHE','GRADLE_USER_HOME','ANDROID_USER_HOME','TEMP','TMP','TMPDIR')
 foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
 try {
     foreach ($dir in @('pub-cache','gradle-cache','android-user','logs','tmp')) { [void][IO.Directory]::CreateDirectory((Join-Path $RuntimeRoot $dir)) }
@@ -40,7 +41,7 @@ try {
     $env:PUB_CACHE = Join-Path $RuntimeRoot 'pub-cache'
     $env:GRADLE_USER_HOME = Join-Path $RuntimeRoot 'gradle-cache'
     $env:ANDROID_USER_HOME = Join-Path $RuntimeRoot 'android-user'
-    $env:TEMP = $env:TMP = Join-Path $RuntimeRoot 'tmp'
+    $env:TEMP = $env:TMP = $env:TMPDIR = Join-Path $RuntimeRoot 'tmp'
     $env:DANSHENG_CORE_ROOT = Join-Path $ArtifactDirectory 'resources'
     $env:DANSHENG_CORE_SDK_DIR = $ArtifactDirectory
     $env:DANSHENG_CORE_LOCK_FILE = $LockFile
@@ -54,7 +55,7 @@ try {
         if ((Test-Path $key) -ne (Test-Path $passwordFile)) { throw 'Incomplete review signing identity; retained for inspection.' }
         if (-not (Test-Path $key)) {
             $env:DANSHENG_BETA_PASSWORD = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(36))
-            & (Join-Path $env:JAVA_HOME 'bin/keytool.exe') -genkeypair -alias dansheng-beta -keyalg RSA -keysize 3072 -validity 3650 -storetype PKCS12 -keystore $key -storepass:env DANSHENG_BETA_PASSWORD -dname 'CN=Dansheng Pre-release Review'
+            & (Join-Path $env:JAVA_HOME "bin/keytool$(if($IsWindows){'.exe'})") -genkeypair -alias dansheng-beta -keyalg RSA -keysize 3072 -validity 3650 -storetype PKCS12 -keystore $key -storepass:env DANSHENG_BETA_PASSWORD -dname 'CN=Dansheng Pre-release Review'
             if ($LASTEXITCODE -ne 0) { throw 'Cannot create review signing identity.' }
             ConvertTo-SecureString $env:DANSHENG_BETA_PASSWORD -AsPlainText -Force | ConvertFrom-SecureString | Set-Content -LiteralPath $passwordFile
         } else {
@@ -77,7 +78,9 @@ try {
     $apk = Join-Path $out $identity.apk_name
     Copy-Item -LiteralPath (Join-Path $app 'build/app/outputs/flutter-apk/app-arm64-v8a-release.apk') -Destination $apk
     & (Join-Path $PSScriptRoot 'audit-apk.ps1') -Apk $apk -Abi arm64-v8a -Output (Join-Path $out 'apk-audit.json') -ArtifactDirectory $ArtifactDirectory -LockFile $LockFile -Release -SdkOnly
-    $buildTools = Join-Path $env:ANDROID_HOME 'build-tools/37.0.0'
+    $androidSdk = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { $env:ANDROID_HOME }
+    if (-not $androidSdk) { throw 'Set ANDROID_SDK_ROOT or ANDROID_HOME to the Android SDK installation.' }
+    $buildTools = Join-Path $androidSdk 'build-tools/37.0.0'
     $suffix = if ($IsWindows) { '.exe' } else { '' }
     & (Join-Path $buildTools "zipalign$suffix") -c -P 16 4 $apk 2>&1 | Tee-Object -FilePath (Join-Path $out 'zipalign.txt')
     if ($LASTEXITCODE -ne 0) { throw 'APK ZIP alignment validation failed.' }

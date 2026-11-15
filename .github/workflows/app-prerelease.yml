@@ -27,7 +27,7 @@ jobs:
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.checks.result == 'success'))
-    runs-on: windows-latest
+    runs-on: [self-hosted, linux, x64, 1402ubuntu]
     timeout-minutes: 120
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
@@ -44,12 +44,18 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
+      - name: Initialize preinstalled Linux environment
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
+          source "$DANSHENG_CI_ROOT/runner-env.sh"
+          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Release
       - name: Select exact App and Core identities
         id: identity
         run: |
           $ErrorActionPreference = 'Stop'
-          $runtime = Join-Path $env:RUNNER_TEMP "dansheng-prerelease-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          "DANSHENG_TASK_RUNTIME=$runtime" >> $env:GITHUB_ENV
           . ./scripts/prerelease-common.ps1
           $commit = git rev-parse HEAD
           $identity = Get-DanshengPrereleaseIdentity -AppRoot $PWD.Path -Commit $commit
@@ -72,47 +78,11 @@ jobs:
           if ($tags -ccontains $env:RELEASE_TAG -or $refs -ccontains "refs/tags/$env:RELEASE_TAG") {
             throw 'This commit already has a release. Inspect it before retrying; no overwrite is performed.'
           }
-      - name: Require persistent signing secrets
-        env:
-          KEYSTORE: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_PASSWORD }}
-        run: |
-          if (-not $env:KEYSTORE -or -not $env:KEYSTORE_PASSWORD) { throw 'Configure both DANSHENG_PRERELEASE_KEYSTORE_* secrets first.' }
-          $dir = Join-Path $env:DANSHENG_TASK_RUNTIME 'signing'
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          $key = Join-Path $dir 'prerelease.p12'
-          [IO.File]::WriteAllBytes($key, [Convert]::FromBase64String($env:KEYSTORE))
-          "DANSHENG_BETA_STORE=$key" >> $env:GITHUB_ENV
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
-        with:
-          distribution: microsoft
-          java-version: '21'
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
-        with:
-          flutter-version: '3.47.7'
-          channel: stable
-          cache: false
-      - name: Install pinned Gradle for clean source builds
-        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
-        with:
-          gradle-version: '9.7.1'
-          cache-disabled: true
-      - name: Prepare pinned Android tools
-        run: |
-          $manager = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest/bin/sdkmanager.bat'
-          & $manager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;30.0.16138531' 'cmake;3.22.1'
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot install pinned Android SDK/NDK.' }
-          "ANDROID_SDK_ROOT=$env:ANDROID_HOME" >> $env:GITHUB_ENV
-      - name: Prepare pinned Rust compiler and Android targets
-        run: |
-          rustup toolchain install 1.99.1-x86_64-pc-windows-msvc --profile minimal --target aarch64-linux-android --target x86_64-linux-android
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot install pinned Rust compiler/targets.' }
-          "RUSTUP_TOOLCHAIN=1.99.1-x86_64-pc-windows-msvc" >> $env:GITHUB_ENV
       - name: Build and verify SDK from exact checkout
         env:
           SOURCE_COMMIT: ${{ steps.identity.outputs.commit }}
         run: |
-          ./scripts/prerelease-source-sdk.ps1 -RuntimeRoot $env:DANSHENG_TASK_RUNTIME -Commit $env:SOURCE_COMMIT
+          ../../scripts/ci/Invoke-Android.ps1 -Mode SourceSdk -Commit $env:SOURCE_COMMIT
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: native-sdk-${{ steps.identity.outputs.commit }}
@@ -122,36 +92,51 @@ jobs:
             ${{ env.DANSHENG_TASK_RUNTIME }}/native-sdk/receipt.json
           if-no-files-found: error
           retention-days: 30
+      - name: Require persistent signing secrets
+        env:
+          KEYSTORE: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_PASSWORD }}
+        run: ../../scripts/ci/Write-Signing.ps1
       - name: Build, sign and audit ARM64 release APK
         env:
           DANSHENG_BETA_PASSWORD: ${{ secrets.DANSHENG_PRERELEASE_KEYSTORE_PASSWORD }}
         run: |
-          ./scripts/build-prerelease.ps1 -RuntimeRoot $env:DANSHENG_TASK_RUNTIME `
-            -ArtifactDirectory (Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk') `
-            -CoreToolsRoot (Resolve-Path '../../core/tools/workspace').Path `
-            -CoreRoot (Resolve-Path '../../core').Path `
-            -LockFile (Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk/core.lock.json')
+          ../../scripts/ci/Invoke-Android.ps1 -Mode Release
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-prerelease-${{ steps.identity.outputs.commit }}
           path: ${{ env.DANSHENG_TASK_RUNTIME }}/artifacts/review/*
           if-no-files-found: error
           retention-days: 30
+      - name: Remove this job's temporary signing files
+        if: always()
+        run: ../../scripts/ci/Clear-Signing.ps1
 
   publish:
     needs: build
     # Automatic runs skip the manual checks job. Override inherited skip status,
     # while still requiring a successful audited build and a non-cancelled run.
     if: always() && !cancelled() && needs.build.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, 1402ubuntu]
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.build.outputs.commit }}
+          persist-credentials: false
+      - name: Initialize preinstalled Linux environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
+          source "$DANSHENG_CI_ROOT/runner-env.sh"
+          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Publish
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android-prerelease-${{ needs.build.outputs.commit }}
-          path: release
+          path: ${{ env.DANSHENG_TASK_RUNTIME }}/release
       - name: Create a draft, attach validated assets, then publish Pre-release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -162,7 +147,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd release
+          cd "$DANSHENG_TASK_RUNTIME/release"
           sha256sum --check SHA256SUMS
           for asset in ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt release-notes.md core.lock.json core-receipt.json; do test -s "$asset"; done
           gh api "repos/$GH_REPO/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$APP_COMMIT" >/dev/null

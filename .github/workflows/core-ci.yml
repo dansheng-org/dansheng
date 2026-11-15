@@ -1,6 +1,10 @@
 name: Rust core
 on:
   workflow_call:
+    inputs:
+      smoke:
+        type: boolean
+        default: false
 permissions:
   contents: read
 defaults:
@@ -8,69 +12,99 @@ defaults:
     working-directory: core
 jobs:
   native:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Preserve required-check names; os is a display identity, not a runner label.
+    name: native (${{ matrix.os }})
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.1
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: core -> target
-      - run: cargo fmt --all -- --check
-      - run: cargo test --workspace --all-features --all-targets --locked
-      - run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
-      - name: Worktree workflow integration fixtures
+        include:
+          - os: ubuntu-latest
+            labels: [self-hosted, linux, x64, 1402ubuntu]
+          - os: windows-latest
+            labels: [self-hosted, windows, x64, dansheng-win]
+    runs-on: ${{ matrix.labels }}
+    defaults:
+      run:
         shell: pwsh
-        run: |
-          ./tools/workspace/tests/Test-Workspace.ps1
-          ./tools/workspace/tests/Test-Monorepo.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP "core-monorepo-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT")
-      - name: Dependency cache isolation fixtures
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Initialize preinstalled Windows environment
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./tools/workspace/tests/Test-Environment.ps1
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/ci/Initialize-Runner.ps1 -Role Native
+      - name: Initialize preinstalled Linux environment
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
+          source "$DANSHENG_CI_ROOT/runner-env.sh"
+          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Native
+      - run: cargo fmt --all -- --check
+        if: ${{ !inputs.smoke }}
+      - run: cargo test --workspace --all-features --all-targets --locked
+        if: ${{ !inputs.smoke }}
+      - run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
+        if: ${{ !inputs.smoke }}
+      - name: Worktree workflow integration fixtures
+        if: ${{ !inputs.smoke }}
+        run: |
+          ./tools/workspace/tests/Test-Workspace.ps1 -OutputDirectory (Join-Path $env:DANSHENG_TASK_RUNTIME 'workspace-fixtures')
+          ./tools/workspace/tests/Test-Monorepo.ps1 -OutputDirectory (Join-Path $env:DANSHENG_TASK_RUNTIME 'monorepo-fixtures')
+      - name: Dependency cache isolation fixtures
+        if: runner.os == 'Windows' && !inputs.smoke
+        run: ./tools/workspace/tests/Test-Environment.ps1 -OutputRoot (Join-Path $env:DANSHENG_TASK_RUNTIME 'environment-fixtures')
   sdk:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, 1402ubuntu]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: core/sdk/package-lock.json
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Initialize preinstalled Linux environment
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
+          source "$DANSHENG_CI_ROOT/runner-env.sh"
+          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Sdk
       - run: npm ci --ignore-scripts
+        if: ${{ !inputs.smoke }}
         working-directory: core/sdk
       - run: npm run check
+        if: ${{ !inputs.smoke }}
         working-directory: core/sdk
       - run: node --test scripts/tests/runtime-paths.test.mjs
+        if: ${{ !inputs.smoke }}
   android:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, 1402ubuntu]
     env:
       ANDROID_NDK_VERSION: '30.0.16138531'
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          toolchain: 1.99.1
-          targets: aarch64-linux-android,x86_64-linux-android
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-      - name: Install and select pinned Android NDK
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Initialize preinstalled Linux environment
+        shell: bash
+        working-directory: ${{ github.workspace }}
         run: |
-          sdkmanager "ndk;${ANDROID_NDK_VERSION}"
-          ndk_root="${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
-          test -f "${ndk_root}/source.properties"
-          grep -F "Pkg.Revision = ${ANDROID_NDK_VERSION}" "${ndk_root}/source.properties"
-          for name in ANDROID_NDK_HOME ANDROID_NDK_ROOT ANDROID_NDK_PATH NDK_HOME; do
-            printf '%s=%s\n' "$name" "$ndk_root" >> "$GITHUB_ENV"
-          done
+          set -euo pipefail
+          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
+          source "$DANSHENG_CI_ROOT/runner-env.sh"
+          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Android
       - name: Build Android core libraries
+        if: ${{ !inputs.smoke }}
+        shell: bash
         run: |
+          set -euo pipefail
           ndk_toolchain="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
           for target in aarch64-linux-android x86_64-linux-android; do
             target_key="${target//-/_}"

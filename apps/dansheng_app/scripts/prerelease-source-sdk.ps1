@@ -39,7 +39,13 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Cannot populate the locked Cargo dependencies.' }
     } finally { Pop-Location }
     # Use a pinned installation, not Flutter's untracked generated wrapper.
-    $launcher = Resolve-DanshengPrereleaseGradle
+    $gradleName = if ($IsWindows) { 'gradle.bat' } else { 'gradle' }
+    $gradlePath = if ($env:GRADLE_HOME) { Join-Path $env:GRADLE_HOME "bin/$gradleName" } else {
+        (Get-Command $gradleName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    }
+    if (-not $gradlePath) { throw 'Install Gradle 9.7.1 on PATH or set GRADLE_HOME before building the source SDK.' }
+    # Pass the host launcher explicitly; retain the common pinned-JAR validator.
+    $launcher = Resolve-DanshengPrereleaseGradle -CommandPath $gradlePath
     $env:GRADLE_HOME = Split-Path -Parent (Split-Path -Parent $launcher)
     & $launcher --version
     if ($LASTEXITCODE -ne 0) { throw 'Cannot initialize the pinned Gradle distribution.' }
