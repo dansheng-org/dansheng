@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // DanXi-style forum data models for Dansheng.
+// Floor fields adapted from DanXi lib/model/forum/floor.dart.
+// Copyright (C) 2021 DanXi-Dev; GPL-3.0-or-later.
+
+/// Star-prefixed tags mark folded threads and are hidden from tag chips.
+bool isHiddenForumTag(String tag) => tag.startsWith('*');
+
+bool isVisibleForumTag(String tag) => tag != '默认' && !isHiddenForumTag(tag);
 
 /// Sort order for community holes.
 enum ForumSortOrder {
@@ -24,6 +31,9 @@ class TeaFloor {
   final int like;
   final int dislike;
   final List<String> fold;
+  final int? ranking;
+  final int? replyTo;
+  final String? specialTag;
 
   const TeaFloor({
     required this.floorId,
@@ -37,6 +47,9 @@ class TeaFloor {
     this.like = 0,
     this.dislike = 0,
     this.fold = const [],
+    this.ranking,
+    this.replyTo,
+    this.specialTag,
   });
 
   factory TeaFloor.fromJson(Map<String, dynamic> json) {
@@ -62,6 +75,9 @@ class TeaFloor {
       like: _parseInt(json['like']),
       dislike: _parseInt(json['dislike']),
       fold: parsedFold,
+      ranking: _parseOptionalInt(json['ranking']),
+      replyTo: _parseOptionalInt(json['reply_to']),
+      specialTag: json['special_tag']?.toString(),
     );
   }
 
@@ -77,6 +93,9 @@ class TeaFloor {
     'like': like,
     'dislike': dislike,
     'fold': fold,
+    'ranking': ranking,
+    'reply_to': replyTo,
+    'special_tag': specialTag,
   };
 }
 
@@ -163,24 +182,6 @@ class TeaHole {
       }
     }
 
-    // Fallback: extract #hashtags from first floor content if tags array is empty
-    if (parsedTags.isEmpty) {
-      final firstFloor = floorsPreview?.firstFloor;
-      final content = firstFloor?.content;
-      if (content != null && content.isNotEmpty) {
-        final matches = RegExp(r'#([^\s#,，。！？]+)').allMatches(content);
-        for (final m in matches) {
-          final tag = m.group(1);
-          if (tag != null &&
-              tag.isNotEmpty &&
-              tag.length <= 16 &&
-              !parsedTags.contains(tag)) {
-            parsedTags.add(tag);
-          }
-        }
-      }
-    }
-
     return TeaHole(
       holeId: _parseInt(json['hole_id']),
       divisionId: _parseInt(json['division_id']),
@@ -263,6 +264,10 @@ class ForumSearchResult {
   final String? timeCreated;
   final List<String> tags;
   final bool deleted;
+  final List<String> fold;
+  final int? ranking;
+  final int? replyTo;
+  final String? specialTag;
 
   const ForumSearchResult({
     required this.holeId,
@@ -272,6 +277,10 @@ class ForumSearchResult {
     this.timeCreated,
     this.tags = const [],
     this.deleted = false,
+    this.fold = const [],
+    this.ranking,
+    this.replyTo,
+    this.specialTag,
   });
 
   factory ForumSearchResult.fromJson(Map<String, dynamic> json) {
@@ -290,20 +299,12 @@ class ForumSearchResult {
     final rawContent =
         json['content']?.toString() ?? json['text']?.toString() ?? '';
     final isDeleted = json['deleted'] == true;
-
-    // Fallback: extract #hashtags from content if tags array is empty
-    if (parsedTags.isEmpty && rawContent.isNotEmpty) {
-      final matches = RegExp(r'#([^\s#,，。！？]+)').allMatches(rawContent);
-      for (final m in matches) {
-        final tag = m.group(1);
-        if (tag != null &&
-            tag.isNotEmpty &&
-            tag.length <= 16 &&
-            !parsedTags.contains(tag)) {
-          parsedTags.add(tag);
-        }
-      }
-    }
+    final fold = json['fold'] is List
+        ? (json['fold'] as List)
+              .where((value) => value != null && value.toString().isNotEmpty)
+              .map((value) => value.toString())
+              .toList()
+        : <String>[];
 
     return ForumSearchResult(
       holeId: _parseInt(json['hole_id']),
@@ -313,6 +314,10 @@ class ForumSearchResult {
       timeCreated: json['time_created']?.toString(),
       tags: parsedTags,
       deleted: isDeleted,
+      fold: fold,
+      ranking: _parseOptionalInt(json['ranking']),
+      replyTo: _parseOptionalInt(json['reply_to']),
+      specialTag: json['special_tag']?.toString(),
     );
   }
 }
@@ -322,4 +327,10 @@ int _parseInt(dynamic val) {
   if (val is num) return val.toInt();
   if (val is String) return int.tryParse(val) ?? 0;
   return 0;
+}
+
+int? _parseOptionalInt(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return value is String ? int.tryParse(value) : null;
 }

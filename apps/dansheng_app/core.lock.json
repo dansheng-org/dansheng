@@ -19,7 +19,7 @@
   "binding": {
     "kind": "pigeon-jni",
     "generator_version": "29.1.1",
-    "pubspec_lock_sha256": "58e9ed3e697182c31b41694e5db10d7b4e95000d479a3b51ebb18e7ecae7d0f3"
+    "pubspec_lock_sha256": "6367694aca9fc5bafa818273ff5e4ad195e14851f2034ba2c73c6f22d9c32615"
   },
   "artifact": {
     "name": "dansheng-android-0.1.0.aar",

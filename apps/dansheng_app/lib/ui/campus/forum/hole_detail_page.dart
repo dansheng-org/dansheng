@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Floor layout adapted from DanXi lib/page/forum/hole_detail.dart.
+// Copyright (C) 2021 DanXi-Dev; GPL-3.0-or-later.
 import 'package:flutter/material.dart';
 
 import '../campus_api.dart';
 import '../../core/dansheng_state.dart';
 import 'forum_editor_dialog.dart';
-import 'forum_format.dart';
+import 'forum_floor_tile.dart';
 import 'forum_models.dart';
 import 'forum_pagination.dart';
 import 'forum_service.dart';
@@ -15,11 +17,16 @@ class HoleDetailPage extends StatefulWidget {
   final int holeId;
   final TeaHole? initialHole;
 
+  /// Locate an already-loaded floor by its global ID after the initial fetch.
+  /// An unloaded target produces a notice without changing pagination.
+  final int? initialFloorId;
+
   const HoleDetailPage({
     super.key,
     required this.controller,
     required this.holeId,
     this.initialHole,
+    this.initialFloorId,
   });
 
   @override
@@ -30,6 +37,10 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
   late final ForumService _service;
   TeaHole? _hole;
   List<TeaFloor> _floors = [];
+  final _scrollController = ScrollController();
+  final _floorKeys = <int, GlobalKey>{};
+  bool _locatingFloor = false;
+  bool _didLocateInitialFloor = false;
 
   bool _isLoading = true;
   bool _isLoadingMore = false;
@@ -44,6 +55,76 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
     _service = ForumService(CampusApi(widget.controller.client));
     _hole = widget.initialHole;
     _loadInitialData();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _openHole(int holeId) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            HoleDetailPage(controller: widget.controller, holeId: holeId),
+      ),
+    );
+  }
+
+  Future<void> _locateFloor(int floorId) async {
+    final targetIndex = _floors.indexWhere((floor) => floor.floorId == floorId);
+    if (targetIndex < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('引用楼层 ##$floorId 尚未加载，请先加载更多楼层；它也可能属于其他帖子。')),
+      );
+      return;
+    }
+    if (_locatingFloor || !_scrollController.hasClients) return;
+    _locatingFloor = true;
+    final key = _floorKeys.putIfAbsent(floorId, () => GlobalKey());
+    try {
+      // ListView is lazy: traverse viewports until the loaded target is built.
+      // Decide direction using floor IDs mapped to list positions, not ranking.
+      while (mounted && _scrollController.hasClients) {
+        final targetContext = key.currentContext;
+        if (targetContext != null && targetContext.mounted) {
+          await Scrollable.ensureVisible(
+            targetContext,
+            alignment: .1,
+            duration: const Duration(milliseconds: 250),
+          );
+          return;
+        }
+        final builtIndices = <int>[
+          for (var index = 0; index < _floors.length; index++)
+            if (_floorKeys[_floors[index].floorId]?.currentContext != null)
+              index,
+        ];
+        final position = _scrollController.position;
+        final backwards =
+            builtIndices.isNotEmpty && targetIndex < builtIndices.first;
+        final nextOffset =
+            (position.pixels +
+                    (backwards ? -1 : 1) * position.viewportDimension * .8)
+                .clamp(position.minScrollExtent, position.maxScrollExtent)
+                .toDouble();
+        if ((nextOffset - position.pixels).abs() < 1) break;
+        await _scrollController.animateTo(
+          nextOffset,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.linear,
+        );
+        await WidgetsBinding.instance.endOfFrame;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('暂时无法定位楼层 ##$floorId，请刷新后重试。')));
+      }
+    } finally {
+      _locatingFloor = false;
+    }
   }
 
   Future<void> _loadInitialData() async {
@@ -70,6 +151,12 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
           _hasMore = fetchedFloors.length >= _pageSize;
           _isLoading = false;
         });
+        if (!_didLocateInitialFloor && widget.initialFloorId != null) {
+          _didLocateInitialFloor = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _locateFloor(widget.initialFloorId!);
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -189,6 +276,7 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
     return RefreshIndicator(
       onRefresh: _loadInitialData,
       child: ListView.builder(
+        controller: _scrollController,
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
         itemCount: _floors.length + 1 + (_hasMore ? 1 : 0),
         itemBuilder: (context, index) {
@@ -198,7 +286,7 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
 
           final floorIndex = index - 1;
           if (floorIndex < _floors.length) {
-            return _buildFloorItem(_floors[floorIndex], floorIndex + 1);
+            return _buildFloorItem(_floors[floorIndex], floorIndex);
           }
 
           // Load more indicator
@@ -220,257 +308,61 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
   }
 
   Widget _buildHoleHeader() {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
     final hole = _hole;
 
     if (hole == null) {
       return const SizedBox(height: 8);
     }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 0,
-      color: colorScheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: colorScheme.outlineVariant.withAlpha(120)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  '#${hole.holeId}',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colorScheme.secondaryContainer,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    '分区 ${hole.divisionId}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: colorScheme.onSecondaryContainer,
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  formatFriendlyTime(hole.timeCreated),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-            if (hole.tags.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: hole.tags.map((t) {
-                  return Chip(
-                    label: Text('#$t'),
-                    padding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                  );
-                }).toList(),
-              ),
-            ],
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(
-                  Icons.chat_bubble_outline_rounded,
-                  size: 14,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '${hole.reply} 回复',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                if (hole.view > 0) ...[
-                  const SizedBox(width: 16),
-                  Icon(
-                    Icons.visibility_outlined,
-                    size: 14,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${hole.view} 浏览',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                if (hole.locked) ...[
-                  const SizedBox(width: 16),
-                  Icon(Icons.lock_outline, size: 14, color: colorScheme.error),
-                  const SizedBox(width: 4),
-                  Text(
-                    '已锁定',
-                    style: TextStyle(fontSize: 12, color: colorScheme.error),
-                  ),
-                ],
-              ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hole.tags.any(isVisibleForumTag)) ...[
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: hole.tags.where(isVisibleForumTag).map((t) {
+                return Text(
+                  '#$t',
+                  style: TextStyle(color: colorScheme.primary),
+                );
+              }).toList(),
             ),
           ],
-        ),
+          const SizedBox(height: 8),
+          DefaultTextStyle(
+            style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+            child: Wrap(
+              spacing: 16,
+              runSpacing: 4,
+              children: [
+                Text('${hole.reply} 回复'),
+                if (hole.view > 0) Text('${hole.view} 浏览'),
+                if (hole.locked) const Text('已锁定'),
+                if (hole.hidden) const Text('已隐藏'),
+                if (hole.frozen) const Text('已冻结'),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildFloorItem(TeaFloor floor, int floorNumber) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final isOp = floorNumber == 1;
-    final anonyname = resolveAnonyname(floor.anonyname, floorNumber);
-    final isDeleted = floor.deleted || floor.content == null;
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 0,
-      color: isOp
-          ? colorScheme.primaryContainer.withAlpha(25)
-          : colorScheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(
-          color: isOp
-              ? colorScheme.primary.withAlpha(80)
-              : colorScheme.outlineVariant.withAlpha(80),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Top floor metadata row
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isOp
-                        ? colorScheme.primary
-                        : colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    isOp ? '洞主' : '$floorNumber楼',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: isOp
-                          ? colorScheme.onPrimary
-                          : colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  anonyname,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isOp ? colorScheme.primary : colorScheme.onSurface,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  formatFriendlyTime(floor.timeCreated),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-
-            // Content or deleted placeholder
-            if (isDeleted)
-              Text(
-                '该楼层已被删除',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontStyle: FontStyle.italic,
-                  color: colorScheme.outline,
-                ),
-              )
-            else
-              Text(
-                cleanPreviewText(floor.content),
-                style: const TextStyle(fontSize: 14, height: 1.45),
-              ),
-
-            if (floor.like > 0 || floor.dislike > 0) ...[
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  if (floor.like > 0) ...[
-                    Icon(
-                      Icons.thumb_up_alt_outlined,
-                      size: 13,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      '${floor.like}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  if (floor.dislike > 0) ...[
-                    const SizedBox(width: 10),
-                    Icon(
-                      Icons.thumb_down_alt_outlined,
-                      size: 13,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      '${floor.dislike}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
+  Widget _buildFloorItem(TeaFloor floor, int index) {
+    final firstFloor =
+        _hole?.floors?.firstFloor ??
+        (_floors.isNotEmpty ? _floors.first : null);
+    return ForumFloorTile(
+      key: _floorKeys.putIfAbsent(floor.floorId, () => GlobalKey()),
+      floor: floor,
+      firstFloor: firstFloor,
+      index: index,
+      onTapHole: _openHole,
+      onTapFloor: _locateFloor,
     );
   }
 }
