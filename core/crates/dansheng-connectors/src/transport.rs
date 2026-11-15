@@ -13,13 +13,29 @@ pub enum HttpMethod {
     Get,
     /// Some source-defined read-only query endpoints require POST.
     Post,
+    /// Writes to services whose protocol uses them (cloud drives, WebDAV).
+    Put,
+    Delete,
+    /// WebDAV: list a collection (read-only), create one, move or rename.
+    Propfind,
+    Mkcol,
+    Move,
 }
 
 impl HttpMethod {
+    pub const fn is_mutating(self) -> bool {
+        !matches!(self, Self::Get | Self::Propfind)
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Delete => "DELETE",
+            Self::Propfind => "PROPFIND",
+            Self::Mkcol => "MKCOL",
+            Self::Move => "MOVE",
         }
     }
 }
@@ -112,6 +128,9 @@ pub struct AuthChallenge {
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ConnectorError {
+    /// A write may have reached the service. Reconcile before explicitly retrying.
+    #[error("the remote write outcome requires reconciliation")]
+    NeedsReconciliation,
     #[error("authentication required")]
     AuthRequired(AuthChallenge),
     #[error("permission denied")]
@@ -141,6 +160,45 @@ pub enum ConnectorError {
     PaginationCycle,
     #[error("connector response limit exceeded")]
     LimitExceeded,
+    /// The remote service refused a write for a known reason. The code is a
+    /// fixed identifier (e.g. `NameConflict`), never remote text.
+    #[error("remote service rejected the operation: {0}")]
+    Rejected(&'static str),
+}
+
+impl ConnectorError {
+    /// Used only after handing a write to a transport or decoding its response.
+    /// Explicit preflight/remote rejections remain definite; lost or malformed
+    /// responses have the same conservative semantics as Canvas writes.
+    pub(crate) fn after_write(self) -> Self {
+        match self {
+            Self::TransportUnavailable
+            | Self::Timeout
+            | Self::Parse { .. }
+            | Self::UnsafeUrl
+            | Self::LimitExceeded
+            | Self::HttpStatus(408 | 500..=599) => Self::NeedsReconciliation,
+            other => other,
+        }
+    }
+}
+
+/// Mirrors Canvas's response boundary: only a response from the requested
+/// endpoint and an explicit 4xx rejection can establish a failed write.
+pub(crate) fn check_write_response(
+    response: &ConnectorResponse,
+    requested: &Url,
+    max_bytes: usize,
+) -> Result<(), ConnectorError> {
+    if response.final_url.origin() != requested.origin()
+        || response.final_url.path() != requested.path()
+        || !(200..300).contains(&response.status) && !(400..500).contains(&response.status)
+        || response.status == 408
+        || response.body.len() > max_bytes
+    {
+        return Err(ConnectorError::NeedsReconciliation);
+    }
+    Ok(())
 }
 
 #[async_trait]

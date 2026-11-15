@@ -24,6 +24,10 @@ class DanshengController extends ChangeNotifier {
 
   String? _activeAccountId;
   String? get activeAccountId => _activeAccountId;
+  int _accountGeneration = 0;
+  int get accountGeneration => _accountGeneration;
+  bool _isChangingAccount = false;
+  bool get isChangingAccount => _isChangingAccount;
 
   Map<String, dynamic>? _balanceData;
   Map<String, dynamic>? get balanceData => _balanceData;
@@ -145,6 +149,8 @@ class DanshengController extends ChangeNotifier {
 
   /// Switch active account
   Future<void> switchAccount(String accountId) async {
+    _isChangingAccount = true;
+    _accountGeneration++;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -157,6 +163,7 @@ class DanshengController extends ChangeNotifier {
       _errorMessage = '切换账号失败: $e';
       rethrow;
     } finally {
+      _isChangingAccount = false;
       _isLoading = false;
       notifyListeners();
     }

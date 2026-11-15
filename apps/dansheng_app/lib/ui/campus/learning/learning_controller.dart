@@ -2,6 +2,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:dansheng_app/ui/core/dansheng_state.dart';
 
@@ -13,12 +14,12 @@ import 'models/timetable_models.dart';
 /// Enforces per-source isolation, race/account-change safety, and cached fallbacks.
 class LearningController extends ChangeNotifier {
   final DanshengController appController;
-  late final CampusApi api;
+  late CampusApi api;
 
   final DateTime Function() currentTime;
   LearningController({required this.appController, DateTime Function()? now})
     : currentTime = now ?? DateTime.now {
-    api = CampusApi(appController.client);
+    api = CampusApi.forAccount(appController);
     _currentAccountId = appController.activeAccountId;
     final now = currentTime().toUtc().add(const Duration(hours: 8));
     _selectedDate = DateTime(now.year, now.month, now.day);
@@ -137,6 +138,28 @@ class LearningController extends ChangeNotifier {
   final Map<String, List<CanvasModule>> _modules = {};
   Map<String, List<CanvasModule>> get modules => _modules;
 
+  /// Standalone quizzes (no assignment of their own), keyed by courseId.
+  final Map<String, List<CanvasAssignment>> _quizzes = {};
+  Map<String, List<CanvasAssignment>> get quizzes => _quizzes;
+
+  /// The student's own submissions, keyed by `courseId:assignmentId`.
+  final Map<String, CanvasSubmission> _submissions = {};
+  final Set<String> _loadingSubmissions = {};
+
+  final Map<String, CanvasGradeSummary> _grades = {};
+  final Map<String, List<CanvasAssignmentGroup>> _assignmentGroups = {};
+  final Map<String, List<CanvasDiscussionTopic>> _discussions = {};
+  final Map<String, List<CanvasPageSummary>> _pages = {};
+
+  /// Module contents, keyed by `courseId:moduleId`.
+  final Map<String, List<CanvasModuleItem>> _moduleItems = {};
+  final Set<String> _loadingModules = {};
+
+  /// Failures of supplementary reads (quizzes, pages, discussions, grades…).
+  /// A course may simply have those tools disabled, so these never raise the
+  /// sign-in prompt or the course-wide error banner.
+  final Map<String, String> _optionalErrors = {};
+
   final Set<String> _downloadingFileIds = {};
   Set<String> get downloadingFileIds => _downloadingFileIds;
 
@@ -147,6 +170,43 @@ class LearningController extends ChangeNotifier {
 
   /// Whether the details of a Canvas course are being fetched right now.
   bool isCourseLoading(String courseId) => _loadingCourseIds.contains(courseId);
+
+  /// Assignments plus standalone quizzes of one course.
+  List<CanvasAssignment> courseWork(String courseId) => [
+    ...?_assignments[courseId],
+    ...?_quizzes[courseId],
+  ];
+
+  String _submissionKey(CanvasAssignment a) => '${a.courseId}:${a.id}';
+
+  /// The student's own submission, once fetched. Quizzes without an
+  /// assignment have none.
+  CanvasSubmission? submissionFor(CanvasAssignment a) =>
+      a.isQuiz ? null : _submissions[_submissionKey(a)];
+
+  bool isSubmissionLoading(CanvasAssignment a) =>
+      _loadingSubmissions.contains(_submissionKey(a));
+
+  /// Still owed: not handed in, graded or excused. Unknown counts as owed so
+  /// a missing status never hides a deadline.
+  bool isOutstanding(CanvasAssignment a) => submissionFor(a)?.isDone != true;
+
+  CanvasGradeSummary? gradeFor(String courseId) => _grades[courseId];
+  List<CanvasAssignmentGroup> assignmentGroupsFor(String courseId) =>
+      _assignmentGroups[courseId] ?? const [];
+  List<CanvasDiscussionTopic>? discussionsFor(String courseId) =>
+      _discussions[courseId];
+  List<CanvasPageSummary> pagesFor(String courseId) =>
+      _pages[courseId] ?? const [];
+
+  List<CanvasModuleItem>? moduleItems(String courseId, String moduleId) =>
+      _moduleItems['$courseId:$moduleId'];
+  bool isModuleLoading(String courseId, String moduleId) =>
+      _loadingModules.contains('$courseId:$moduleId');
+
+  /// Failure of a supplementary read such as `canvas.discussions.sync`.
+  String? optionalError(String method, String id) =>
+      _optionalErrors['$method:$id'];
 
   // --- Computed Queries ---
 
@@ -267,9 +327,21 @@ class LearningController extends ChangeNotifier {
   List<CanvasAssignment> get allAssignments {
     final list = <CanvasAssignment>[];
     for (final course in courses) {
-      list.addAll(_assignments[course.id] ?? const []);
+      list.addAll(courseWork(course.id));
     }
     return list;
+  }
+
+  /// Every assignment with a deadline: upcoming ones soonest first, then
+  /// past deadlines most recent first.
+  List<CanvasAssignment> get deadlineAssignments {
+    final now = currentTime();
+    final dated = allAssignments.where((a) => a.dueAt != null).toList();
+    final upcoming = dated.where((a) => !a.dueAt!.isBefore(now)).toList()
+      ..sort((a, b) => a.dueAt!.compareTo(b.dueAt!));
+    final past = dated.where((a) => a.dueAt!.isBefore(now)).toList()
+      ..sort((a, b) => b.dueAt!.compareTo(a.dueAt!));
+    return [...upcoming, ...past];
   }
 
   /// Assignments due on the currently selected date.
@@ -295,8 +367,11 @@ class LearningController extends ChangeNotifier {
 
   // --- Account Change Safety ---
   void checkAccountChange() {
+    if (appController.isChangingAccount) return;
     final newId = appController.activeAccountId;
-    if (newId != _currentAccountId) {
+    if (newId != _currentAccountId || !api.isCurrent) {
+      api.accountScope?.dispose();
+      api = CampusApi.forAccount(appController);
       _currentAccountId = newId;
       _requestToken++;
       _resetState();
@@ -326,6 +401,16 @@ class LearningController extends ChangeNotifier {
     _folders.clear();
     _materials.clear();
     _modules.clear();
+    _quizzes.clear();
+    _submissions.clear();
+    _loadingSubmissions.clear();
+    _grades.clear();
+    _assignmentGroups.clear();
+    _discussions.clear();
+    _pages.clear();
+    _moduleItems.clear();
+    _loadingModules.clear();
+    _optionalErrors.clear();
     _loadingCourseIds.clear();
     _downloadingFileIds.clear();
     _downloadedFileIds.clear();
@@ -655,84 +740,327 @@ class LearningController extends ChangeNotifier {
       orElse: () => CanvasCourse(id: courseId, name: ''),
     );
 
-    Future<List?> read(String method) async {
-      try {
-        final data = await api.call(method, {'course_id': courseId});
-        if (data is! List) throw const FormatException('Invalid records');
-        if (curToken == _requestToken) {
-          _detailErrors.remove('$method:$courseId');
-        }
-        return data;
-      } catch (failure) {
-        if (curToken != _requestToken) return null;
-        dynamic cached;
-        try {
-          cached = await api.call('campus.cached', {
-            'method': method,
-            'course_id': courseId,
-          });
-        } catch (_) {}
-        if (curToken != _requestToken) return null;
-        if (cached is List) {
-          _canvasFromCache = true;
-          return cached;
-        }
-        _detailErrors['$method:$courseId'] =
-            '${course.name}：${campusError(failure)}';
-        _canvasAuthRequired = _canvasAuthRequired || _isAuthError(failure);
-        return null;
-      }
-    }
+    Future<List?> read(String method, {bool optional = false}) => _readCanvas(
+      method,
+      {'course_id': courseId},
+      curToken,
+      errorKey: '$method:$courseId',
+      label: course.name,
+      optional: optional,
+    );
+    List<Map<String, dynamic>> rows(List? data) =>
+        data!.whereType<Map<String, dynamic>>().toList();
 
     final results = await Future.wait([
       read('canvas.assignments.sync'),
       read('canvas.announcements.sync'),
+      read('canvas.quizzes.sync', optional: true),
     ]);
     if (curToken != _requestToken) return;
     if (results[0] != null) {
-      _assignments[courseId] = results[0]!
-          .whereType<Map<String, dynamic>>()
+      _assignments[courseId] = rows(results[0])
           .map((r) => CanvasAssignment.fromJson(r, courseId, course.name))
           .toList();
     }
     if (results[1] != null) {
-      _announcements[courseId] = results[1]!
-          .whereType<Map<String, dynamic>>()
+      _announcements[courseId] = rows(results[1])
           .map((r) => CanvasAnnouncement.fromJson(r, courseId, course.name))
           .toList();
     }
-    notifyListeners();
-    if (courseId != _selectedCourseId) return;
-    final assets = await Future.wait([
-      read('canvas.folders.sync'),
-      read('canvas.materials.sync'),
-      read('canvas.modules.sync'),
-    ]);
-    if (curToken != _requestToken) return;
-    if (assets[0] != null) {
-      _folders[courseId] = assets[0]!
-          .whereType<Map<String, dynamic>>()
-          .map(CanvasFolder.fromJson)
-          .toList();
-    }
-    if (assets[1] != null) {
-      _materials[courseId] = assets[1]!
-          .whereType<Map<String, dynamic>>()
-          .map((r) => CanvasMaterial.fromJson(r, courseId))
-          .toList();
-    }
-    if (assets[2] != null) {
-      _modules[courseId] = assets[2]!
-          .whereType<Map<String, dynamic>>()
-          .map(CanvasModule.fromJson)
-          .toList();
+    if (results[2] != null) {
+      // A graded quiz is already listed as an assignment.
+      _quizzes[courseId] = [
+        for (final r in rows(results[2]))
+          if (CanvasAssignment.quizAssignmentId(r) == null &&
+              CanvasAssignment.quizPublished(r))
+            CanvasAssignment.fromQuiz(r, courseId, course.name),
+      ];
     }
     notifyListeners();
+    if (courseId == _selectedCourseId) {
+      final assets = await Future.wait([
+        read('canvas.folders.sync'),
+        read('canvas.materials.sync'),
+        read('canvas.modules.sync'),
+        read('canvas.pages.sync', optional: true),
+        read('canvas.discussions.sync', optional: true),
+        read('canvas.assignment_groups.sync', optional: true),
+        read('canvas.grades.self', optional: true),
+      ]);
+      if (curToken != _requestToken) return;
+      if (assets[0] != null) {
+        _folders[courseId] = rows(assets[0])
+            .map(CanvasFolder.fromJson)
+            .toList();
+      }
+      if (assets[1] != null) {
+        _materials[courseId] = rows(assets[1])
+            .map((r) => CanvasMaterial.fromJson(r, courseId))
+            .toList();
+      }
+      if (assets[2] != null) {
+        _modules[courseId] = rows(assets[2]).map(CanvasModule.fromJson).toList()
+          ..sort((a, b) => a.position.compareTo(b.position));
+      }
+      if (assets[3] != null) {
+        _pages[courseId] =
+            rows(assets[3])
+                .map(CanvasPageSummary.fromJson)
+                .where((p) => p.slug.isNotEmpty)
+                .toList()
+              ..sort((a, b) {
+                if (a.frontPage != b.frontPage) return a.frontPage ? -1 : 1;
+                return a.title.compareTo(b.title);
+              });
+      }
+      if (assets[4] != null) {
+        _discussions[courseId] =
+            rows(assets[4]).map(CanvasDiscussionTopic.fromJson).toList()
+              ..sort((a, b) {
+                final x = a.activityAt, y = b.activityAt;
+                if (x == null || y == null) return x == null ? 1 : -1;
+                return y.compareTo(x);
+              });
+      }
+      if (assets[5] != null) {
+        _assignmentGroups[courseId] =
+            rows(assets[5]).map(CanvasAssignmentGroup.fromJson).toList()
+              ..sort((a, b) => a.position.compareTo(b.position));
+      }
+      if (assets[6] != null) {
+        final grades = rows(assets[6]).map(CanvasGradeSummary.fromJson);
+        final summary = grades.where((g) => !g.isEmpty).firstOrNull;
+        if (summary != null) {
+          _grades[courseId] = summary;
+        } else {
+          _grades.remove(courseId);
+        }
+      }
+      notifyListeners();
+    }
+    // Own status of current deadlines, including ones that just passed.
+    final since = currentTime().subtract(const Duration(days: 14));
+    await loadSubmissions(
+      [
+        for (final a in _assignments[courseId] ?? const <CanvasAssignment>[])
+          if ((a.dueAt != null && a.dueAt!.isAfter(since)) ||
+              _submissions.containsKey(_submissionKey(a)))
+            a,
+      ],
+      token: curToken,
+      refresh: true,
+    );
   }
+
+  /// Reads a Canvas list with cache fallback. A required read records its
+  /// failure as a course error and may raise the sign-in prompt; an optional
+  /// one only notes the failure for its own section.
+  Future<List?> _readCanvas(
+    String method,
+    Map<String, dynamic> params,
+    int token, {
+    required String errorKey,
+    String label = '',
+    bool optional = false,
+  }) async {
+    try {
+      final data = await api.call(method, params);
+      if (data is! List) throw const FormatException('Invalid records');
+      if (token == _requestToken) {
+        _detailErrors.remove(errorKey);
+        _optionalErrors.remove(errorKey);
+      }
+      return data;
+    } catch (failure) {
+      if (token != _requestToken) return null;
+      dynamic cached;
+      try {
+        cached = await api.call('campus.cached', {...params, 'method': method});
+      } catch (_) {}
+      if (token != _requestToken) return null;
+      if (cached is List) {
+        _canvasFromCache = true;
+        return cached;
+      }
+      final message = campusError(failure);
+      if (optional) {
+        _optionalErrors[errorKey] = message;
+      } else {
+        _detailErrors[errorKey] = label.isEmpty ? message : '$label：$message';
+        _canvasAuthRequired = _canvasAuthRequired || _isAuthError(failure);
+      }
+      return null;
+    }
+  }
+
+  /// A single record (page, discussion thread, syllabus…) with cache fallback.
+  /// Failures are thrown to the caller, which shows them in place.
+  Future<Map<String, dynamic>> _readRecord(
+    String method,
+    Map<String, dynamic> params,
+  ) async {
+    final requestApi = api;
+    final token = _requestToken;
+    void check() {
+      if (token != _requestToken) {
+        throw PlatformException(code: 'AccountChanged');
+      }
+      requestApi.accountScope?.check();
+    }
+
+    dynamic value;
+    try {
+      value = await requestApi.call(method, params);
+      check();
+      if (rowsOf(value).isEmpty) {
+        throw const FormatException('SourceSchemaChanged');
+      }
+    } catch (error) {
+      if (isAccountChange(error)) rethrow;
+      check();
+      dynamic cached;
+      try {
+        cached = await requestApi.call('campus.cached', {
+          ...params,
+          'method': method,
+        });
+      } catch (error) {
+        if (isAccountChange(error)) rethrow;
+      }
+      check();
+      if (rowsOf(cached).isEmpty) rethrow;
+      value = cached;
+    }
+    return rowsOf(value).first;
+  }
+
+  // --- Own submissions ---
+
+  /// Fetches the student's own submission of each assignment, three at a time.
+  Future<void> loadSubmissions(
+    Iterable<CanvasAssignment> assignments, {
+    int? token,
+    bool refresh = false,
+  }) async {
+    final t = token ?? _requestToken;
+    final todo = [
+      for (final a in assignments)
+        if (!a.isQuiz &&
+            (refresh || !_submissions.containsKey(_submissionKey(a))))
+          a,
+    ];
+    for (var i = 0; i < todo.length && t == _requestToken; i += 3) {
+      await Future.wait(
+        todo.skip(i).take(3).map((a) => loadSubmission(a, token: t)),
+      );
+    }
+  }
+
+  Future<void> loadSubmission(CanvasAssignment a, {int? token}) async {
+    final t = token ?? _requestToken;
+    final key = _submissionKey(a);
+    if (a.isQuiz || a.id.isEmpty || !_loadingSubmissions.add(key)) return;
+    try {
+      final data = await _readCanvas(
+        'canvas.submission.self',
+        {'course_id': a.courseId, 'assignment_id': a.id},
+        t,
+        errorKey: 'canvas.submission.self:$key',
+        optional: true,
+      );
+      final row = rowsOf(data).firstOrNull;
+      if (t == _requestToken && row != null) {
+        _submissions[key] = CanvasSubmission.fromJson(row);
+      }
+    } finally {
+      if (t == _requestToken) {
+        _loadingSubmissions.remove(key);
+        notifyListeners();
+      }
+    }
+  }
+
+  // --- On-demand course content ---
+
+  Future<void> loadModuleItems(String courseId, String moduleId) async {
+    final key = '$courseId:$moduleId';
+    final t = _requestToken;
+    if (!_loadingModules.add(key)) return;
+    notifyListeners();
+    try {
+      final data = await _readCanvas(
+        'canvas.module_items.sync',
+        {'course_id': courseId, 'module_id': moduleId},
+        t,
+        errorKey: 'canvas.module_items.sync:$key',
+        optional: true,
+      );
+      if (t == _requestToken && data != null) {
+        _moduleItems[key] = rowsOf(data).map(CanvasModuleItem.fromJson).toList()
+          ..sort((a, b) => a.position.compareTo(b.position));
+      }
+    } finally {
+      if (t == _requestToken) {
+        _loadingModules.remove(key);
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<CanvasPage> readPage(String courseId, String slug) async =>
+      CanvasPage.fromJson(
+        await _readRecord('canvas.page.read', {
+          'course_id': courseId,
+          'page_slug': slug,
+        }),
+      );
+
+  Future<CanvasDiscussionTopic> readDiscussion(
+    String courseId,
+    String topicId,
+  ) async => CanvasDiscussionTopic.fromJson(
+    await _readRecord('canvas.discussion.read', {
+      'course_id': courseId,
+      'topic_id': topicId,
+    }),
+  );
+
+  Future<CanvasDiscussionView> readDiscussionThread(
+    String courseId,
+    String topicId,
+  ) async => CanvasDiscussionView.fromJson(
+    await _readRecord('canvas.discussion.view', {
+      'course_id': courseId,
+      'topic_id': topicId,
+    }),
+  );
+
+  /// Fresh quiz metadata. Never requests questions or starts an attempt.
+  Future<CanvasAssignment> readQuiz(CanvasAssignment quiz) async =>
+      CanvasAssignment.fromQuiz(
+        await _readRecord('canvas.quiz.read', {
+          'course_id': quiz.courseId,
+          'quiz_id': quiz.id,
+        }),
+        quiz.courseId,
+        quiz.courseName,
+      );
+
+  /// The public academic syllabus; only undergraduate lessons carry an id.
+  bool hasSyllabus(TimetableCourse course) =>
+      isUndergraduate && RegExp(r'^\d{1,20}$').hasMatch(course.lessonId ?? '');
+
+  Future<CourseSyllabus> readSyllabus(TimetableCourse course) async =>
+      CourseSyllabus.fromJson(
+        await _readRecord('fudan.catalog.syllabus', {
+          'lesson_id': course.lessonId,
+        }),
+      );
 
   @override
   void dispose() {
     _requestToken++;
+    api.accountScope?.dispose();
     super.dispose();
   }
 

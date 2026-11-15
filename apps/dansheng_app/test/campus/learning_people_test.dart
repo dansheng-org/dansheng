@@ -66,7 +66,10 @@ void main() {
     'roster roles and compose use selected recipient API params only after send',
     (tester) async {
       await mount(tester);
-      expect(bridge.calls.single['params'], {'course_id': '10'});
+      expect(bridge.calls.single['params'], {
+        'course_id': '10',
+        'account_id': 'a',
+      });
       for (final label in ['老师', '助教', '学生', '成员']) {
         expect(find.text(label), findsOneWidget);
       }
@@ -97,6 +100,7 @@ void main() {
           'recipients': ['30'],
           'subject': '请教',
           'body': '你好',
+          'account_id': 'a',
         },
       );
     },
@@ -108,12 +112,16 @@ void main() {
     await tester.enterText(find.byKey(const Key('people-search')), '不存在');
     await tester.tap(find.byTooltip('搜索'));
     await tester.pumpAndSettle();
-    expect(bridge.calls.last['params'], {'course_id': '10', 'search': '不存在'});
+    expect(bridge.calls.last['params'], {
+      'course_id': '10',
+      'search': '不存在',
+      'account_id': 'a',
+    });
     expect(find.text('未找到匹配的课程人员'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('people-search')), '');
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
-    expect(bridge.calls.last['params'], {'course_id': '10'});
+    expect(bridge.calls.last['params'], {'course_id': '10', 'account_id': 'a'});
     expect(find.text('暂无课程人员'), findsOneWidget);
   });
 

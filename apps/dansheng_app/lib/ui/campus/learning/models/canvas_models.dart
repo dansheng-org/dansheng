@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import 'canvas_learning_models.dart';
+
+export 'canvas_learning_models.dart';
 
 /// Represents an enrolled Canvas/eLearning course.
 class CanvasCourse {
@@ -103,7 +106,8 @@ class CanvasCourse {
   }
 }
 
-/// Represents a Canvas course assignment.
+/// A Canvas course assignment, or a Classic Quiz that has no assignment of
+/// its own (so its deadline would otherwise go unseen).
 class CanvasAssignment {
   final String id;
   final String courseId;
@@ -112,10 +116,15 @@ class CanvasAssignment {
   final DateTime? dueAt;
   final double? pointsPossible;
   final List<String> submissionTypes;
-  final bool hasSubmittedSubmissions;
   final bool lockedForUser;
   final String? description;
   final String? htmlUrl;
+
+  /// Set for a standalone quiz; its [id] is then the quiz id.
+  final bool isQuiz;
+  final int? timeLimitMinutes;
+  final int? allowedAttempts;
+  final int? questionCount;
 
   const CanvasAssignment({
     required this.id,
@@ -125,11 +134,47 @@ class CanvasAssignment {
     this.dueAt,
     this.pointsPossible,
     this.submissionTypes = const [],
-    this.hasSubmittedSubmissions = false,
     this.lockedForUser = false,
     this.description,
     this.htmlUrl,
+    this.isQuiz = false,
+    this.timeLimitMinutes,
+    this.allowedAttempts,
+    this.questionCount,
   });
+
+  /// A Classic Quiz record from canvas.quizzes.sync.
+  factory CanvasAssignment.fromQuiz(
+    Map<String, dynamic> json, [
+    String? defaultCourseId,
+    String? defaultCourseName,
+  ]) {
+    final payload = payloadOf(json);
+    return CanvasAssignment(
+      id: payload['id']?.toString() ?? '',
+      courseId: payload['course_id']?.toString() ?? defaultCourseId ?? '',
+      courseName: defaultCourseName,
+      name: payload['title']?.toString() ?? '未命名测验',
+      dueAt: parseTime(payload['due_at']),
+      pointsPossible: parseDouble(payload['points_possible']),
+      lockedForUser: payload['locked_for_user'] == true,
+      description: payload['description']?.toString(),
+      htmlUrl: payload['html_url']?.toString(),
+      isQuiz: true,
+      timeLimitMinutes: parseInt(payload['time_limit']),
+      allowedAttempts: parseInt(payload['allowed_attempts']),
+      questionCount: parseInt(payload['question_count']),
+    );
+  }
+
+  /// The assignment a quiz record points to; such quizzes are already listed
+  /// as assignments.
+  static String? quizAssignmentId(Map<String, dynamic> json) =>
+      payloadOf(json)['assignment_id']?.toString();
+
+  /// Whether this quiz is published to students (unpublished ones are hidden).
+  static bool quizPublished(Map<String, dynamic> json) =>
+      payloadOf(json)['published'] != false;
 
   factory CanvasAssignment.fromJson(
     Map<String, dynamic> json, [
@@ -167,7 +212,6 @@ class CanvasAssignment {
           .toList();
     }
 
-    final hasSub = payload['has_submitted_submissions'] == true;
     final locked = payload['locked_for_user'] == true;
 
     return CanvasAssignment(
@@ -178,7 +222,6 @@ class CanvasAssignment {
       dueAt: due,
       pointsPossible: points,
       submissionTypes: subTypes,
-      hasSubmittedSubmissions: hasSub,
       lockedForUser: locked,
       description: payload['description']?.toString(),
       htmlUrl: payload['html_url']?.toString(),

@@ -17,7 +17,7 @@ import java.io.File
 
 class MainActivity : FlutterActivity(), DanshengApi {
     private val rt get() = (application as DanshengApplication).runtime
-    private val campus by lazy { CampusServices(this,rt,::serviceLogin,::confirm,sheet,::verifyPortal) }
+    private val campus by lazy { CampusServices(this,rt,::serviceLogin,::confirm,sheet,::verifyPortal,::pick) }
     private var portalResult:CompletableDeferred<Intent>?=null
     private var picker: CompletableDeferred<Uri>? = null
     private val sheet by lazy { ModernSheet(this) }
@@ -192,9 +192,10 @@ class MainActivity : FlutterActivity(), DanshengApi {
         return rt.campusLogins.connect(service,account,replace,confirmForumRisk) { previous ->
             val forum=service=="forum"
             val emails=if(forum)CampusLogins.forumEmails(account) else emptyList()
-            val title=when(service) { "forum"->"登录树洞"; "canvas"->"连接 Canvas"; else->"统一身份认证" }
-            val secret=when(service) { "forum"->"树洞密码"; "canvas"->"Canvas 访问令牌"; else->"统一身份认证密码" }
-            sheet.credentials(title,"登录后加密保存在本机",if(forum)"注册邮箱" else null,secret,
+            val webdav=service.startsWith("webdav:")
+            val title=when { forum->"登录树洞"; webdav->"连接 WebDAV"; service=="canvas"->"连接 Canvas"; service=="cloud"->"登录复旦云盘"; else->"统一身份认证" }
+            val secret=when { forum->"树洞密码"; webdav->"密码或应用专用密码"; service=="canvas"->"Canvas 访问令牌"; service=="cloud"->"云盘密码（非统一身份认证密码）"; else->"统一身份认证密码" }
+            sheet.credentials(title,"登录后加密保存在本机",if(forum)"注册邮箱" else if(webdav)"用户名" else null,secret,
                 previous.ifBlank { emails.firstOrNull().orEmpty() }, emails)
         }
     }

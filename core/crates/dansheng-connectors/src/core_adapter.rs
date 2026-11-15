@@ -22,6 +22,10 @@ use std::collections::BTreeMap;
 #[path = "bridge_bytes_tests.rs"]
 mod bridge_bytes_tests;
 
+#[cfg(test)]
+#[path = "drive_regression_tests.rs"]
+mod drive_regression_tests;
+
 pub struct CampusService;
 // Canvas serves same-origin file metadata, then redirects the download to this
 // school storage origin. Network selects credentials again per origin on redirect.
@@ -111,6 +115,27 @@ impl BoundTransport<'_> {
                 }
             })?;
         self.pin_credential_identity(format!("native:{identity}"), challenge)
+    }
+
+    fn check_after_response(
+        &self,
+        challenge: &crate::AuthChallenge,
+        leased: bool,
+        mutating: bool,
+    ) -> Result<(), ConnectorError> {
+        let result = self.current_authority().and_then(|_| {
+            if leased {
+                self.check_native_lease(challenge)?;
+            }
+            Ok(())
+        });
+        result.map_err(|error| {
+            if mutating {
+                ConnectorError::NeedsReconciliation
+            } else {
+                error
+            }
+        })
     }
 }
 
@@ -216,6 +241,7 @@ impl ConnectorTransport for BoundTransport<'_> {
         })
     }
     async fn execute(&self, input: ConnectorRequest) -> Result<ConnectorResponse, ConnectorError> {
+        let mutating = input.method.is_mutating() && self.source_capability.ends_with(".write");
         if self.source_capability == "canvas.write"
             && input.method == crate::HttpMethod::Post
             && matches!(input.auth, TransportAuth::HostSession { .. })
@@ -225,7 +251,7 @@ impl ConnectorTransport for BoundTransport<'_> {
                 .await
                 .map_err(|error| match error {
                     CanvasWriteError::Rejected(error) => error,
-                    CanvasWriteError::NeedsReconciliation => ConnectorError::TransportUnavailable,
+                    CanvasWriteError::NeedsReconciliation => ConnectorError::NeedsReconciliation,
                 });
         }
         let current = self.current_authority()?;
@@ -357,13 +383,16 @@ impl ConnectorTransport for BoundTransport<'_> {
                         transport_error(error)
                     }
                 })?;
-            self.current_authority()?;
-            if leased {
-                self.check_native_lease(&challenge)?;
-            }
+            self.check_after_response(&challenge, leased, mutating)?;
             return Ok(ConnectorResponse {
                 status: response.status,
-                final_url: url::Url::parse(&response.url).map_err(|_| ConnectorError::UnsafeUrl)?,
+                final_url: url::Url::parse(&response.url).map_err(|_| {
+                    if mutating {
+                        ConnectorError::NeedsReconciliation
+                    } else {
+                        ConnectorError::UnsafeUrl
+                    }
+                })?,
                 headers: response.headers.into_iter().collect(),
                 body: response.body,
             });
@@ -399,10 +428,7 @@ impl ConnectorTransport for BoundTransport<'_> {
                     transport_error(error)
                 }
             })?;
-        self.current_authority()?;
-        if leased {
-            self.check_native_lease(&challenge)?;
-        }
+        self.check_after_response(&challenge, leased, mutating)?;
         if canvas_course_read && matches!(response.status, 401 | 403) {
             let check = self
                 .network
@@ -432,7 +458,13 @@ impl ConnectorTransport for BoundTransport<'_> {
         }
         Ok(ConnectorResponse {
             status: response.status,
-            final_url: url::Url::parse(&response.url).map_err(|_| ConnectorError::UnsafeUrl)?,
+            final_url: url::Url::parse(&response.url).map_err(|_| {
+                if mutating {
+                    ConnectorError::NeedsReconciliation
+                } else {
+                    ConnectorError::UnsafeUrl
+                }
+            })?,
             headers: response.headers.into_iter().collect(),
             body: response.body.into_bytes(),
         })
@@ -440,6 +472,7 @@ impl ConnectorTransport for BoundTransport<'_> {
 }
 fn transport_error(error: CoreError) -> ConnectorError {
     match error.code.as_str() {
+        "NeedsReconciliation" => ConnectorError::NeedsReconciliation,
         "PermissionDenied" => ConnectorError::PermissionDenied,
         "Timeout" => ConnectorError::Timeout,
         "CapabilityUnavailable" => ConnectorError::CapabilityUnavailable,
@@ -455,6 +488,12 @@ fn transport_error(error: CoreError) -> ConnectorError {
 }
 pub(crate) fn source_error(error: ConnectorError) -> CoreError {
     match error {
+        ConnectorError::NeedsReconciliation => {
+            canvas_write_error(CanvasWriteError::NeedsReconciliation)
+        }
+        ConnectorError::Rejected(code) => {
+            CoreError::new(code, "the remote service rejected this operation")
+        }
         ConnectorError::AuthRequired(_) => CoreError::new(
             "AuthenticationRequired",
             "complete this source's authentication through the host",
@@ -510,6 +549,27 @@ impl CoreService for CampusService {
             ("fudan.exams", "fudan.academic.read"),
             ("fudan.grades", "fudan.academic.read"),
             ("fudan.gpa", "fudan.academic.read"),
+            ("fudan.cloud.roots", "fudan.cloud.read"),
+            ("fudan.cloud.list", "fudan.cloud.read"),
+            ("fudan.cloud.download", "fudan.cloud.read"),
+            ("fudan.cloud.mkdir", "fudan.cloud.write"),
+            ("fudan.cloud.rename", "fudan.cloud.write"),
+            ("fudan.cloud.delete", "fudan.cloud.write"),
+            ("fudan.cloud.upload", "fudan.cloud.write"),
+            ("fudan.cloud.share", "fudan.cloud.write"),
+            ("fudan.cloud.unshare", "fudan.cloud.write"),
+            ("webdav.servers", "webdav.read"),
+            ("webdav.list", "webdav.read"),
+            ("webdav.download", "webdav.read"),
+            ("webdav.server.add", "webdav.configure"),
+            ("webdav.server.remove", "webdav.configure"),
+            ("webdav.login", "webdav.configure"),
+            ("webdav.mkdir", "webdav.write"),
+            ("webdav.rename", "webdav.write"),
+            ("webdav.delete", "webdav.write"),
+            ("webdav.upload", "webdav.write"),
+            #[cfg(feature = "login")]
+            ("fudan.cloud.login", "fudan.cloud.login"),
             ("fudan.ecard.balance", "fudan.card.read"),
             #[cfg(feature = "login")]
             ("fudan.ecard.login", "fudan.card.login"),
@@ -540,6 +600,8 @@ impl CoreService for CampusService {
             ("fudan.pe", "fudan.pe.read"),
             ("fudan.bus", "fudan.life.read"),
             ("fudan.notices", "fudan.notices.read"),
+            ("fudan.notice.attachments", "fudan.notices.read"),
+            ("fudan.notice.attachment.download", "fudan.notices.read"),
             ("fudan.qr.status", "fudan.identity.read"),
             ("fudan.qr.present", "fudan.identity.present"),
             ("canvas.configure", "canvas.configure"),
@@ -609,6 +671,12 @@ impl CoreService for CampusService {
                 .await;
         }
         grant.check_account(principal, Some(account))?;
+        if method.starts_with("webdav.") {
+            return webdav_call(
+                context, principal, grant, capability, method, &params, account,
+            )
+            .await;
+        }
         if method == "fudan.postgraduate.semester" {
             let mut io_grant = grant.clone();
             io_grant.capabilities.insert("http.request".into());
@@ -808,6 +876,27 @@ impl CoreService for CampusService {
             return Ok(json!({"connected":true}));
         }
         #[cfg(feature = "login")]
+        if method == "fudan.cloud.login" {
+            // The drive has its own password, entered on this device by its
+            // owner. One attempt per call: the drive locks after failures.
+            if !principal.is_owner() {
+                return Err(CoreError::new(
+                    "PermissionDenied",
+                    "cloud drive login requires the profile owner",
+                ));
+            }
+            let session = crate::fudan_cloud::login(account, required_string(&params, "password")?)
+                .await
+                .map_err(|e| CoreError::new(e.code(), e.message()))?;
+            context.network.set_session(
+                account,
+                crate::fudan_cloud::ORIGIN,
+                None,
+                session.cookies,
+            )?;
+            return Ok(json!({"account_id":account,"session_imported":true}));
+        }
+        #[cfg(feature = "login")]
         if matches!(
             method,
             "fudan.ecard.login"
@@ -839,7 +928,11 @@ impl CoreService for CampusService {
                     _ => return Err(CoreError::invalid("unknown campus service")),
                 }
             } else if method == "fudan.academic.login" {
-                crate::login::LoginTarget::Academic
+                match params["service"].as_str() {
+                    None | Some("undergraduate") => crate::login::LoginTarget::Academic,
+                    Some("postgraduate") => crate::login::LoginTarget::Postgraduate,
+                    _ => return Err(CoreError::invalid("unknown academic service")),
+                }
             } else {
                 crate::login::LoginTarget::Ecard
             };
@@ -1226,6 +1319,117 @@ impl CoreService for CampusService {
             &source.source_id,
             &[capability.to_owned()].into_iter().collect(),
         )?;
+        if method == "fudan.notice.attachment.download" {
+            return download_notice_attachment(context, principal, grant, account, &params).await;
+        }
+        if method.starts_with("fudan.cloud.") {
+            // Listings carry private file names; they are returned to the
+            // caller only and never written to shared records or search.
+            io_grant.origins.insert(crate::fudan_cloud::ORIGIN.into());
+            let client = crate::fudan_cloud::FudanCloudClient::new(BoundTransport {
+                account,
+                store: context.store,
+                source_capability: capability,
+                credential_lease: Default::default(),
+                network: context.network,
+                platform: context.platform,
+                principal,
+                grant: &io_grant,
+            });
+            return match method {
+                "fudan.cloud.roots" => Ok(serde_json::to_value(
+                    client.roots(&source).await.map_err(source_error)?,
+                )?),
+                "fudan.cloud.list" => Ok(serde_json::to_value(
+                    client
+                        .list(&source, required_string(&params, "path")?)
+                        .await
+                        .map_err(source_error)?,
+                )?),
+                "fudan.cloud.download" => {
+                    // A cheap private read first: an expired session must
+                    // surface as sign-in, not as a saved login page.
+                    let session = DriveDownloadSession::capture(context.network, account)?;
+                    client.user_root(&source).await.map_err(source_error)?;
+                    session.check()?;
+                    download_cloud_file(context, principal, grant, account, &params, &session).await
+                }
+                "fudan.cloud.mkdir" => Ok(json!({"path": client
+                    .create_folder(
+                        &source,
+                        required_string(&params, "path")?,
+                        required_string(&params, "name")?,
+                    )
+                    .await
+                    .map_err(source_error)?})),
+                "fudan.cloud.rename" => {
+                    client
+                        .rename(
+                            &source,
+                            required_string(&params, "path")?,
+                            required_string(&params, "name")?,
+                        )
+                        .await
+                        .map_err(source_error)?;
+                    Ok(json!({"renamed": true}))
+                }
+                "fudan.cloud.delete" => {
+                    client
+                        .delete(&source, required_string(&params, "path")?)
+                        .await
+                        .map_err(source_error)?;
+                    Ok(json!({"deleted": true, "recycled": true}))
+                }
+                "fudan.cloud.upload" => {
+                    let file = upload_source(
+                        context,
+                        principal,
+                        grant,
+                        account,
+                        &params,
+                        crate::fudan_cloud::MAX_UPLOAD,
+                    )?;
+                    let path = client
+                        .upload(
+                            &source,
+                            required_string(&params, "path")?,
+                            &file.name,
+                            &file.bytes,
+                            &file.mime,
+                            Utc::now().timestamp_millis().max(0) as u64,
+                        )
+                        .await
+                        .map_err(source_error)?;
+                    Ok(json!({"path": path, "size": file.bytes.len()}))
+                }
+                "fudan.cloud.share" => Ok(serde_json::to_value(
+                    client
+                        .share(
+                            &source,
+                            required_string(&params, "path")?,
+                            params
+                                .get("days")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(7)
+                                .min(365) as u32,
+                            params
+                                .get("with_code")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(true),
+                        )
+                        .await
+                        .map_err(source_error)?,
+                )?),
+                "fudan.cloud.unshare" => {
+                    client
+                        .revoke_share(&source, required_string(&params, "batch_link")?)
+                        .await
+                        .map_err(source_error)?;
+                    Ok(json!({"revoked": true}))
+                }
+                _ => Err(CoreError::new("MethodNotFound", "unknown cloud method")),
+            };
+        }
         if method.starts_with("community.") {
             io_grant.origins.extend([
                 crate::community::TEA_ORIGIN.into(),
@@ -1544,6 +1748,12 @@ impl CoreService for CampusService {
                             },
                             number(&params, "page", Some(1), 1000)? as u32,
                         )
+                        .await
+                        .map_err(campus_error)?,
+                )?,
+                "fudan.notice.attachments" => serde_json::to_value(
+                    client
+                        .notice_attachments(&source, required_string(&params, "url")?)
                         .await
                         .map_err(campus_error)?,
                 )?,
@@ -2793,6 +3003,688 @@ async fn download_canvas_material(
     }
     context.store.kv_set(&namespace, &key, &downloaded)?;
     context.store.record_upsert("service:canvas",account,"official.canvas.materials",&format!("download:{file_id}"),"course_material",&json!({"file_id":file_id,"asset_id":downloaded["asset_id"],"name":downloaded["name"],"size":downloaded["size"],"mime_type":downloaded["mime_type"]}))?;
+    Ok(downloaded)
+}
+/// WebDAV drives configured by the owner. Server addresses (not secrets) are
+/// kept per account; credentials live only in the network session of each
+/// server's origin and are provided by the trusted host on sign-in.
+async fn webdav_call(
+    context: ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    capability: &str,
+    method: &str,
+    params: &Value,
+    account: &str,
+) -> CoreResult<Value> {
+    use crate::webdav_drive::{WebDavClient, validate_base};
+    use sha2::{Digest, Sha256};
+    const NAMESPACE: &str = "service:webdav";
+    let owner_only = || {
+        if principal.is_owner() {
+            Ok(())
+        } else {
+            Err(CoreError::new(
+                "PermissionDenied",
+                "WebDAV servers are managed by the profile owner",
+            ))
+        }
+    };
+    let mut servers: Vec<Value> = context
+        .store
+        .kv_get(NAMESPACE, account)?
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let origin_of = |server: &Value| -> CoreResult<url::Url> {
+        validate_base(server["url"].as_str().unwrap_or("")).map_err(source_error)
+    };
+    match method {
+        "webdav.servers" => {
+            let mut out = Vec::new();
+            for server in &servers {
+                let base = origin_of(server)?;
+                out.push(json!({
+                    "id": server["id"],
+                    "name": server["name"],
+                    "url": base.as_str(),
+                    "connected": context.network.credential_available(
+                        account,
+                        &base.origin().ascii_serialization(),
+                        CredentialKind::Bearer,
+                    ),
+                }));
+            }
+            return Ok(Value::Array(out));
+        }
+        "webdav.server.add" => {
+            owner_only()?;
+            let base = validate_base(required_string(params, "url")?).map_err(source_error)?;
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| base.host_str().unwrap_or("WebDAV"))
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(60)
+                .collect::<String>();
+            let id = hex_string(&Sha256::digest(base.as_str().as_bytes()))[..12].to_owned();
+            if servers.len() >= 20 && !servers.iter().any(|s| s["id"] == id) {
+                return Err(CoreError::new("LimitExceeded", "too many WebDAV servers"));
+            }
+            servers.retain(|s| s["id"] != id);
+            let server = json!({"id": id, "name": name, "url": base.as_str()});
+            servers.push(server.clone());
+            context
+                .store
+                .kv_set(NAMESPACE, account, &Value::Array(servers))?;
+            return Ok(server);
+        }
+        "webdav.server.remove" => {
+            owner_only()?;
+            let id = required_string(params, "id")?;
+            let removed: Vec<Value> = servers.iter().filter(|s| s["id"] == id).cloned().collect();
+            servers.retain(|s| s["id"] != id);
+            for server in removed {
+                let origin = origin_of(&server)?.origin().ascii_serialization();
+                if !servers
+                    .iter()
+                    .any(|s| origin_of(s).is_ok_and(|b| b.origin().ascii_serialization() == origin))
+                {
+                    // Replace the credentials with an empty session.
+                    context
+                        .network
+                        .set_session(account, &origin, None, Vec::new())?;
+                }
+            }
+            context
+                .store
+                .kv_set(NAMESPACE, account, &Value::Array(servers))?;
+            return Ok(json!({"removed": true}));
+        }
+        _ => {}
+    }
+    let id = required_string(params, "id")?;
+    let server = servers
+        .iter()
+        .find(|s| s["id"] == id)
+        .cloned()
+        .ok_or_else(|| CoreError::new("NotFound", "this WebDAV server is not configured"))?;
+    let base = origin_of(&server)?;
+    let origin = base.origin().ascii_serialization();
+    let mut io_grant = grant.clone();
+    io_grant.capabilities.insert("http.request".into());
+    if method != "webdav.list" && method != "webdav.download" {
+        io_grant.capabilities.insert("http.write".into());
+    }
+    io_grant.origins.insert(origin.clone());
+    let source = SourceContext {
+        account_id: account.into(),
+        source_id: format!("official.webdav.{id}"),
+        observed_at: Utc::now(),
+    };
+    let client = WebDavClient::new(
+        BoundTransport {
+            account,
+            store: context.store,
+            source_capability: capability,
+            credential_lease: Default::default(),
+            network: context.network,
+            platform: context.platform,
+            principal,
+            grant: &io_grant,
+        },
+        base.clone(),
+    );
+    let path = || required_string(params, "path");
+    let is_folder = params
+        .get("is_folder")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    match method {
+        "webdav.login" => {
+            owner_only()?;
+            context.network.set_session_basic(
+                account,
+                &origin,
+                required_string(params, "username")?,
+                required_string(params, "password")?,
+            )?;
+            if let Err(error) = client.verify(&source).await {
+                context
+                    .network
+                    .set_session(account, &origin, None, Vec::new())?;
+                return Err(match error {
+                    ConnectorError::AuthRequired(_) => CoreError::new(
+                        "InvalidCredentials",
+                        "the WebDAV server rejected these credentials",
+                    ),
+                    other => source_error(other),
+                });
+            }
+            Ok(json!({"connected": true}))
+        }
+        "webdav.list" => Ok(serde_json::to_value(
+            client.list(&source, path()?).await.map_err(source_error)?,
+        )?),
+        "webdav.mkdir" => Ok(json!({"path": client
+            .create_folder(&source, path()?, required_string(params, "name")?)
+            .await
+            .map_err(source_error)?})),
+        "webdav.rename" => Ok(json!({"path": client
+            .rename(&source, path()?, required_string(params, "name")?, is_folder)
+            .await
+            .map_err(source_error)?})),
+        "webdav.delete" => {
+            client
+                .delete(&source, path()?, is_folder)
+                .await
+                .map_err(source_error)?;
+            Ok(json!({"deleted": true}))
+        }
+        "webdav.upload" => {
+            let file = upload_source(
+                context,
+                principal,
+                grant,
+                account,
+                params,
+                crate::webdav_drive::MAX_UPLOAD,
+            )?;
+            let saved = client
+                .upload(&source, path()?, &file.name, &file.bytes, &file.mime)
+                .await
+                .map_err(source_error)?;
+            Ok(json!({"path": saved, "size": file.bytes.len()}))
+        }
+        "webdav.download" => {
+            grant.check(principal, "files.download")?;
+            let session = DriveDownloadSession::capture(context.network, account)?;
+            // Pin before verification: a replacement during the probe must not
+            // bind a new identity to an older download/cache request.
+            client.verify(&source).await.map_err(source_error)?;
+            session.check()?;
+            download_webdav_file(
+                context, principal, grant, account, id, &base, params, &session,
+            )
+            .await
+        }
+        _ => Err(CoreError::new("MethodNotFound", "unknown WebDAV method")),
+    }
+}
+
+/// A real authenticated session captured before the private verification read.
+/// The opaque generation/route fingerprint never comes from request parameters.
+struct DriveDownloadSession<'a> {
+    network: &'a Network,
+    account: &'a str,
+    fingerprint: String,
+}
+
+impl<'a> DriveDownloadSession<'a> {
+    fn capture(network: &'a Network, account: &'a str) -> CoreResult<Self> {
+        Ok(Self {
+            network,
+            account,
+            fingerprint: network.session_fingerprint(Some(account))?,
+        })
+    }
+
+    fn check(&self) -> CoreResult<()> {
+        if self.network.session_fingerprint(Some(self.account))? != self.fingerprint {
+            return Err(CoreError::new(
+                "AuthenticationRequired",
+                "drive session changed during the download request",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn finish(
+        &self,
+        context: &ServiceContext<'_>,
+        service: &Principal,
+        grant: &Grant,
+        result: CoreResult<Value>,
+    ) -> CoreResult<Value> {
+        if let Err(error) = self.check() {
+            if let Ok(ref downloaded) = result {
+                let _ = dansheng_core::assets::dispatch(
+                    context.store,
+                    context.network,
+                    service,
+                    grant,
+                    "files.delete",
+                    json!({"asset_id": downloaded["asset_id"], "account_id": self.account}),
+                )
+                .await;
+            }
+            return Err(error);
+        }
+        result
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn download_webdav_file(
+    context: ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    account: &str,
+    id: &str,
+    base: &url::Url,
+    params: &Value,
+    session: &DriveDownloadSession<'_>,
+) -> CoreResult<Value> {
+    use dansheng_core::{PrincipalKind, assets};
+    use sha2::{Digest, Sha256};
+    session.check()?;
+    let origin = base.origin().ascii_serialization();
+    let file_path = required_string(params, "path")?;
+    let url = crate::webdav_drive::resource_url(base, file_path, false).map_err(source_error)?;
+    let name = file_path
+        .rsplit('/')
+        .next()
+        .filter(|n| !n.is_empty())
+        .unwrap_or("webdav-file")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(96)
+        .collect::<String>();
+    let mut delegated = grant.clone();
+    delegated.account_ids.insert(account.into());
+    delegated.origins = std::collections::BTreeSet::from([origin.clone()]);
+    delegated.capabilities.extend(
+        [
+            "webdav.read",
+            "http.request",
+            "files.download",
+            "files.export",
+            "files.delete",
+        ]
+        .map(str::to_owned),
+    );
+    let service = Principal {
+        id: "service:webdav".into(),
+        kind: PrincipalKind::Client,
+    };
+    let source_id = format!("official.webdav.{id}.files");
+    context.store.require_source_capabilities(
+        "service:webdav",
+        &source_id,
+        &["webdav.read".to_owned()].into_iter().collect(),
+    )?;
+    let size = params.get("size").and_then(Value::as_u64);
+    let key = hex_string(&Sha256::digest(serde_json::to_vec(&json!([
+        session.fingerprint,
+        account,
+        id,
+        file_path,
+        params.get("modified_at"),
+        size
+    ]))?));
+    let namespace = format!("service:webdav:files:{account}");
+    let cached = context.store.kv_get(&namespace, &key)?;
+    if let Some(asset) = cached["asset_id"].as_str()
+        && assets::export_descriptor(
+            context.store,
+            &service,
+            &delegated,
+            json!({"asset_id": asset, "account_id": account}),
+        )
+        .is_ok()
+    {
+        session.check()?;
+        return Ok(cached);
+    }
+    let downloaded = context
+        .network
+        .with_owner_private_origin_read(
+            principal,
+            grant,
+            &service,
+            account,
+            &origin,
+            assets::dispatch(
+                context.store,
+                context.network,
+                &service,
+                &delegated,
+                "files.download",
+                json!({
+                    "url": url.to_string(),
+                    "account_id": account,
+                    "source_id": source_id,
+                    "name": name,
+                    "max_bytes": assets::MAX_FILE_BYTES,
+                }),
+            ),
+        )
+        .await;
+    let downloaded = session
+        .finish(&context, &service, &delegated, downloaded)
+        .await?;
+    if size.is_some_and(|n| downloaded["size"].as_u64() != Some(n)) {
+        let _ = assets::dispatch(
+            context.store,
+            context.network,
+            &service,
+            &delegated,
+            "files.delete",
+            json!({"asset_id": downloaded["asset_id"], "account_id": account}),
+        )
+        .await;
+        return Err(CoreError::new(
+            "IntegrityMismatch",
+            "WebDAV download differs from its listing",
+        ));
+    }
+    session.check()?;
+    context.store.kv_set(&namespace, &key, &downloaded)?;
+    session.check()?;
+    Ok(downloaded)
+}
+
+/// Saves one public notice attachment as a managed asset, so it can be opened
+/// or uploaded to a drive. Only files under the notice site's CMS file store.
+async fn download_notice_attachment(
+    context: ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    account: &str,
+    params: &Value,
+) -> CoreResult<Value> {
+    use dansheng_core::{PrincipalKind, assets};
+    grant.check(principal, "files.download")?;
+    let url = crate::campus::notice_attachment_url(required_string(params, "url")?)
+        .map_err(campus_error)?;
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '/' | '\\'))
+        .take(120)
+        .collect::<String>();
+    let name = if name.trim().is_empty() {
+        "附件".to_owned()
+    } else {
+        name
+    };
+    let mut delegated = grant.clone();
+    delegated.account_ids.insert(account.into());
+    delegated.origins = std::collections::BTreeSet::from([url.origin().ascii_serialization()]);
+    delegated.capabilities.extend(
+        [
+            "fudan.notices.read",
+            "http.request",
+            "files.download",
+            "files.export",
+            "files.delete",
+        ]
+        .map(str::to_owned),
+    );
+    let service = Principal {
+        id: "service:fudan".into(),
+        kind: PrincipalKind::Client,
+    };
+    context.store.require_source_capabilities(
+        "service:fudan",
+        "official.fudan.notice.attachments",
+        &["fudan.notices.read".to_owned()].into_iter().collect(),
+    )?;
+    let downloaded = assets::dispatch(
+        context.store,
+        context.network,
+        &service,
+        &delegated,
+        "files.download",
+        json!({
+            "url": url.to_string(),
+            "account_id": account,
+            "source_id": "official.fudan.notice.attachments",
+            "name": name,
+            "max_bytes": assets::MAX_FILE_BYTES,
+        }),
+    )
+    .await?;
+    if downloaded["mime_type"]
+        .as_str()
+        .is_some_and(|m| m.starts_with("text/html"))
+    {
+        // A login or error page instead of the file.
+        let _ = assets::dispatch(
+            context.store,
+            context.network,
+            &service,
+            &delegated,
+            "files.delete",
+            json!({"asset_id": downloaded["asset_id"], "account_id": account}),
+        )
+        .await;
+        return Err(CoreError::new(
+            "AuthenticationRequired",
+            "this attachment requires the campus sign-in page",
+        ));
+    }
+    Ok(downloaded)
+}
+
+/// Bytes to upload to a drive.
+struct UploadFile {
+    name: String,
+    mime: String,
+    bytes: Vec<u8>,
+}
+
+/// The file an upload sends: a managed asset (`asset_id`, e.g. a downloaded
+/// notice attachment or course file) or bytes the trusted host read from a
+/// file the person picked (`data_base64`). `name` overrides the asset name.
+fn upload_source(
+    context: ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    account: &str,
+    params: &Value,
+    max: usize,
+) -> CoreResult<UploadFile> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let override_name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|n| !n.trim().is_empty());
+    let too_large = || CoreError::new("AssetTooLarge", "file exceeds the upload limit");
+    if let Some(id) = params.get("asset_id").and_then(Value::as_str) {
+        let descriptor = dansheng_core::assets::export_descriptor(
+            context.store,
+            principal,
+            grant,
+            json!({"asset_id": id, "account_id": account}),
+        )?;
+        if descriptor["size"].as_u64().is_none_or(|n| n as usize > max) {
+            return Err(too_large());
+        }
+        let path = required_string(&descriptor, "path")?;
+        let bytes = std::fs::read(path)?;
+        if bytes.len() > max {
+            return Err(too_large());
+        }
+        return Ok(UploadFile {
+            name: override_name
+                .or(descriptor["name"].as_str())
+                .unwrap_or("file")
+                .to_owned(),
+            mime: descriptor["mime_type"]
+                .as_str()
+                .unwrap_or("application/octet-stream")
+                .to_owned(),
+            bytes,
+        });
+    }
+    if !principal.is_owner() {
+        return Err(CoreError::new(
+            "PermissionDenied",
+            "raw upload bytes are accepted only from the trusted host",
+        ));
+    }
+    let data = required_string(params, "data_base64")?;
+    if data.len() > max / 3 * 4 + 8 {
+        return Err(too_large());
+    }
+    let bytes = STANDARD
+        .decode(data)
+        .map_err(|_| CoreError::invalid("data_base64 must be base64"))?;
+    if bytes.len() > max {
+        return Err(too_large());
+    }
+    Ok(UploadFile {
+        name: override_name
+            .ok_or_else(|| CoreError::invalid("name is required"))?
+            .to_owned(),
+        mime: params
+            .get("content_type")
+            .and_then(Value::as_str)
+            .filter(|m| m.len() <= 100 && m.contains('/') && !m.chars().any(char::is_control))
+            .unwrap_or("application/octet-stream")
+            .to_owned(),
+        bytes,
+    })
+}
+
+/// Saves one cloud drive file as a managed asset. `path` comes from a listing;
+/// `size` and `modified_at` from the same listing key the local cache, so a
+/// changed file is fetched again.
+async fn download_cloud_file(
+    context: ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    account: &str,
+    params: &Value,
+    session: &DriveDownloadSession<'_>,
+) -> CoreResult<Value> {
+    use dansheng_core::{PrincipalKind, assets};
+    use sha2::{Digest, Sha256};
+    grant.check(principal, "files.download")?;
+    session.check()?;
+    let path = required_string(params, "path")?;
+    let url = crate::fudan_cloud::download_url(path).map_err(source_error)?;
+    let size = params.get("size").and_then(Value::as_u64);
+    if size.is_some_and(|n| n > assets::MAX_FILE_BYTES) {
+        return Err(CoreError::new(
+            "AssetTooLarge",
+            "cloud file exceeds the managed file limit",
+        ));
+    }
+    let name = path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(96)
+        .collect::<String>();
+    let name = if name.trim().is_empty() {
+        "cloud-file".to_owned()
+    } else {
+        name
+    };
+    let mime = params
+        .get("content_type")
+        .and_then(Value::as_str)
+        .filter(|m| {
+            m.len() <= 100
+                && m.split_once('/').is_some_and(|(a, b)| {
+                    !a.is_empty()
+                        && !b.is_empty()
+                        && m.bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || b"/.+-_".contains(&c))
+                })
+        })
+        .unwrap_or("application/octet-stream");
+    let mut delegated = grant.clone();
+    delegated.account_ids.insert(account.into());
+    delegated.origins = std::collections::BTreeSet::from([crate::fudan_cloud::ORIGIN.into()]);
+    delegated.capabilities.extend(
+        [
+            "fudan.cloud.read",
+            "http.request",
+            "files.download",
+            "files.export",
+            "files.delete",
+        ]
+        .map(str::to_owned),
+    );
+    let service = Principal {
+        id: "service:fudan-cloud".into(),
+        kind: PrincipalKind::Client,
+    };
+    let key = hex_string(&Sha256::digest(serde_json::to_vec(&json!([
+        session.fingerprint,
+        account,
+        path,
+        params.get("modified_at"),
+        size
+    ]))?));
+    let namespace = format!("service:fudan-cloud:files:{account}");
+    context.store.require_source_capabilities(
+        "service:fudan-cloud",
+        "official.fudan.cloud.files",
+        &["fudan.cloud.read".to_owned()].into_iter().collect(),
+    )?;
+    let cached = context.store.kv_get(&namespace, &key)?;
+    if let Some(id) = cached["asset_id"].as_str()
+        && assets::export_descriptor(
+            context.store,
+            &service,
+            &delegated,
+            json!({"asset_id":id,"account_id":account}),
+        )
+        .is_ok()
+    {
+        session.check()?;
+        return Ok(cached);
+    }
+    let downloaded = assets::dispatch(
+        context.store,
+        context.network,
+        &service,
+        &delegated,
+        "files.download",
+        json!({
+            "url": url.to_string(),
+            "account_id": account,
+            "source_id": "official.fudan.cloud.files",
+            "name": name,
+            "mime_type": mime,
+            "max_bytes": assets::MAX_FILE_BYTES,
+        }),
+    )
+    .await;
+    let downloaded = session
+        .finish(&context, &service, &delegated, downloaded)
+        .await?;
+    if size.is_some_and(|n| downloaded["size"].as_u64() != Some(n)) {
+        // A login or error page instead of the file has a different size.
+        let _ = assets::dispatch(
+            context.store,
+            context.network,
+            &service,
+            &delegated,
+            "files.delete",
+            json!({"asset_id":downloaded["asset_id"],"account_id":account}),
+        )
+        .await;
+        return Err(CoreError::new(
+            "IntegrityMismatch",
+            "cloud download differs from its listing",
+        ));
+    }
+    session.check()?;
+    context.store.kv_set(&namespace, &key, &downloaded)?;
+    session.check()?;
     Ok(downloaded)
 }
 fn hex_string(bytes: &[u8]) -> String {

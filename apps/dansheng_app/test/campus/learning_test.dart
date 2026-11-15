@@ -327,6 +327,87 @@ void main() {
                 return canvasAnnouncementsFixture;
               }
               return [];
+            case 'canvas.quizzes.sync':
+              if (params['course_id'] != '81001') return [];
+              return [
+                {
+                  'id': '83001',
+                  'course_id': '81001',
+                  'title': '随堂测验一',
+                  'due_at': '2026-11-20T12:00:00+08:00',
+                  'time_limit': 30,
+                  'question_count': 10,
+                  'allowed_attempts': 1,
+                  'published': true,
+                },
+                {
+                  'id': '83002',
+                  'course_id': '81001',
+                  'title': '已计分测验',
+                  'assignment_id': '82002',
+                  'due_at': '2026-11-21T12:00:00+08:00',
+                },
+              ];
+            case 'canvas.submission.self':
+              return [
+                {
+                  'external_id': 'submission-self',
+                  'payload': params['assignment_id'] == '82002'
+                      ? {
+                          'assignment_id': '82002',
+                          'workflow_state': 'graded',
+                          'submitted_at': '2026-11-07T10:00:00Z',
+                          'score': 9.0,
+                          'submission_comments': [
+                            {
+                              'id': '1',
+                              'author_name': '王老师',
+                              'comment': '<p>很好</p>',
+                            },
+                          ],
+                        }
+                      : {
+                          'assignment_id': params['assignment_id'],
+                          'workflow_state': 'unsubmitted',
+                        },
+                },
+              ];
+            case 'canvas.discussions.sync':
+              if (params['course_id'] != '81001') return [];
+              return [
+                {
+                  'id': '84001',
+                  'title': '期中复习答疑',
+                  'discussion_subentry_count': 2,
+                  'read_state': 'unread',
+                  'posted_at': '2026-11-05T08:00:00Z',
+                },
+              ];
+            case 'canvas.grades.self':
+              if (params['course_id'] != '81001') return [];
+              return [
+                {
+                  'payload': {
+                    'enrollment_id': '1',
+                    'grades': {'current_score': 92.5, 'current_grade': 'A'},
+                  },
+                },
+              ];
+            case 'canvas.assignment_groups.sync':
+              if (params['course_id'] != '81001') return [];
+              return [
+                {
+                  'id': '1',
+                  'name': '平时作业',
+                  'group_weight': 40.0,
+                  'position': 1,
+                },
+              ];
+            case 'canvas.pages.sync':
+              if (params['course_id'] != '81001') return [];
+              return [
+                {'page_slug': 'syllabus', 'title': '课程说明', 'front_page': true},
+              ];
             default:
               return {};
           }
@@ -372,7 +453,13 @@ void main() {
         // On 2026-11-08, "第1次上机实验报告" is due
         expect(find.text('第1次上机实验报告'), findsOneWidget);
         expect(find.textContaining('截止'), findsWidgets);
-        expect(find.text('待提交'), findsOneWidget);
+        // Own submission status, not the course-wide submission flag.
+        expect(find.text('未提交'), findsOneWidget);
+        expect(find.text('已提交'), findsOneWidget);
+        expect(find.text('得分 9 / 10'), findsOneWidget);
+        // A standalone quiz is a deadline; a graded quiz is already listed.
+        expect(find.text('随堂测验一'), findsOneWidget);
+        expect(find.text('已计分测验'), findsNothing);
 
         // Week grid shows the teaching week and the course block
         expect(find.text('第1周'), findsOneWidget);
@@ -390,6 +477,21 @@ void main() {
         await tester.pumpAndSettle();
         expect(calledMethods, contains('canvas.modules.sync'));
         expect(find.text('第1模块：计算机系统概览'), findsOneWidget);
+        expect(find.text('课程说明'), findsOneWidget);
+        await tester.tap(find.text('讨论(1)'));
+        await tester.pumpAndSettle();
+        expect(find.text('期中复习答疑'), findsOneWidget);
+        expect(find.text('未读'), findsOneWidget);
+        await tester.tap(find.text('成绩'));
+        await tester.pumpAndSettle();
+        expect(find.text('92.5 · A'), findsOneWidget);
+        expect(find.text('40%'), findsOneWidget);
+        expect(find.text('9 分 / 10'), findsOneWidget);
+        await tester.tap(find.text('作业(3)'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('课后习题二'));
+        await tester.pumpAndSettle();
+        expect(find.text('很好'), findsOneWidget);
       },
     );
 
@@ -433,7 +535,10 @@ void main() {
 
         expect(find.text('大学物理'), findsOneWidget);
         expect(find.text('二教201'), findsOneWidget);
-        expect(find.text('今日无截止作业'), findsOneWidget);
+        // Deadlines are listed for every date, not only the selected day.
+        expect(find.text('第1次上机实验报告'), findsOneWidget);
+        expect(find.text('课后习题二'), findsOneWidget);
+        expect(find.text('11月15日 23:59 截止'), findsOneWidget);
       }
 
       // Tap "今天" button to return to today
@@ -871,7 +976,7 @@ void main() {
       // Test tapping assignment card to view assignment details modal
       await tester.tap(find.text('第1次上机实验报告'));
       await tester.pumpAndSettle();
-      expect(find.text('100.0 分'), findsOneWidget);
+      expect(find.text('100 分'), findsOneWidget);
       expect(find.textContaining('完成实验一的全部要求'), findsOneWidget);
     });
 

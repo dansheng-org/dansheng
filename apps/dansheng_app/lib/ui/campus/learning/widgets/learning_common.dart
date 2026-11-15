@@ -111,15 +111,15 @@ class SoftBadge extends StatelessWidget {
 /// Inline notice with one action: a sign-in prompt or a retryable failure.
 class InfoBanner extends StatelessWidget {
   final String message;
-  final String actionLabel;
-  final VoidCallback onAction;
+  final String? actionLabel;
+  final VoidCallback? onAction;
   final bool signIn;
 
   const InfoBanner({
     super.key,
     required this.message,
-    required this.actionLabel,
-    required this.onAction,
+    this.actionLabel,
+    this.onAction,
     this.signIn = false,
   });
 
@@ -155,20 +155,22 @@ class InfoBanner extends StatelessWidget {
               ),
             ),
           ),
-          if (signIn)
+          if (actionLabel == null || onAction == null)
+            const SizedBox.shrink()
+          else if (signIn)
             FilledButton.tonal(
               onPressed: onAction,
               style: FilledButton.styleFrom(
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
-              child: Text(actionLabel),
+              child: Text(actionLabel!),
             )
           else
             TextButton(
               onPressed: onAction,
               style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-              child: Text(actionLabel),
+              child: Text(actionLabel!),
             ),
         ],
       ),

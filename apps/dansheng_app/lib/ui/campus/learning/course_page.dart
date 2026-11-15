@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import 'package:flutter/material.dart';
 
+import '../campus_api.dart';
+import '../campus_account_boundary.dart';
+
 import 'learning_controller.dart';
 import 'people/course_people_page.dart';
 import 'chat/learning_chat_page.dart';
 import 'models/canvas_models.dart';
 import 'models/timetable_models.dart';
+import 'widgets/course_content_pages.dart';
 import 'widgets/course_files_view.dart';
 import 'widgets/learning_common.dart';
 
@@ -32,6 +36,7 @@ class CoursePage extends StatefulWidget {
 }
 
 class _CoursePageState extends State<CoursePage> {
+  late final CampusApi _api = widget.controller.api;
   static const _weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
   CanvasCourse? get _canvas {
@@ -48,13 +53,16 @@ class _CoursePageState extends State<CoursePage> {
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && widget.controller.selectedCourseId != canvas.id) {
+      if (mounted &&
+          _api.isCurrent &&
+          widget.controller.selectedCourseId != canvas.id) {
         widget.controller.selectCourse(canvas.id);
       }
     });
   }
 
   Future<void> _refresh() {
+    if (!_api.isCurrent) return Future.value();
     final canvas = _canvas;
     return canvas == null
         ? widget.controller.loadCanvas()
@@ -64,112 +72,135 @@ class _CoursePageState extends State<CoursePage> {
   @override
   Widget build(BuildContext context) {
     final ctrl = widget.controller;
-    return ListenableBuilder(
-      listenable: ctrl,
-      builder: (context, _) {
-        final scheme = Theme.of(context).colorScheme;
-        final session = widget.session;
-        final canvas = _canvas;
-        _ensureSelected(canvas);
-        final sessions = session != null
-            ? ctrl.sessionsNamed(session.name)
-            : (canvas == null
-                  ? const <TimetableCourse>[]
-                  : ctrl.sessionsFor(canvas));
-        final lead = session ?? (sessions.isEmpty ? null : sessions.first);
-        final name = lead?.name ?? canvas?.name ?? '课程';
+    return CampusAccountBoundary(
+      api: _api,
+      child: ListenableBuilder(
+        listenable: ctrl,
+        builder: (context, _) {
+          final scheme = Theme.of(context).colorScheme;
+          final session = widget.session;
+          final canvas = _canvas;
+          _ensureSelected(canvas);
+          final sessions = session != null
+              ? ctrl.sessionsNamed(session.name)
+              : (canvas == null
+                    ? const <TimetableCourse>[]
+                    : ctrl.sessionsFor(canvas));
+          final lead = session ?? (sessions.isEmpty ? null : sessions.first);
+          final name = lead?.name ?? canvas?.name ?? '课程';
 
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-            ),
-            actions: [
-              if (canvas != null)
-                IconButton(
-                  tooltip: '课程聊天',
-                  icon: const Icon(Icons.forum_outlined),
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          LearningChatPage(controller: ctrl, course: canvas),
-                    ),
-                  ),
+          return Scaffold(
+            appBar: AppBar(
+              title: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
                 ),
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded),
-                tooltip: '刷新',
-                onPressed: _refresh,
               ),
-            ],
-          ),
-          body: RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-              children: [
-                _buildSummary(scheme, name, lead, sessions, canvas),
+              actions: [
                 if (canvas != null)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      icon: const Icon(Icons.people_outline),
-                      label: const Text('课程人员'),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => CoursePeoplePage(
-                            controller: ctrl,
-                            course: canvas,
-                          ),
-                        ),
+                  IconButton(
+                    tooltip: '课程聊天',
+                    icon: const Icon(Icons.forum_outlined),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            LearningChatPage(controller: ctrl, course: canvas),
                       ),
                     ),
                   ),
-                const SizedBox(height: 18),
-                SectionHeader(
-                  icon: Icons.school_rounded,
-                  title: 'eLearning',
-                  trailing: [
-                    if (canvas != null && ctrl.canvasFromCache)
-                      const SoftBadge('离线缓存'),
-                  ],
+                IconButton(
+                  icon: const Icon(Icons.refresh_rounded),
+                  tooltip: '刷新',
+                  onPressed: _refresh,
                 ),
-                const SizedBox(height: 10),
-                if (canvas != null)
-                  CourseFilesView(
-                    key: ValueKey(canvas.id),
-                    controller: ctrl,
-                    courseId: canvas.id,
-                  )
-                else if (ctrl.canvasAuthRequired)
-                  InfoBanner(
-                    signIn: true,
-                    message: '学习平台需要登录以获取课程课件',
-                    actionLabel: '登录 Canvas',
-                    onAction: ctrl.loginCanvas,
-                  )
-                else if (ctrl.canvasLoading)
-                  const SectionSpinner()
-                else if (ctrl.canvasError != null)
-                  InfoBanner(
-                    message: ctrl.canvasError!,
-                    actionLabel: '重试',
-                    onAction: ctrl.loadCanvas,
-                  )
-                else
-                  const EmptyHint(
-                    icon: Icons.link_off_rounded,
-                    text: 'eLearning 中暂未找到与这门课对应的课程',
-                  ),
               ],
             ),
-          ),
-        );
-      },
+            body: RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                children: [
+                  _buildSummary(scheme, name, lead, sessions, canvas),
+                  if (canvas != null ||
+                      (lead != null && ctrl.hasSyllabus(lead)))
+                    Wrap(
+                      spacing: 4,
+                      children: [
+                        if (canvas != null)
+                          TextButton.icon(
+                            icon: const Icon(Icons.people_outline),
+                            label: const Text('课程人员'),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => CoursePeoplePage(
+                                  controller: ctrl,
+                                  course: canvas,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (lead != null && ctrl.hasSyllabus(lead))
+                          TextButton.icon(
+                            icon: const Icon(Icons.menu_book_outlined),
+                            label: const Text('教学大纲'),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => SyllabusScreen(
+                                  controller: ctrl,
+                                  course: lead,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  const SizedBox(height: 18),
+                  SectionHeader(
+                    icon: Icons.school_rounded,
+                    title: 'eLearning',
+                    trailing: [
+                      if (canvas != null && ctrl.canvasFromCache)
+                        const SoftBadge('离线缓存'),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (canvas != null)
+                    CourseFilesView(
+                      key: ValueKey(canvas.id),
+                      controller: ctrl,
+                      courseId: canvas.id,
+                    )
+                  else if (ctrl.canvasAuthRequired)
+                    InfoBanner(
+                      signIn: true,
+                      message: '学习平台需要登录以获取课程课件',
+                      actionLabel: '登录 Canvas',
+                      onAction: ctrl.loginCanvas,
+                    )
+                  else if (ctrl.canvasLoading)
+                    const SectionSpinner()
+                  else if (ctrl.canvasError != null)
+                    InfoBanner(
+                      message: ctrl.canvasError!,
+                      actionLabel: '重试',
+                      onAction: ctrl.loadCanvas,
+                    )
+                  else
+                    const EmptyHint(
+                      icon: Icons.link_off_rounded,
+                      text: 'eLearning 中暂未找到与这门课对应的课程',
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 

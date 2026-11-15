@@ -1023,6 +1023,108 @@ pub fn parse_aao_notices(body: &[u8], kind: AaoKind) -> Result<Vec<AaoNotice>, C
     Ok(result)
 }
 
+/// A file attached to an AAO/GS notice page.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NoticeAttachment {
+    pub name: String,
+    pub url: String,
+}
+
+const NOTICE_HOSTS: [&str; 2] = ["jwc.fudan.edu.cn", "gs.fudan.edu.cn"];
+const ATTACHMENT_PREFIX: &str = "/_upload/article/files/";
+
+fn notice_host(url: &url::Url) -> bool {
+    url.scheme() == "https"
+        && url.host_str().is_some_and(|h| NOTICE_HOSTS.contains(&h))
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.fragment().is_none()
+}
+
+/// A notice page URL as listed by `fudan.notices`.
+pub fn notice_page(url: &str) -> Result<url::Url, CampusError> {
+    let url = url::Url::parse(url).map_err(|_| CampusError::InvalidQuery("notice url"))?;
+    let path = url.path();
+    if !notice_host(&url)
+        || url.query().is_some()
+        || !(path.ends_with(".htm") || path.ends_with(".psp"))
+    {
+        return Err(CampusError::InvalidQuery("notice url"));
+    }
+    Ok(url)
+}
+
+/// An attachment address on the same notice site, under the CMS file store.
+pub fn notice_attachment_url(url: &str) -> Result<url::Url, CampusError> {
+    let url = url::Url::parse(url).map_err(|_| CampusError::InvalidQuery("attachment url"))?;
+    if !notice_host(&url) || !url.path().starts_with(ATTACHMENT_PREFIX) || url.query().is_some() {
+        return Err(CampusError::InvalidQuery("attachment url"));
+    }
+    Ok(url)
+}
+
+/// `sudyfile-attr="{'title':'名称.pdf'}"` carries the display name.
+fn sudyfile_title(attr: Option<&str>) -> Option<String> {
+    let attr = attr?;
+    let start = attr.find("'title':'")? + "'title':'".len();
+    let end = attr[start..].find('\'')? + start;
+    let title = attr[start..end].trim();
+    (!title.is_empty()).then(|| title.to_owned())
+}
+
+/// Attachment links (`<a>` or embedded PDF players) of a notice page. Only
+/// same-site files under the CMS file store are returned.
+pub fn parse_notice_attachments(
+    body: &[u8],
+    page: &url::Url,
+) -> Result<Vec<NoticeAttachment>, CampusError> {
+    let doc = Html::parse_document(utf8(body, "notice")?);
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let (links, players) = (selector("a[href]"), selector("[pdfsrc]"));
+    let candidates = doc
+        .select(&links)
+        .filter_map(|a| a.value().attr("href").map(|href| (a, href)))
+        .chain(
+            doc.select(&players)
+                .filter_map(|e| e.value().attr("pdfsrc").map(|src| (e, src))),
+        );
+    for (element, link) in candidates {
+        if !link.contains(ATTACHMENT_PREFIX) {
+            continue;
+        }
+        let Ok(url) = page.join(link) else { continue };
+        if url.origin() != page.origin()
+            || notice_attachment_url(url.as_str()).is_err()
+            || !seen.insert(url.as_str().to_owned())
+        {
+            continue;
+        }
+        let fallback = url
+            .path_segments()
+            .and_then(|mut s| s.next_back())
+            .map(|s| {
+                percent_encoding::percent_decode_str(s)
+                    .decode_utf8_lossy()
+                    .into_owned()
+            })
+            .unwrap_or_else(|| "附件".into());
+        let label = text(element);
+        let name = sudyfile_title(element.value().attr("sudyfile-attr"))
+            .or_else(|| (!label.is_empty() && label.contains('.')).then_some(label))
+            .unwrap_or(fallback);
+        out.push(NoticeAttachment {
+            name: name.chars().filter(|c| !c.is_control()).take(200).collect(),
+            url: url.into(),
+        });
+        if out.len() >= 50 {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 fn public_url(base: &str, relative: &str) -> Result<String, CampusError> {
     let origin = url::Url::parse(base).expect("constant origin");
     let url = origin
@@ -1643,6 +1745,20 @@ impl<T: ConnectorTransport> FudanCampusClient<T> {
             position: format!("page:{page}"),
         };
         Ok(result)
+    }
+
+    /// The attachments of one notice. Pages behind the campus login surface
+    /// as an authentication error rather than an empty list.
+    pub async fn notice_attachments(
+        &self,
+        source: &SourceContext,
+        url: &str,
+    ) -> Result<Vec<NoticeAttachment>, CampusError> {
+        let page = notice_page(url)?;
+        let bytes = self
+            .request(source, page.clone(), HttpMethod::Get, None, false)
+            .await?;
+        parse_notice_attachments(&bytes, &page)
     }
 
     pub async fn qr_state(
