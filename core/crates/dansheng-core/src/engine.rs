@@ -3,7 +3,7 @@ use crate::services::{CoreService, ServiceContext};
 mod native_jobs;
 use crate::{
     api::*,
-    network::{HttpRequest, Network},
+    network::{HttpRequest, Network, WriteDispatch},
     platform::PlatformPort,
     plugins::{
         PluginCancellation, PluginError, PluginHost, PluginLimits, PluginManifest, PluginRunner,
@@ -41,6 +41,10 @@ pub struct Engine {
     native_slots: tokio::sync::Semaphore,
 }
 impl Engine {
+    #[cfg(test)]
+    pub(crate) fn set_test_network(&mut self, network: Network) {
+        self.network = network;
+    }
     pub fn open(
         data_dir: impl AsRef<Path>,
         platform: Arc<dyn PlatformPort>,
@@ -267,8 +271,34 @@ impl Engine {
             if let Some(account) = &account {
                 self.ensure_session_loaded(account).await?;
             }
-            let result = service
-                .call(
+            let engine = self.clone();
+            let bound_principal = principal.clone();
+            let bound_account = account.clone();
+            let private_network = grant.allow_private_network;
+            let private_origins = grant.private_network_origins.clone();
+            // No session is a valid starting state for anonymous/login services.
+            // A credentialed write still pins its own session in Network.
+            let identity = account
+                .as_deref()
+                .filter(|a| self.network.has_session(a))
+                .map(|a| self.network.session_fingerprint(Some(a)))
+                .transpose()?;
+            let dispatch = WriteDispatch::new(move || {
+                let current = engine.store.grant(&bound_principal.id)?;
+                current.check(&bound_principal, &capability)?;
+                current.check_account(&bound_principal, bound_account.as_deref())?;
+                if (private_network && !current.allow_private_network)
+                    || !private_origins.is_subset(&current.private_network_origins)
+                {
+                    return Err(CoreError::new(
+                        "PermissionDenied",
+                        "network authority was narrowed",
+                    ));
+                }
+                Ok(())
+            });
+            let result = dispatch
+                .scope(service.call(
                     ServiceContext {
                         store: &self.store,
                         network: &self.network,
@@ -278,7 +308,7 @@ impl Engine {
                     &grant,
                     method,
                     params,
-                )
+                ))
                 .await;
             if let Some(account) = &account {
                 self.refresh_saved_session(account).await;
@@ -286,10 +316,19 @@ impl Engine {
             // The service may have awaited a final page or a native protocol
             // response while authorization changed. Check after the last await
             // before allowing its response to leave this caller's boundary.
-            let current = self.store.grant(&principal.id)?;
-            current.check(principal, &capability)?;
-            current.check_account(principal, account.as_deref())?;
-            return result;
+            if dispatch.was_dispatched()
+                && let Some(expected) = identity
+                && !self
+                    .network
+                    .session_fingerprint(account.as_deref())
+                    .is_ok_and(|actual| actual == expected)
+            {
+                return Err(CoreError::new(
+                    "NeedsReconciliation",
+                    "service session changed after dispatch",
+                ));
+            }
+            return dispatch.finish(result);
         }
         if crate::organizer::required_capability(method).is_some() {
             return crate::organizer::dispatch(&self.store, principal, &grant, method, params);

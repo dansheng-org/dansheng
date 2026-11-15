@@ -18,6 +18,108 @@ use url::Url;
 #[serde(transparent)]
 pub struct CanvasId(pub String);
 
+/// Course roster whitelist. Never retain email, login/SIS IDs, avatars or grades.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasCourseUser {
+    pub id: CanvasId,
+    pub name: String,
+    pub short_name: Option<String>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub enrollments: Vec<CanvasCourseUserEnrollment>,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasCourseUserEnrollment {
+    #[serde(rename = "type")]
+    pub enrollment_type: String,
+    pub role: Option<String>,
+    pub role_id: Option<CanvasId>,
+    pub enrollment_state: Option<String>,
+    pub course_id: Option<CanvasId>,
+    pub course_section_id: Option<CanvasId>,
+    pub user_id: Option<CanvasId>,
+}
+
+/// Conversations API whitelist: message text is inert data; signed URLs,
+/// avatars, UUIDs and arbitrary remote fields are never retained.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasRecipient {
+    pub id: CanvasId,
+    pub name: Option<String>,
+    pub full_name: Option<String>,
+    pub common_courses: Option<HashMap<CanvasId, Vec<String>>>,
+    pub common_groups: Option<HashMap<CanvasId, Vec<String>>>,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasConversationMessage {
+    pub id: CanvasId,
+    pub author_id: Option<CanvasId>,
+    pub body: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub generated: Option<bool>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub attachments: Vec<CanvasLearningAttachment>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub forwarded_messages: Vec<CanvasConversationMessage>,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasConversation {
+    pub id: CanvasId,
+    pub subject: Option<String>,
+    pub workflow_state: Option<String>,
+    pub last_message: Option<String>,
+    pub last_message_at: Option<DateTime<Utc>>,
+    pub message_count: Option<u64>,
+    pub subscribed: Option<bool>,
+    pub private: Option<bool>,
+    pub starred: Option<bool>,
+    pub visible: Option<bool>,
+    pub context_name: Option<String>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub audience: Vec<CanvasId>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub participants: Vec<CanvasRecipient>,
+    #[serde(default, deserialize_with = "null_vec")]
+    pub messages: Vec<CanvasConversationMessage>,
+}
+
+// Debug must not print private message bodies, subjects or recipient names.
+macro_rules! private_canvas_debug {
+    ($($ty:ty),+ $(,)?) => {$ (
+        impl std::fmt::Debug for $ty {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($ty)).finish_non_exhaustive()
+            }
+        }
+    )+};
+}
+private_canvas_debug!(
+    CanvasCourseUser,
+    CanvasCourseUserEnrollment,
+    CanvasRecipient,
+    CanvasConversationMessage,
+    CanvasConversation
+);
+
+/// Separate from read errors: once a POST is dispatched, an unconfirmed result
+/// must never be interpreted as permission to retry.
+#[derive(Debug, thiserror::Error)]
+pub enum CanvasWriteError {
+    #[error(transparent)]
+    Rejected(#[from] ConnectorError),
+    #[error("Canvas send outcome is unknown; reconcile before sending again")]
+    NeedsReconciliation,
+}
+
+fn conversation_id(id: &str) -> Result<(), ConnectorError> {
+    if id.is_empty() || id.len() > 32 || !id.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(ConnectorError::InvalidConfiguration("Canvas id"));
+    }
+    Ok(())
+}
+
 impl<'de> Deserialize<'de> for CanvasId {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
@@ -831,6 +933,52 @@ impl<T: ConnectorTransport> CanvasClient<T> {
             &self.origin,
         )?;
         let collection_path = initial_url.path().to_owned();
+        // Roster Links may change pagination, never the search or included fields.
+        let roster =
+            collection_path.starts_with("/api/v1/courses/") && collection_path.ends_with("/users");
+        let roster_query = |candidate: &Url| {
+            let mut pairs: Vec<_> = candidate
+                .query_pairs()
+                .filter(|(key, _)| !matches!(key.as_ref(), "page" | "per_page" | "cursor"))
+                .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                .collect();
+            pairs.sort();
+            pairs
+        };
+        let expected_roster_query = roster_query(&initial_url);
+        // Conversation/search pagination must retain the requested audience and
+        // search scope. Reject a widened Link before making the next request.
+        let conversation_query: Vec<_> = initial_url
+            .query_pairs()
+            .filter(|(key, _)| matches!(key.as_ref(), "filter[]" | "context" | "type" | "search"))
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        let conversation_scope = |candidate: &Url| {
+            if roster && roster_query(candidate) != expected_roster_query {
+                return false;
+            }
+            if !matches!(
+                collection_path.as_str(),
+                "/api/v1/conversations" | "/api/v1/search/recipients"
+            ) {
+                return true;
+            }
+            let mut expected = conversation_query.clone();
+            let mut actual: Vec<_> = candidate
+                .query_pairs()
+                .filter(|(key, _)| {
+                    matches!(
+                        key.as_ref(),
+                        "filter" | "filter[]" | "context" | "type" | "search"
+                    ) || key.starts_with("filter[")
+                        || key.starts_with("types[")
+                })
+                .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                .collect();
+            expected.sort();
+            actual.sort();
+            actual == expected
+        };
         // A self-only enrollment query must stay self-only on every server Link
         // and final redirect; dropping its filter would expose a course roster.
         let user_filter = initial_url
@@ -850,7 +998,7 @@ impl<T: ConnectorTransport> CanvasClient<T> {
         let mut visited = HashSet::new();
         let mut result = Vec::new();
         while let Some(url) = next {
-            if url.path() != collection_path || !self_only(&url) {
+            if url.path() != collection_path || !self_only(&url) || !conversation_scope(&url) {
                 return Err(ConnectorError::UnsafeUrl);
             }
             if !visited.insert(url.as_str().to_owned()) {
@@ -883,7 +1031,10 @@ impl<T: ConnectorTransport> CanvasClient<T> {
             )?;
             // A same-origin non-API redirect is not a successful Canvas data response either.
             safe_api_url(response.final_url.clone(), &self.origin)?;
-            if response.final_url.path() != collection_path || !self_only(&response.final_url) {
+            if response.final_url.path() != collection_path
+                || !self_only(&response.final_url)
+                || !conversation_scope(&response.final_url)
+            {
                 return Err(ConnectorError::UnsafeUrl);
             }
             let page: Vec<R> = parse_list(&response.body)?;
@@ -892,7 +1043,9 @@ impl<T: ConnectorTransport> CanvasClient<T> {
             }
             next = next_page(&response.headers, &response.final_url, &self.origin)?;
             if let Some(ref next_url) = next
-                && (next_url.path() != collection_path || !self_only(next_url))
+                && (next_url.path() != collection_path
+                    || !self_only(next_url)
+                    || !conversation_scope(next_url))
             {
                 return Err(ConnectorError::UnsafeUrl);
             }
@@ -937,6 +1090,306 @@ impl<T: ConnectorTransport> CanvasClient<T> {
             return Err(ConnectorError::UnsafeUrl);
         }
         serde_json::from_slice(&response.body).map_err(|_| parse_error("Canvas", "item JSON"))
+    }
+
+    /// GET /conversations follows opaque Link pagination. No course means the
+    /// Canvas default inbox (all non-archived conversations).
+    pub async fn conversations(
+        &self,
+        source: &SourceContext,
+        course_id: Option<&str>,
+    ) -> Result<Vec<SourceRecord<CanvasConversation>>, ConnectorError> {
+        let mut url = self
+            .origin
+            .join("/api/v1/conversations?per_page=100")
+            .map_err(|_| ConnectorError::UnsafeUrl)?;
+        if let Some(id) = course_id {
+            conversation_id(id)?;
+            url.query_pairs_mut()
+                .append_pair("filter[]", &format!("course_{id}"));
+        }
+        let rows: Vec<CanvasConversation> = self.list(url.as_str(), source).await?;
+        let mut seen = HashSet::new();
+        rows.into_iter()
+            .map(|row| {
+                if !seen.insert(row.id.clone()) {
+                    return Err(parse_error("Canvas", "duplicate conversation id"));
+                }
+                Ok(source.record(
+                    format!("conversation:{}", row.id.0),
+                    row.last_message_at,
+                    row,
+                ))
+            })
+            .collect()
+    }
+
+    /// Explicitly suppress Canvas's default read-state mutation.
+    pub async fn conversation(
+        &self,
+        source: &SourceContext,
+        id: &str,
+    ) -> Result<SourceRecord<CanvasConversation>, ConnectorError> {
+        conversation_id(id)?;
+        let url = self
+            .origin
+            .join(&format!(
+                "/api/v1/conversations/{id}?auto_mark_as_read=false"
+            ))
+            .map_err(|_| ConnectorError::UnsafeUrl)?;
+        let row: CanvasConversation = self.get(url, source).await?;
+        if row.id.0 != id {
+            return Err(parse_error("Canvas", "conversation id mismatch"));
+        }
+        Ok(source.record(format!("conversation:{id}"), row.last_message_at, row))
+    }
+
+    /// User-only search, scoped to the selected course; never substitutes a roster.
+    pub async fn recipients(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+        search: &str,
+    ) -> Result<Vec<SourceRecord<CanvasRecipient>>, ConnectorError> {
+        conversation_id(course_id)?;
+        if search.len() > 1024 || search.chars().any(char::is_control) {
+            return Err(ConnectorError::InvalidConfiguration(
+                "Canvas recipient search",
+            ));
+        }
+        let mut url = self
+            .origin
+            .join("/api/v1/search/recipients?per_page=100")
+            .map_err(|_| ConnectorError::UnsafeUrl)?;
+        url.query_pairs_mut()
+            .append_pair("context", &format!("course_{course_id}"))
+            .append_pair("type", "user")
+            .append_pair("search", search);
+        let rows: Vec<CanvasRecipient> = self.list(url.as_str(), source).await?;
+        let mut seen = HashSet::new();
+        rows.into_iter()
+            .map(|row| {
+                if !seen.insert(row.id.clone()) {
+                    return Err(parse_error("Canvas", "duplicate recipient id"));
+                }
+                Ok(source.record(format!("recipient:{}", row.id.0), None, row))
+            })
+            .collect()
+    }
+
+    /// GET the authorized roster; search terms and roster results are not cached.
+    pub async fn course_users(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+        search: Option<&str>,
+    ) -> Result<Vec<SourceRecord<CanvasCourseUser>>, ConnectorError> {
+        let path = self.course_path(course_id, "users")?;
+        let mut url = self
+            .origin
+            .join(&path)
+            .map_err(|_| ConnectorError::UnsafeUrl)?;
+        url.query_pairs_mut()
+            .append_pair("include[]", "enrollments");
+        if let Some(search) = search {
+            if search.len() > 256 || search.chars().any(char::is_control) {
+                return Err(ConnectorError::InvalidConfiguration("Canvas roster search"));
+            }
+            if !search.trim().is_empty() {
+                url.query_pairs_mut()
+                    .append_pair("search_term", search.trim());
+            }
+        }
+        let rows: Vec<CanvasCourseUser> = self.list(url.as_str(), source).await?;
+        let mut seen = HashSet::new();
+        for row in &rows {
+            if !seen.insert(&row.id) {
+                return Err(parse_error("Canvas", "duplicate course user id"));
+            }
+            if row.enrollments.len() > self.limits.max_items {
+                return Err(ConnectorError::LimitExceeded);
+            }
+            for enrollment in &row.enrollments {
+                if enrollment
+                    .course_id
+                    .as_ref()
+                    .is_some_and(|id| id.0 != course_id)
+                    || enrollment.user_id.as_ref().is_some_and(|id| id != &row.id)
+                {
+                    return Err(parse_error("Canvas", "roster enrollment context"));
+                }
+            }
+        }
+        Ok(rows
+            .into_iter()
+            .map(|row| source.record(format!("course-user:{course_id}:{}", row.id.0), None, row))
+            .collect())
+    }
+
+    fn validate_send(&self, source: &SourceContext, body: &str) -> Result<(), ConnectorError> {
+        source.validate()?;
+        // Page contexts have no trusted CSRF facility. Native session writes are
+        // separately opt-in at the transport and restricted to the school origin.
+        if self.access == CanvasAccess::BrowserSession
+            || (self.access == CanvasAccess::HostSession
+                && self.origin.origin().ascii_serialization() != "https://elearning.fudan.edu.cn")
+        {
+            return Err(ConnectorError::CapabilityUnavailable);
+        }
+        if body.trim().is_empty() || body.len() > self.limits.max_body_bytes || body.contains('\0')
+        {
+            return Err(ConnectorError::InvalidConfiguration("Canvas message body"));
+        }
+        Ok(())
+    }
+
+    async fn post_conversation<R: for<'de> Deserialize<'de>>(
+        &self,
+        source: &SourceContext,
+        path: &str,
+        form: Vec<(String, String)>,
+    ) -> Result<R, CanvasWriteError> {
+        let url = safe_api_url(
+            self.origin
+                .join(path)
+                .map_err(|_| ConnectorError::UnsafeUrl)?,
+            &self.origin,
+        )?;
+        let (auth, mode) = self.auth_for_source(source);
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(form)
+            .finish();
+        // Exactly one dispatch. Even revoked authority after dispatch can hide a
+        // successful send, so transport failures are conservatively uncertain.
+        let request = ConnectorRequest {
+            method: HttpMethod::Post,
+            url: url.clone(),
+            auth,
+            headers: vec![
+                ("Accept".into(), "application/json".into()),
+                (
+                    "Content-Type".into(),
+                    "application/x-www-form-urlencoded".into(),
+                ),
+            ],
+            body: Some(body.into_bytes()),
+        };
+        let response = if self.access == CanvasAccess::HostSession {
+            self.transport.execute_canvas_session_write(request).await
+        } else {
+            self.transport
+                .execute(request)
+                .await
+                .map_err(|_| CanvasWriteError::NeedsReconciliation)
+        }?;
+        if safe_api_url(response.final_url.clone(), &self.origin).is_err()
+            || response.final_url.path() != url.path()
+        {
+            return Err(CanvasWriteError::NeedsReconciliation);
+        }
+        // Only explicit client rejections are confirmed failures. Redirects,
+        // timeout statuses, 5xx and malformed/oversized successes are uncertain.
+        if (400..500).contains(&response.status) && response.status != 408 {
+            check_response(
+                &response,
+                &self.origin,
+                AuthChallenge {
+                    connector: "canvas".into(),
+                    origin: self.origin.origin().ascii_serialization(),
+                    account_id: source.account_id.clone(),
+                    mode,
+                },
+                self.limits.max_page_bytes,
+            )?;
+        }
+        if !matches!(response.status, 200 | 201) || response.body.len() > self.limits.max_page_bytes
+        {
+            return Err(CanvasWriteError::NeedsReconciliation);
+        }
+        serde_json::from_slice(&response.body).map_err(|_| CanvasWriteError::NeedsReconciliation)
+    }
+
+    /// POST /conversations/:id/add_message sends to all existing participants.
+    pub async fn reply_conversation(
+        &self,
+        source: &SourceContext,
+        id: &str,
+        body: &str,
+    ) -> Result<SourceRecord<CanvasConversation>, CanvasWriteError> {
+        conversation_id(id)?;
+        self.validate_send(source, body)?;
+        let row: CanvasConversation = self
+            .post_conversation(
+                source,
+                &format!("/api/v1/conversations/{id}/add_message"),
+                vec![("body".into(), body.into())],
+            )
+            .await?;
+        if row.id.0 != id || row.messages.is_empty() {
+            return Err(CanvasWriteError::NeedsReconciliation);
+        }
+        Ok(source.record(format!("conversation:{id}"), row.last_message_at, row))
+    }
+
+    /// POST /conversations. One new thread; multiple explicit user IDs form a
+    /// group, never a course-wide/bulk broadcast or asynchronous batch.
+    pub async fn create_conversation(
+        &self,
+        source: &SourceContext,
+        course_id: &str,
+        recipients: &[CanvasId],
+        subject: &str,
+        body: &str,
+    ) -> Result<Vec<SourceRecord<CanvasConversation>>, CanvasWriteError> {
+        conversation_id(course_id)?;
+        self.validate_send(source, body)?;
+        if recipients.is_empty()
+            || recipients.len() > 100
+            || subject.trim().is_empty()
+            || subject.chars().count() > 255
+            || subject.chars().any(char::is_control)
+        {
+            return Err(ConnectorError::InvalidConfiguration(
+                "Canvas conversation recipients/subject",
+            )
+            .into());
+        }
+        let mut unique = HashSet::new();
+        let mut form = vec![
+            ("context_code".into(), format!("course_{course_id}")),
+            ("subject".into(), subject.into()),
+            ("body".into(), body.into()),
+            ("force_new".into(), "true".into()),
+            (
+                "group_conversation".into(),
+                (recipients.len() > 1).to_string(),
+            ),
+        ];
+        for id in recipients {
+            conversation_id(&id.0)?;
+            if !unique.insert(&id.0) {
+                return Err(
+                    ConnectorError::InvalidConfiguration("duplicate Canvas recipient").into(),
+                );
+            }
+            form.push(("recipients[]".into(), id.0.clone()));
+        }
+        let rows: Vec<CanvasConversation> = self
+            .post_conversation(source, "/api/v1/conversations", form)
+            .await?;
+        if rows.len() != 1 {
+            return Err(CanvasWriteError::NeedsReconciliation);
+        }
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                source.record(
+                    format!("conversation:{}", row.id.0),
+                    row.last_message_at,
+                    row,
+                )
+            })
+            .collect())
     }
 
     pub async fn courses(

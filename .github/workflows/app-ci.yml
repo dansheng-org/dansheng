@@ -66,5 +66,73 @@ jobs:
           git diff --exit-code -- lib/bridge.g.dart android/app/src/main/kotlin/org/dansheng/app/Bridge.g.kt
   core:
     uses: ./.github/workflows/core-ci.yml
-# Native Android smoke needs the real pinned Core SDK/acquisition setup.
-# This source job does not claim an APK build or a stable native release check.
+  android-source-sdk:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: apps/dansheng_app
+    env:
+      PUB_HOSTED_URL: https://pub.flutter-io.cn
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: microsoft
+          java-version: '21'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: false
+      - name: Install pinned Gradle for clean source builds
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          gradle-version: '9.7.1'
+          cache-disabled: true
+      - name: Prepare isolated runtime and pinned Android/Rust tools
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP "dansheng-native-check-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "DANSHENG_TASK_RUNTIME=$runtime" >> $env:GITHUB_ENV
+          "PUB_CACHE=$(Join-Path $runtime 'pub-cache')" >> $env:GITHUB_ENV
+          "GRADLE_USER_HOME=$(Join-Path $runtime 'gradle-cache')" >> $env:GITHUB_ENV
+          "ANDROID_USER_HOME=$(Join-Path $runtime 'android-user')" >> $env:GITHUB_ENV
+          "ANDROID_SDK_ROOT=$env:ANDROID_HOME" >> $env:GITHUB_ENV
+          $manager = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest/bin/sdkmanager.bat'
+          & $manager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;30.0.16138531' 'cmake;3.22.1'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot install pinned Android SDK/NDK.' }
+          rustup toolchain install 1.99.1-x86_64-pc-windows-msvc --profile minimal --target aarch64-linux-android --target x86_64-linux-android
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot install pinned Rust compiler/targets.' }
+          "RUSTUP_TOOLCHAIN=1.99.1-x86_64-pc-windows-msvc" >> $env:GITHUB_ENV
+      - name: Build exact checkout SDK and compile App Kotlin/Pigeon
+        run: |
+          # PRs use the checked-out merge commit, never an assumed head SHA.
+          $commit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify checked-out source.' }
+          ./scripts/prerelease-source-sdk.ps1 -RuntimeRoot $env:DANSHENG_TASK_RUNTIME -Commit $commit
+          $native = Join-Path $env:DANSHENG_TASK_RUNTIME 'native-sdk'
+          $core = (Resolve-Path '../../core').Path
+          $lock = Join-Path $native 'core.lock.json'
+          $env:DANSHENG_CORE_SDK_DIR = $native
+          $env:DANSHENG_CORE_LOCK_FILE = $lock
+          $env:DANSHENG_CORE_ROOT = Join-Path $native 'resources'
+          flutter pub get --enforce-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'Locked Pub resolution failed.' }
+          flutter build apk --debug --target-platform android-arm64 --no-pub
+          if ($LASTEXITCODE -ne 0) { throw 'App Kotlin/Pigeon ARM64 compile failed.' }
+          . ./scripts/prerelease-common.ps1
+          $null = Test-DanshengPrereleaseSdk -AppRoot $PWD.Path -CoreRoot $core -CoreToolsRoot (Join-Path $core 'tools/workspace') -ArtifactDirectory $native -LockFile $lock
+          ./scripts/audit-apk.ps1 -Apk (Join-Path $PWD.Path 'build/app/outputs/flutter-apk/app-debug.apk') -Abi arm64-v8a `
+            -ArtifactDirectory $native -LockFile $lock -SdkOnly -Output (Join-Path $env:DANSHENG_TASK_RUNTIME 'apk-audit.json')
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-source-sdk-evidence
+          path: |
+            ${{ env.DANSHENG_TASK_RUNTIME }}/native-sdk/core.lock.json
+            ${{ env.DANSHENG_TASK_RUNTIME }}/native-sdk/receipt.json
+            ${{ env.DANSHENG_TASK_RUNTIME }}/apk-audit.json
+          if-no-files-found: error
+          retention-days: 14

@@ -29,6 +29,13 @@ class _TestBridge implements DanshengBridge {
   }
 }
 
+class _StudentApp extends DanshengController {
+  _StudentApp({required super.client, this.account = '26300000000'});
+  final String account;
+  @override
+  String? get activeAccountId => account;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -326,7 +333,7 @@ void main() {
         };
 
         final client = DanshengClient(bridge: _TestBridge());
-        final controller = DanshengController(client: client);
+        final controller = _StudentApp(client: client);
 
         await tester.pumpWidget(
           MaterialApp(
@@ -348,9 +355,9 @@ void main() {
         expect(find.text('课程学习'), findsOneWidget);
 
         // Check academic filter options
-        expect(find.text('本科生'), findsOneWidget);
-        expect(find.text('研究生'), findsOneWidget);
-        expect(find.text('2026-2027学年第一学期'), findsOneWidget);
+        expect(find.text('本科生'), findsNothing);
+        expect(find.text('研究生'), findsNothing);
+        expect(find.text('2026-2027学年第一学期'), findsNothing);
 
         // Check Calendar header
         expect(find.text('今天'), findsOneWidget);
@@ -375,7 +382,7 @@ void main() {
         );
 
         // Canvas Enrolled Courses section
-        expect(find.text('全部 eLearning'), findsOneWidget);
+        expect(find.text('本学期课程'), findsOneWidget);
         expect(find.text('计算机系统导论'), findsWidgets);
         // Course files load only once the course page is opened
         expect(calledMethods, isNot(contains('canvas.modules.sync')));
@@ -401,7 +408,7 @@ void main() {
       };
 
       final client = DanshengClient(bridge: _TestBridge());
-      final controller = DanshengController(client: client);
+      final controller = _StudentApp(client: client);
 
       await tester.pumpWidget(
         MaterialApp(
@@ -435,53 +442,46 @@ void main() {
       expect(find.text('高等数学'), findsOneWidget);
     });
 
-    testWidgets('3. Postgraduate mode and endpoint switching', (tester) async {
-      final List<Map<String, dynamic>> syncCalls = [];
+    testWidgets(
+      '3. Postgraduate timetable is selected from student number without controls',
+      (tester) async {
+        final List<Map<String, dynamic>> syncCalls = [];
 
-      _TestBridge.handler = (method, params) async {
-        if (method == 'fudan.semesters') return semestersFixture;
-        if (method == 'fudan.postgraduate.sync') {
-          syncCalls.add({'method': method, 'params': params});
-          return pgTimetableFixture;
-        }
-        if (method == 'fudan.timetable.sync') return ugTimetableFixture;
-        if (method == 'canvas.courses.sync') return canvasCoursesFixture;
-        return {};
-      };
+        _TestBridge.handler = (method, params) async {
+          if (method == 'fudan.postgraduate.semester') {
+            return (semestersFixture['semesters'] as List).first;
+          }
+          if (method == 'fudan.postgraduate.sync') {
+            syncCalls.add({'method': method, 'params': params});
+            return pgTimetableFixture;
+          }
+          if (method == 'fudan.timetable.sync') return ugTimetableFixture;
+          if (method == 'canvas.courses.sync') return canvasCoursesFixture;
+          return {};
+        };
 
-      final client = DanshengClient(bridge: _TestBridge());
-      final controller = DanshengController(client: client);
+        final client = DanshengClient(bridge: _TestBridge());
+        final controller = _StudentApp(client: client, account: '26100000000');
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: LearningPage(
-            controller: controller,
-            now: () => DateTime.utc(2026, 11, 8, 4),
+        await tester.pumpWidget(
+          MaterialApp(
+            home: LearningPage(
+              controller: controller,
+              now: () => DateTime.utc(2026, 11, 8, 4),
+            ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
+        );
+        await tester.pumpAndSettle();
 
-      // Tap '研究生'
-      await tester.tap(find.text('研究生'));
-      await tester.pumpAndSettle();
-
-      // Verify postgraduate sync call made
-      expect(syncCalls.isNotEmpty, isTrue);
-      expect(syncCalls.last['params']['endpoint'], equals('primary'));
-
-      // Verify postgraduate course displayed
-      expect(find.text('高级算法设计'), findsOneWidget);
-      expect(find.text('交叉二号楼A301'), findsOneWidget);
-
-      // Verify endpoint switch '次端'
-      expect(find.text('主端'), findsOneWidget);
-      expect(find.text('次端'), findsOneWidget);
-      await tester.tap(find.text('次端'));
-      await tester.pumpAndSettle();
-
-      expect(syncCalls.last['params']['endpoint'], equals('secondary'));
-    });
+        expect(syncCalls, hasLength(1));
+        expect(syncCalls.single['params']['endpoint'], 'primary');
+        for (final label in ['本科生', '研究生', '主端', '次端', '课表设置']) {
+          expect(find.text(label), findsNothing);
+        }
+        expect(find.text('高级算法设计'), findsOneWidget);
+        expect(find.text('交叉二号楼A301'), findsOneWidget);
+      },
+    );
 
     testWidgets(
       '4. Nested folders, downloading with course_id and file_id, and opening file via parent bridge with actual asset_id',
@@ -538,7 +538,7 @@ void main() {
         };
 
         final client = DanshengClient(bridge: _TestBridge());
-        final controller = DanshengController(client: client);
+        final controller = _StudentApp(client: client);
 
         await tester.pumpWidget(
           MaterialApp(
@@ -620,7 +620,7 @@ void main() {
       };
 
       final client = DanshengClient(bridge: _TestBridge());
-      final controller = DanshengController(client: client);
+      final controller = _StudentApp(client: client);
 
       await tester.pumpWidget(
         MaterialApp(
@@ -665,7 +665,7 @@ void main() {
         };
 
         final client = DanshengClient(bridge: _TestBridge());
-        final controller = DanshengController(client: client);
+        final controller = _StudentApp(client: client);
 
         await tester.pumpWidget(
           MaterialApp(
@@ -678,7 +678,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // Academic banner shows sign-in prompt
-        expect(find.text('教务系统需要登录以同步课表'), findsOneWidget);
+        expect(find.text('登录教务系统以同步课表'), findsOneWidget);
         expect(find.text('登录教务'), findsOneWidget);
 
         // Canvas still renders enrolled courses and assignments (source isolation!)
@@ -711,7 +711,7 @@ void main() {
         };
 
         final client = DanshengClient(bridge: _TestBridge());
-        final controller = DanshengController(client: client);
+        final controller = _StudentApp(client: client);
 
         await tester.pumpWidget(
           MaterialApp(
@@ -757,7 +757,7 @@ void main() {
       };
 
       final client = DanshengClient(bridge: _TestBridge());
-      final controller = DanshengController(client: client);
+      final controller = _StudentApp(client: client);
 
       await tester.pumpWidget(
         MaterialApp(
@@ -785,7 +785,7 @@ void main() {
       };
 
       final client = DanshengClient(bridge: _TestBridge());
-      final controller = DanshengController(client: client);
+      final controller = _StudentApp(client: client);
 
       await tester.pumpWidget(
         MaterialApp(
@@ -821,7 +821,7 @@ void main() {
       };
 
       final client = DanshengClient(bridge: _TestBridge());
-      final controller = DanshengController(client: client);
+      final controller = _StudentApp(client: client);
 
       // Put LearningPage inside a hidden TickerMode (e.g. IndexedStack inactive tab)
       await tester.pumpWidget(
@@ -905,7 +905,7 @@ void main() {
         };
 
         final client = DanshengClient(bridge: _TestBridge());
-        final controller = DanshengController(client: client);
+        final controller = _StudentApp(client: client);
 
         await tester.pumpWidget(
           MaterialApp(

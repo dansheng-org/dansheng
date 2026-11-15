@@ -1,5 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+Map<String, dynamic> _timetableObject(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  throw const FormatException('Invalid timetable record');
+}
+
+int _timetableInt(dynamic value, int min, int max) {
+  final parsed = value is int ? value : int.tryParse(value?.toString() ?? '');
+  if (parsed == null || parsed < min || parsed > max) {
+    throw const FormatException('Invalid timetable number');
+  }
+  return parsed;
+}
+
 /// Represents an academic semester.
 class Semester {
   final String externalId;
@@ -28,15 +41,15 @@ class Semester {
         payload['startsOn']?.toString() ??
         '';
 
-    DateTime parsedStart;
-    if (startsOnStr.isNotEmpty) {
-      try {
-        parsedStart = DateTime.parse(startsOnStr);
-      } catch (_) {
-        parsedStart = DateTime.now();
-      }
-    } else {
-      parsedStart = DateTime.now();
+    final parsedStart = DateTime.tryParse(startsOnStr);
+    // Fabricating a start date shifts every teaching week. Rust serializes
+    // a date-only Monday; reject damaged cache metadata explicitly.
+    if (id.isEmpty ||
+        parsedStart == null ||
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(startsOnStr) ||
+        parsedStart.toIso8601String().substring(0, 10) != startsOnStr ||
+        parsedStart.weekday != DateTime.monday) {
+      throw const FormatException('Invalid timetable semester');
     }
 
     return Semester(
@@ -64,8 +77,7 @@ class SemesterCatalog {
   factory SemesterCatalog.fromJson(dynamic json) {
     if (json is List) {
       final list = json
-          .whereType<Map<String, dynamic>>()
-          .map((e) => Semester.fromJson(e))
+          .map((e) => Semester.fromJson(_timetableObject(e)))
           .toList();
       return SemesterCatalog(
         semesters: list,
@@ -73,18 +85,18 @@ class SemesterCatalog {
       );
     }
     if (json is Map<String, dynamic>) {
-      final sems =
-          (json['semesters'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => Semester.fromJson(e))
-              .toList() ??
-          <Semester>[];
+      if (json['semesters'] is! List) {
+        throw const FormatException('Invalid semester catalog');
+      }
+      final sems = (json['semesters'] as List)
+          .map((e) => Semester.fromJson(_timetableObject(e)))
+          .toList();
       final defId =
           json['default_semester_id']?.toString() ??
           json['defaultSemesterId']?.toString();
       return SemesterCatalog(semesters: sems, defaultSemesterId: defId);
     }
-    return const SemesterCatalog(semesters: []);
+    throw const FormatException('Invalid semester catalog');
   }
 }
 
@@ -169,34 +181,42 @@ class TimetableCourse {
       teachersList = teachersRaw.map((e) => e.toString()).toList();
     }
 
-    final weeksRaw = payload['weeks'] ?? payload['weekIndexes'];
-    List<int> weeksList = [];
-    if (weeksRaw is List) {
-      weeksList = weeksRaw
-          .map((e) => e is int ? e : int.tryParse(e.toString()) ?? 0)
-          .where((w) => w >= 0)
-          .toList();
-    }
-
     final rawStart = payload['start_unit'] ?? payload['startUnit'];
-    final startUnit = rawStart is int
-        ? rawStart
-        : int.tryParse(rawStart?.toString() ?? '1') ?? 1;
+    final startUnit = _timetableInt(rawStart, 1, 15);
 
     final rawEnd = payload['end_unit'] ?? payload['endUnit'];
-    final endUnit = rawEnd is int
-        ? rawEnd
-        : int.tryParse(rawEnd?.toString() ?? '1') ?? 1;
+    final endUnit = _timetableInt(rawEnd, startUnit, 15);
 
     final rawWeekday = payload['weekday'];
-    final weekday = rawWeekday is int
-        ? rawWeekday
-        : int.tryParse(rawWeekday?.toString() ?? '1') ?? 1;
+    final weekday = _timetableInt(rawWeekday, 1, 7);
+
+    final normalized = payload.containsKey('weeks');
+    final weeksRaw = normalized ? payload['weeks'] : payload['weekIndexes'];
+    if (weeksRaw is! List) {
+      throw const FormatException('Invalid timetable weeks');
+    }
+    final weeksList =
+        weeksRaw
+            .map((value) {
+              final week = _timetableInt(value, normalized ? 0 : 1, 64);
+              // JWGL raw weekIndexes start on Sunday. Rust's payload.weeks already
+              // uses Monday-based weeks and must never be shifted again.
+              return !normalized && weekday == DateTime.sunday
+                  ? week - 1
+                  : week;
+            })
+            .toSet()
+            .toList()
+          ..sort();
+    final name = (payload['name'] ?? payload['courseName'])?.toString() ?? '';
+    if (name.trim().isEmpty) {
+      throw const FormatException('Invalid timetable course name');
+    }
 
     return TimetableCourse(
       lessonId: (payload['lesson_id'] ?? payload['lessonId'])?.toString(),
       courseCode: (payload['course_code'] ?? payload['lessonCode'])?.toString(),
-      name: (payload['name'] ?? payload['courseName'])?.toString() ?? '',
+      name: name,
       teachers: teachersList,
       room: payload['room']?.toString(),
       weekday: weekday,
@@ -273,43 +293,52 @@ class TimetableData {
   const TimetableData({this.semester, required this.courses});
 
   factory TimetableData.fromJson(dynamic json, [Semester? currentSemester]) {
-    if (json == null) {
-      return TimetableData(semester: currentSemester, courses: const []);
-    }
-
     Semester? sem = currentSemester;
     final List<TimetableCourse> courses = [];
 
     if (json is Map<String, dynamic>) {
       if (json['semester'] is Map<String, dynamic>) {
         sem = Semester.fromJson(json['semester'] as Map<String, dynamic>);
+        if (currentSemester != null &&
+            sem.externalId != currentSemester.externalId) {
+          throw const FormatException('Timetable semester mismatch');
+        }
+      } else if (json.containsKey('semester')) {
+        throw const FormatException('Invalid timetable semester');
       }
 
       // Check if courses is a list of SourceRecords or courses
       if (json['courses'] is List) {
         for (final item in json['courses'] as List) {
-          if (item is Map<String, dynamic>) {
-            courses.add(TimetableCourse.fromJson(item));
-          }
+          courses.add(TimetableCourse.fromJson(_timetableObject(item)));
         }
       } else if (json['studentTableVms'] is List) {
         // Raw crawler format (DanXi / undergraduate.json)
-        for (final vm in json['studentTableVms'] as List) {
-          if (vm is Map<String, dynamic> && vm['activities'] is List) {
-            for (final act in vm['activities'] as List) {
-              if (act is Map<String, dynamic>) {
-                courses.add(TimetableCourse.fromJson(act));
-              }
-            }
-          }
+        final tables = json['studentTableVms'] as List;
+        if (tables.length != 1) {
+          throw const FormatException('Invalid student timetable count');
         }
+        final vm = _timetableObject(tables.single);
+        if (vm['activities'] is! List) {
+          throw const FormatException('Invalid timetable activities');
+        }
+        for (final act in vm['activities'] as List) {
+          courses.add(TimetableCourse.fromJson(_timetableObject(act)));
+        }
+      } else {
+        throw const FormatException('Invalid timetable response');
       }
     } else if (json is List) {
       for (final item in json) {
-        if (item is Map<String, dynamic>) {
-          courses.add(TimetableCourse.fromJson(item));
-        }
+        courses.add(TimetableCourse.fromJson(_timetableObject(item)));
       }
+    } else {
+      // A cache miss is null; a successfully empty timetable is [] or courses: [].
+      throw const FormatException('Invalid timetable response');
+    }
+
+    if (courses.isNotEmpty && sem == null) {
+      throw const FormatException('Missing timetable semester');
     }
 
     return TimetableData(semester: sem, courses: courses);

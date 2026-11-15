@@ -9,17 +9,24 @@ import 'learning_common.dart';
 class CourseListView extends StatelessWidget {
   final LearningController controller;
   final void Function(CanvasCourse course) onOpen;
+  final List<CanvasCourse>? courses;
+  final String title;
+  final VoidCallback? onOpenArchive;
 
   const CourseListView({
     super.key,
     required this.controller,
     required this.onOpen,
+    this.courses,
+    this.title = '本学期课程',
+    this.onOpenArchive,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final ctrl = controller;
+    final visibleCourses = courses ?? ctrl.courses;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -28,17 +35,26 @@ class CourseListView extends StatelessWidget {
         children: [
           SectionHeader(
             icon: Icons.school_rounded,
-            title: '全部 eLearning',
+            title: title,
             trailing: [
-              if (ctrl.courses.isNotEmpty)
+              if (visibleCourses.isNotEmpty)
                 SoftBadge(
-                  '${ctrl.courses.length}',
+                  '${visibleCourses.length}',
                   background: scheme.primaryContainer,
                   foreground: scheme.onPrimaryContainer,
                 ),
               if (ctrl.canvasFromCache) const SoftBadge('离线缓存'),
             ],
           ),
+          if (onOpenArchive != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: onOpenArchive,
+                icon: const Icon(Icons.history, size: 18),
+                label: const Text('过往学期与其他课程'),
+              ),
+            ),
           const SizedBox(height: 10),
           if (ctrl.canvasAuthRequired)
             InfoBanner(
@@ -53,13 +69,13 @@ class CourseListView extends StatelessWidget {
               actionLabel: '重试',
               onAction: ctrl.loadCanvas,
             ),
-          if (ctrl.courses.isEmpty) ...[
+          if (visibleCourses.isEmpty) ...[
             if (ctrl.canvasLoading)
               const SectionSpinner()
             else if (!ctrl.canvasAuthRequired && ctrl.canvasError == null)
-              const EmptyHint(icon: Icons.menu_book_rounded, text: '暂无已选课程'),
+              const EmptyHint(icon: Icons.menu_book_rounded, text: '暂无本学期课程'),
           ] else
-            for (final course in ctrl.courses)
+            for (final course in visibleCourses)
               _CourseTile(
                 course: course,
                 controller: ctrl,

@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/dansheng_state.dart';
 import '../../screens/account_balance_screen.dart';
-import '../../screens/settings_screen.dart';
+import '../../widgets/campus_account_actions.dart';
 import '../campus_api.dart';
 import '../venues/venue_page.dart';
 import 'board/board_layout.dart';
@@ -469,18 +469,7 @@ class _EHallPageState extends State<EHallPage> {
                     onPressed: () => setState(() => editing = true),
                     icon: const Icon(Icons.dashboard_customize_outlined),
                   ),
-                  IconButton(
-                    tooltip: '账号与校园卡',
-                    onPressed: () =>
-                        _push(AccountBalanceScreen(controller: controller)),
-                    icon: const Icon(Icons.account_circle_outlined),
-                  ),
-                  IconButton(
-                    tooltip: '设置',
-                    onPressed: () =>
-                        _push(SettingsScreen(controller: controller)),
-                    icon: const Icon(Icons.tune_outlined),
-                  ),
+                  CampusAccountActions(controller: controller),
                 ],
         ),
         body: RefreshIndicator(

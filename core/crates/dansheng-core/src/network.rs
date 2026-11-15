@@ -17,12 +17,80 @@ use std::{
     collections::{BTreeMap, HashMap},
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
 use url::Url;
+
+#[cfg(test)]
+#[path = "network_csrf_tests.rs"]
+mod csrf_tests;
+
+/// Per-service authority and dispatch state. Scoped to the calling future, never
+/// shared with unrelated requests or serialized into HTTP/IPC.
+pub(crate) struct WriteDispatch {
+    check: Box<dyn Fn() -> CoreResult<()> + Send + Sync>,
+    dispatched: AtomicBool,
+}
+
+tokio::task_local! {
+    static WRITE_DISPATCH: Arc<WriteDispatch>;
+}
+
+impl WriteDispatch {
+    pub(crate) fn new(check: impl Fn() -> CoreResult<()> + Send + Sync + 'static) -> Arc<Self> {
+        Arc::new(Self {
+            check: Box::new(check),
+            dispatched: AtomicBool::new(false),
+        })
+    }
+
+    pub(crate) async fn scope<F: std::future::Future>(self: &Arc<Self>, future: F) -> F::Output {
+        WRITE_DISPATCH.scope(self.clone(), future).await
+    }
+
+    pub(crate) fn was_dispatched(&self) -> bool {
+        self.dispatched.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn finish<T>(&self, result: CoreResult<T>) -> CoreResult<T> {
+        if let Err(error) = (self.check)() {
+            // Do not mask uncertainty reported by another trusted transport.
+            if self.was_dispatched()
+                || result
+                    .as_ref()
+                    .is_err_and(|e| e.code == "NeedsReconciliation")
+            {
+                return Err(CoreError::new(
+                    "NeedsReconciliation",
+                    "write authority changed after dispatch",
+                ));
+            }
+            return Err(error);
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct TestDispatchPause {
+    reached: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
+}
+
+#[cfg(test)]
+impl TestDispatchPause {
+    async fn pause(&self) {
+        self.reached.notify_one();
+        self.resume.notified().await;
+    }
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct HttpRequest {
@@ -161,6 +229,109 @@ struct Session {
     secret_headers: BTreeMap<String, String>,
     jar: Arc<SessionJar>,
 }
+
+/// Policy supplied by a trusted native adapter, never by serialized HTTP/IPC.
+/// No credentials are carried in this policy or returned to the adapter.
+#[derive(Clone)]
+pub struct CookieCsrf {
+    pub origin: String,
+    pub cookie_name: String,
+    pub header_name: String,
+}
+
+fn csrf_required() -> CoreError {
+    CoreError::new(
+        "CsrfRequired",
+        "the HTTP session needs a valid CSRF cookie before sending",
+    )
+}
+
+fn validate_cookie_csrf_request(
+    principal: &Principal,
+    grant: &Grant,
+    input: &HttpRequest,
+    policy: &CookieCsrf,
+) -> CoreResult<()> {
+    grant.check(principal, "http.request")?;
+    grant.check(principal, "http.write")?;
+    grant.check_account(principal, input.account_id.as_deref())?;
+    let url = Url::parse(&input.url).map_err(|_| CoreError::invalid("invalid request URL"))?;
+    validate_url(&url, principal, grant)?;
+    let name = HeaderName::from_bytes(policy.header_name.as_bytes())
+        .map_err(|_| CoreError::invalid("invalid CSRF header name"))?;
+    validate_secret_headers([(name.to_string(), "validation".into())].into())?;
+    if url.scheme() != "https"
+        || url.origin().ascii_serialization() != policy.origin
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || input.method != "POST"
+        || input.follow_redirects
+        || input.account_id.as_deref().is_none_or(str::is_empty)
+        || policy.cookie_name.is_empty()
+        || policy.cookie_name.len() > 128
+        || !policy
+            .cookie_name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        || matches!(
+            name.as_str(),
+            "origin" | "referer" | "content-type" | "accept"
+        )
+        || input.headers.keys().any(|key| {
+            key.eq_ignore_ascii_case(name.as_str())
+                || matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "origin"
+                        | "referer"
+                        | "host"
+                        | "cookie"
+                        | "cookie2"
+                        | "authorization"
+                        | "proxy-authorization"
+                )
+        })
+    {
+        return Err(CoreError::new(
+            "PermissionDenied",
+            "unsupported cookie-CSRF request",
+        ));
+    }
+    Ok(())
+}
+
+/// Decode exactly once like decodeURIComponent, not form decoding: '+' stays '+'.
+/// The result never leaves this module or enters HttpRequest/IPC/logs.
+fn cookie_csrf_header(jar: &SessionJar, url: &Url, cookie_name: &str) -> CoreResult<HeaderValue> {
+    let store = jar.0.lock().map_err(|_| csrf_required())?;
+    let matches = store.matches(url);
+    let mut tokens = matches.iter().filter(|cookie| cookie.name() == cookie_name);
+    let raw = tokens.next().ok_or_else(csrf_required)?.value();
+    if tokens.next().is_some() || raw.is_empty() || raw.len() > 8192 {
+        return Err(csrf_required());
+    }
+    let mut decoded = Vec::with_capacity(raw.len());
+    let mut bytes = raw.bytes();
+    while let Some(byte) = bytes.next() {
+        let byte = if byte == b'%' {
+            let high = bytes.next().and_then(|b| (b as char).to_digit(16));
+            let low = bytes.next().and_then(|b| (b as char).to_digit(16));
+            match (high, low) {
+                (Some(high), Some(low)) => (high * 16 + low) as u8,
+                _ => return Err(csrf_required()),
+            }
+        } else {
+            byte
+        };
+        if !(0x21..=0x7e).contains(&byte) {
+            return Err(csrf_required());
+        }
+        decoded.push(byte);
+    }
+    let mut value = HeaderValue::from_bytes(&decoded).map_err(|_| csrf_required())?;
+    value.set_sensitive(true);
+    Ok(value)
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CredentialKind {
     #[default]
@@ -282,6 +453,7 @@ pub(crate) fn secret_headers_from_value(
 }
 #[derive(Clone)]
 struct Transfer {
+    cookie_csrf: Option<CookieCsrf>,
     sink: Option<PathBuf>,
     max_bytes: u64,
     resume: bool,
@@ -292,6 +464,7 @@ struct Transfer {
 impl Transfer {
     fn buffered(credentials: CredentialKind) -> Self {
         Self {
+            cookie_csrf: None,
             sink: None,
             max_bytes: 8 * 1024 * 1024,
             resume: false,
@@ -307,6 +480,10 @@ pub struct Network {
     concurrency: Arc<Semaphore>,
     #[cfg(test)]
     test_roots: Vec<rustls::pki_types::CertificateDer<'static>>,
+    #[cfg(test)]
+    test_before_queue: Option<Arc<tokio::sync::Notify>>,
+    #[cfg(test)]
+    test_dns_pause: Option<Arc<TestDispatchPause>>,
 }
 impl Default for Network {
     fn default() -> Self {
@@ -316,10 +493,38 @@ impl Default for Network {
             concurrency: Arc::new(Semaphore::new(8)),
             #[cfg(test)]
             test_roots: Vec::new(),
+            #[cfg(test)]
+            test_before_queue: None,
+            #[cfg(test)]
+            test_dns_pause: None,
         }
     }
 }
 impl Network {
+    fn check_write_binding(
+        &self,
+        principal: &Principal,
+        grant: &Grant,
+        account: Option<&str>,
+        identity: Option<&str>,
+        authority: Option<&WriteDispatch>,
+    ) -> CoreResult<()> {
+        grant.check(principal, "http.write")?;
+        grant.check_account(principal, account)?;
+        if let Some(authority) = authority {
+            (authority.check)()?;
+        }
+        if let Some(expected) = identity
+            && self.session_fingerprint(account)? != expected
+        {
+            return Err(CoreError::new(
+                "AuthenticationRequired",
+                "HTTP session changed before dispatch",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn set_routes(&self, account: &str, routes: Vec<GatewayRoute>) -> CoreResult<()> {
         if account.is_empty() || account.len() > 256 || account.chars().any(char::is_control) {
             return Err(CoreError::invalid("invalid routing account"));
@@ -637,6 +842,24 @@ impl Network {
             .into_text()
     }
 
+    /// Trusted Rust adapter only: no IPC selector and no cookie/token getter.
+    /// One direct, origin/account-bound POST; redirects and gateways are rejected.
+    /// All errors after dispatch have code NeedsReconciliation, including decoding.
+    pub async fn request_with_cookie_csrf(
+        &self,
+        principal: &Principal,
+        grant: &Grant,
+        input: HttpRequest,
+        policy: CookieCsrf,
+    ) -> CoreResult<HttpResponse> {
+        validate_cookie_csrf_request(principal, grant, &input, &policy)?;
+        let mut transfer = Transfer::buffered(CredentialKind::Cookie);
+        transfer.cookie_csrf = Some(policy);
+        self.execute(principal, grant, input, transfer)
+            .await?
+            .into_text()
+    }
+
     /// Send an optional raw body and receive raw bytes, without UTF-8, JSON,
     /// charset or base64 conversion. The request and response buffer limit is
     /// 8 MiB. Text `input.body` is rejected to avoid two competing body sources.
@@ -679,6 +902,7 @@ impl Network {
             grant,
             input,
             Transfer {
+                cookie_csrf: None,
                 sink: Some(path),
                 max_bytes,
                 resume,
@@ -775,6 +999,7 @@ impl Network {
         routes: &[GatewayRoute],
     ) -> CoreResult<WireResponse> {
         let Transfer {
+            cookie_csrf,
             sink,
             max_bytes,
             resume,
@@ -784,11 +1009,38 @@ impl Network {
         } = transfer;
         grant.check(principal, "http.request")?;
         grant.check_account(principal, input.account_id.as_deref())?;
+        let mutating = !matches!(input.method.as_str(), "GET" | "HEAD" | "OPTIONS");
+        let authority = mutating
+            .then(|| WRITE_DISPATCH.try_with(Arc::clone).ok())
+            .flatten();
+        if let Some(authority) = &authority {
+            (authority.check)()?;
+        }
+        // Bind before any queue/DNS await. A replacement must never silently
+        // become the credential used by a pending write, even outside Engine.
+        let identity = if mutating && credentials != CredentialKind::Anonymous {
+            Some(self.session_fingerprint(input.account_id.as_deref())?)
+        } else {
+            None
+        };
+        #[cfg(test)]
+        if let Some(notify) = &self.test_before_queue {
+            notify.notify_one();
+        }
         let _permit = self
             .concurrency
             .acquire()
             .await
             .map_err(|_| CoreError::new("Shutdown", "network unavailable"))?;
+        if mutating {
+            self.check_write_binding(
+                principal,
+                grant,
+                input.account_id.as_deref(),
+                identity.as_deref(),
+                authority.as_deref(),
+            )?;
+        }
         let mut url =
             Url::parse(&input.url).map_err(|_| CoreError::invalid("invalid request URL"))?;
         let mut method = Method::from_bytes(input.method.as_bytes())
@@ -875,6 +1127,29 @@ impl Network {
                 input.account_id.as_deref(),
                 &url.origin().ascii_serialization(),
             )?;
+            // CSRF and Cookie come from the same account/origin session snapshot.
+            // Gateway cookie translation has no proven CSRF contract; fail closed.
+            if let Some(policy) = &cookie_csrf {
+                if route.is_some() {
+                    return Err(CoreError::new(
+                        "CapabilityUnavailable",
+                        "cookie-CSRF writes require a direct route",
+                    ));
+                }
+                let (_, _, jar, _) = native.as_ref().ok_or_else(csrf_required)?;
+                let name = HeaderName::from_bytes(policy.header_name.as_bytes())
+                    .map_err(|_| CoreError::invalid("invalid CSRF header name"))?;
+                headers.insert(
+                    name.clone(),
+                    cookie_csrf_header(jar, &url, &policy.cookie_name)?,
+                );
+                headers.insert(
+                    "origin",
+                    HeaderValue::from_str(&policy.origin)
+                        .map_err(|_| CoreError::invalid("invalid CSRF origin"))?,
+                );
+                hidden_headers.insert(name.to_string());
+            }
             let session = if route.is_some() {
                 self.copy_session(
                     input.account_id.as_deref(),
@@ -922,14 +1197,21 @@ impl Network {
             let port = physical
                 .port_or_known_default()
                 .ok_or_else(|| CoreError::invalid("URL has no port"))?;
-            let addrs: Vec<SocketAddr> =
-                tokio::time::timeout_at(deadline, tokio::net::lookup_host((host.as_str(), port)))
-                    .await
-                    .map_err(|_| {
-                        CoreError::new("NetworkUnreachable", "DNS resolution deadline exceeded")
-                    })?
-                    .map_err(|_| CoreError::new("NetworkUnreachable", "DNS resolution failed"))?
-                    .collect();
+            let resolution = async {
+                let result = tokio::net::lookup_host((host.as_str(), port)).await;
+                #[cfg(test)]
+                if let Some(pause) = &self.test_dns_pause {
+                    pause.pause().await;
+                }
+                result
+            };
+            let addrs: Vec<SocketAddr> = tokio::time::timeout_at(deadline, resolution)
+                .await
+                .map_err(|_| {
+                    CoreError::new("NetworkUnreachable", "DNS resolution deadline exceeded")
+                })?
+                .map_err(|_| CoreError::new("NetworkUnreachable", "DNS resolution failed"))?
+                .collect();
             if addrs.is_empty() {
                 return Err(CoreError::new(
                     "NetworkUnreachable",
@@ -1022,6 +1304,20 @@ impl Network {
                 } else {
                     request.json(value)
                 };
+            }
+            // No await between the final checks and dispatch. The session used
+            // to build this request must still be the one pinned before queuing.
+            if mutating_request {
+                self.check_write_binding(
+                    principal,
+                    grant,
+                    input.account_id.as_deref(),
+                    identity.as_deref(),
+                    authority.as_deref(),
+                )?;
+                if let Some(authority) = &authority {
+                    authority.dispatched.store(true, Ordering::Release);
+                }
             }
             let mut response = request.send().await.map_err(|e| {
                 let code = if !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS) {

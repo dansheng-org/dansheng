@@ -28,6 +28,8 @@ class LearningController extends ChangeNotifier {
   // --- Account & Request Tracking ---
   String? _currentAccountId;
   int _requestToken = 0;
+  int _academicRequest = 0;
+  int _canvasRequest = 0;
 
   // --- Calendar & Navigation State ---
   late DateTime _selectedDate;
@@ -40,17 +42,29 @@ class LearningController extends ChangeNotifier {
   String get calendarViewMode => _calendarViewMode;
 
   // --- Academic (Timetable) State ---
-  bool _isUndergraduate = true;
-  bool get isUndergraduate => _isUndergraduate;
+  /// Fudan student category is the third digit of the active student number.
+  static bool? undergraduateForAccount(String? account) {
+    final id = account?.trim() ?? '';
+    if (!RegExp(r'^\d{3,}$').hasMatch(id)) return null;
+    return switch (id[2]) {
+      '1' || '2' => false,
+      '3' => true,
+      _ => null,
+    };
+  }
 
-  String _pgEndpoint = 'primary'; // 'primary' | 'secondary'
-  String get pgEndpoint => _pgEndpoint;
+  bool get isUndergraduate =>
+      undergraduateForAccount(_currentAccountId) == true;
+  bool get hasAcademicIdentity =>
+      undergraduateForAccount(_currentAccountId) != null;
 
   List<Semester> _semesters = [];
   List<Semester> get semesters => _semesters;
 
   Semester? _selectedSemester;
   Semester? get selectedSemester => _selectedSemester;
+  Semester? _currentSemester;
+  Semester? get currentSemester => _currentSemester;
 
   TimetableData? _timetableData;
   TimetableData? get timetableData => _timetableData;
@@ -69,7 +83,15 @@ class LearningController extends ChangeNotifier {
 
   // --- Canvas (eLearning) State ---
   List<CanvasCourse> _courses = [];
-  List<CanvasCourse> get courses => _courses;
+  List<CanvasCourse> get courses => _courses
+      .where(
+        (c) => c.belongsToTerm(today, academicTermName: _currentSemester?.name),
+      )
+      .toList();
+  List<CanvasCourse> get archivedCourses {
+    final currentIds = courses.map((c) => c.id).toSet();
+    return _courses.where((c) => !currentIds.contains(c.id)).toList();
+  }
 
   String? _selectedCourseId;
   String? get selectedCourseId => _selectedCourseId;
@@ -84,7 +106,11 @@ class LearningController extends ChangeNotifier {
   String? get canvasError => _canvasError;
   final Map<String, String> _detailErrors = {};
   String? get assignmentError => _detailErrors.entries
-      .where((e) => e.key.startsWith('canvas.assignments.sync:'))
+      .where(
+        (e) =>
+            e.key.startsWith('canvas.assignments.sync:') &&
+            courses.any((c) => e.key == 'canvas.assignments.sync:${c.id}'),
+      )
       .firstOrNull
       ?.value;
   String? detailsError(String id) => _detailErrors.entries
@@ -186,7 +212,7 @@ class LearningController extends ChangeNotifier {
     final name = _fold(course.name);
     final code = _fold(course.courseCode);
     CanvasCourse? partial;
-    for (final candidate in _courses) {
+    for (final candidate in courses) {
       final otherName = _fold(candidate.name);
       final otherCode = _fold(candidate.courseCode);
       if (code.length >= 4 &&
@@ -240,8 +266,8 @@ class LearningController extends ChangeNotifier {
   /// All assignments flattened across all enrolled courses.
   List<CanvasAssignment> get allAssignments {
     final list = <CanvasAssignment>[];
-    for (final sublist in _assignments.values) {
-      list.addAll(sublist);
+    for (final course in courses) {
+      list.addAll(_assignments[course.id] ?? const []);
     }
     return list;
   }
@@ -282,6 +308,7 @@ class LearningController extends ChangeNotifier {
   void _resetState() {
     _semesters = [];
     _selectedSemester = null;
+    _currentSemester = null;
     _timetableData = null;
     _academicError = null;
     _academicAuthRequired = false;
@@ -359,25 +386,15 @@ class LearningController extends ChangeNotifier {
   }
 
   // --- Academic Settings & Actions ---
-  void setUndergraduate(bool value) {
-    if (_isUndergraduate != value) {
-      _isUndergraduate = value;
-      notifyListeners();
-      loadAcademicTimetable();
-    }
-  }
-
-  void setPgEndpoint(String endpoint) {
-    if (_pgEndpoint != endpoint) {
-      _pgEndpoint = endpoint;
-      notifyListeners();
-      loadAcademicTimetable();
-    }
-  }
-
   void selectSemester(Semester semester) {
     if (_selectedSemester?.externalId != semester.externalId) {
       _selectedSemester = semester;
+      _timetableData = null;
+      selectDate(
+        semester.externalId == _currentSemester?.externalId
+            ? today
+            : semester.startsOn,
+      );
       notifyListeners();
       loadAcademicTimetable();
     }
@@ -391,7 +408,18 @@ class LearningController extends ChangeNotifier {
 
   // --- Data Loading Orchestration ---
   Future<void> loadAll() async {
+    final token = _requestToken;
     await Future.wait([loadAcademic(), loadCanvas()]);
+    // The academic catalog can arrive after Canvas. Fill summaries newly
+    // classified as current (e.g. a dated summer term), without loading archives.
+    if (token != _requestToken) return;
+    for (final course in courses) {
+      if (!_assignments.containsKey(course.id) &&
+          !_loadingCourseIds.contains(course.id)) {
+        await loadCourseDetails(course.id, token: token);
+        if (token != _requestToken) return;
+      }
+    }
   }
 
   bool _isAuthError(Object e) {
@@ -403,98 +431,148 @@ class LearningController extends ChangeNotifier {
         s.contains('401');
   }
 
-  /// Load academic semesters and timetable with cache fallback.
+  /// A missing cache preserves the original failure instead of an empty table.
+  Future<(dynamic, bool)> _readSource(
+    String method,
+    Map<String, dynamic> params,
+  ) async {
+    try {
+      final value = await api.call(method, params);
+      if (value == null) throw const FormatException('SourceSchemaChanged');
+      return (value, false);
+    } catch (error) {
+      // The PG calendar endpoint checks the current term's validity interval.
+      // Reusing an old response could bypass that check after a semester ends.
+      if (_isAuthError(error) || method == 'fudan.postgraduate.semester') {
+        rethrow;
+      }
+      dynamic cached;
+      try {
+        cached = await api.call('campus.cached', {...params, 'method': method});
+      } catch (_) {}
+      if (cached == null) rethrow;
+      return (cached, true);
+    }
+  }
+
+  Semester? _semesterForToday(List<Semester> semesters) {
+    final started =
+        semesters
+            .where(
+              (s) =>
+                  !s.startsOn.isAfter(today) &&
+                  today.difference(s.startsOn).inDays < 210,
+            )
+            .toList()
+          ..sort((a, b) => b.startsOn.compareTo(a.startsOn));
+    return started.firstOrNull;
+  }
+
   Future<void> loadAcademic() async {
     final token = _requestToken;
+    final request = ++_academicRequest;
+    bool active() => token == _requestToken && request == _academicRequest;
+    _academicLoading = true;
+    _academicError = null;
+    _academicAuthRequired = false;
+    _academicFromCache = false;
+    if (!hasAcademicIdentity) {
+      _academicLoading = false;
+      _academicError = '请在账号与校园卡中设置有效学号后同步课表';
+      notifyListeners();
+      return;
+    }
+    notifyListeners();
+    try {
+      final (response, cached) = await _readSource(
+        isUndergraduate ? 'fudan.semesters' : 'fudan.postgraduate.semester',
+        {},
+      );
+      if (!active()) return;
+      _semesters = isUndergraduate
+          ? SemesterCatalog.fromJson(response).semesters
+          : [Semester.fromJson(response as Map<String, dynamic>)];
+      // PG metadata already validates the full semester, including week zero
+      // before teaching week one's Monday. Do not reject that future Monday.
+      _currentSemester = isUndergraduate
+          ? _semesterForToday(_semesters)
+          : _semesters.single;
+      final previousId = _selectedSemester?.externalId;
+      _selectedSemester =
+          _semesters.where((s) => s.externalId == previousId).firstOrNull ??
+          _currentSemester;
+      _academicFromCache = cached;
+    } catch (e) {
+      // UG can resolve its own semester after a transient catalog failure.
+      // PG metadata must be explicitly verified before interpreting week bits.
+      if (active() && !isUndergraduate) {
+        _academicError = e.toString().contains('SemesterCalendarUnavailable')
+            ? '本学期校历尚未确认，暂时无法显示课表'
+            : campusError(e);
+        _academicAuthRequired = _isAuthError(e);
+        _academicLoading = false;
+        notifyListeners();
+        return;
+      }
+      if (active() && isUndergraduate && _isAuthError(e)) {
+        _academicError = campusError(e);
+        _academicAuthRequired = true;
+        _academicLoading = false;
+        notifyListeners();
+        return;
+      }
+    }
+    if (!active()) return;
+    await loadAcademicTimetable(token: token);
+  }
+
+  Future<void> loadAcademicTimetable({int? token}) async {
+    final curToken = token ?? _requestToken;
+    final request = ++_academicRequest;
+    bool active() => curToken == _requestToken && request == _academicRequest;
+    final undergraduate = isUndergraduate;
+    final semester = undergraduate ? _selectedSemester : _currentSemester;
     _academicLoading = true;
     _academicError = null;
     _academicAuthRequired = false;
     _academicFromCache = false;
     notifyListeners();
-
-    try {
-      dynamic semResponse;
-      try {
-        semResponse = await api.call('fudan.semesters');
-      } catch (e) {
-        if (_isAuthError(e)) rethrow;
-        // Try cached semesters
-        semResponse = await api.call('campus.cached', {
-          'method': 'fudan.semesters',
-        });
-        _academicFromCache = true;
-      }
-
-      if (token != _requestToken) return;
-
-      final catalog = SemesterCatalog.fromJson(semResponse);
-      _semesters = catalog.semesters;
-      if (_semesters.isNotEmpty) {
-        if (catalog.defaultSemesterId != null) {
-          _selectedSemester = _semesters.firstWhere(
-            (s) => s.externalId == catalog.defaultSemesterId,
-            orElse: () => _semesters.first,
-          );
-        } else {
-          _selectedSemester = _semesters.first;
-        }
-      }
-
-      await loadAcademicTimetable(token: token);
-    } catch (e) {
-      if (token != _requestToken) return;
-      _academicError = campusError(e);
-      _academicAuthRequired = _isAuthError(e) || _academicError!.contains('登录');
-    } finally {
-      if (token == _requestToken) {
-        _academicLoading = false;
-        notifyListeners();
-      }
-    }
-  }
-
-  /// Load timetable for the currently selected semester/mode.
-  Future<void> loadAcademicTimetable({int? token}) async {
-    final curToken = token ?? _requestToken;
-    _academicLoading = true;
-    _academicError = null;
-    notifyListeners();
-
-    final method = _isUndergraduate
+    final method = undergraduate
         ? 'fudan.timetable.sync'
         : 'fudan.postgraduate.sync';
-    final params = <String, dynamic>{};
-    if (_selectedSemester != null) {
-      params['semester'] = _selectedSemester!.toJson();
-    }
-    if (!_isUndergraduate) {
-      params['endpoint'] = _pgEndpoint;
-    }
-
+    final params = <String, dynamic>{
+      if (semester != null) 'semester': semester.toJson(),
+      if (!undergraduate) 'endpoint': 'primary',
+    };
     try {
-      dynamic tableResponse;
-      try {
-        tableResponse = await api.call(method, params);
-      } catch (e) {
-        if (_isAuthError(e)) rethrow;
-        // Fallback to cached timetable
-        final cachedParams = Map<String, dynamic>.from(params)
-          ..['method'] = method;
-        tableResponse = await api.call('campus.cached', cachedParams);
-        _academicFromCache = true;
+      if (!hasAcademicIdentity) {
+        _academicError = '请在账号与校园卡中设置有效学号后同步课表';
+        return;
       }
-
-      if (curToken != _requestToken) return;
-
-      _timetableData = TimetableData.fromJson(tableResponse, _selectedSemester);
-      _academicError = null;
-      _academicAuthRequired = false;
+      if (!undergraduate && semester == null) {
+        _academicError = '暂未获取到本学期开学日期，请先同步学期信息后重试';
+        return;
+      }
+      final (response, cached) = await _readSource(method, params);
+      if (!active()) return;
+      final table = TimetableData.fromJson(response, semester);
+      _timetableData = table;
+      _selectedSemester = table.semester ?? semester;
+      final receivedSemester = table.semester;
+      if (_currentSemester == null &&
+          receivedSemester != null &&
+          !receivedSemester.startsOn.isAfter(today) &&
+          today.difference(receivedSemester.startsOn).inDays < 210) {
+        // A server's future default must not reclassify Canvas courses.
+        _currentSemester = receivedSemester;
+      }
+      _academicFromCache = cached;
     } catch (e) {
-      if (curToken != _requestToken) return;
+      if (!active()) return;
       _academicError = campusError(e);
       _academicAuthRequired = _isAuthError(e) || _academicError!.contains('登录');
     } finally {
-      if (curToken == _requestToken) {
+      if (active()) {
         _academicLoading = false;
         notifyListeners();
       }
@@ -504,6 +582,8 @@ class LearningController extends ChangeNotifier {
   /// Load Canvas courses with cache fallback.
   Future<void> loadCanvas() async {
     final token = _requestToken;
+    final request = ++_canvasRequest;
+    bool active() => token == _requestToken && request == _canvasRequest;
     _canvasLoading = true;
     _canvasError = null;
     _canvasAuthRequired = false;
@@ -511,38 +591,28 @@ class LearningController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      dynamic coursesResponse;
-      try {
-        coursesResponse = await api.call('canvas.courses.sync');
-      } catch (e) {
-        if (_isAuthError(e)) rethrow;
-        // Try cached courses
-        coursesResponse = await api.call('campus.cached', {
-          'method': 'canvas.courses.sync',
-        });
-        _canvasFromCache = true;
+      final (coursesResponse, cached) = await _readSource(
+        'canvas.courses.sync',
+        {},
+      );
+      if (!active()) return;
+      if (coursesResponse is! List) {
+        throw const FormatException('SourceSchemaChanged');
       }
-
-      if (token != _requestToken) return;
+      _canvasFromCache = cached;
 
       final List<CanvasCourse> courseList = [];
-      if (coursesResponse is List) {
-        for (final item in coursesResponse) {
-          if (item is Map<String, dynamic>) {
-            courseList.add(CanvasCourse.fromJson(item));
-          }
+      for (final item in coursesResponse) {
+        if (item is Map<String, dynamic>) {
+          courseList.add(CanvasCourse.fromJson(item));
         }
       }
 
       _courses = courseList;
 
       // Load assignments and details for enrolled courses
-      final enrolled = List<CanvasCourse>.of(_courses);
-      for (
-        var offset = 0;
-        offset < enrolled.length && token == _requestToken;
-        offset += 3
-      ) {
+      final enrolled = List<CanvasCourse>.of(courses);
+      for (var offset = 0; offset < enrolled.length && active(); offset += 3) {
         await Future.wait(
           enrolled
               .skip(offset)
@@ -551,14 +621,14 @@ class LearningController extends ChangeNotifier {
         );
       }
     } catch (e) {
-      if (token != _requestToken) return;
+      if (!active()) return;
       _canvasError = campusError(e);
       _canvasAuthRequired =
           _isAuthError(e) ||
           _canvasError!.contains('登录') ||
           _canvasError!.contains('绑定');
     } finally {
-      if (token == _requestToken) {
+      if (active()) {
         _canvasLoading = false;
         notifyListeners();
       }

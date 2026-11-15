@@ -7,6 +7,9 @@ class CanvasCourse {
   final String? courseCode;
   final String? workflowState;
   final String? termName;
+  final String? termId;
+  final DateTime? termStartsAt;
+  final DateTime? termEndsAt;
 
   const CanvasCourse({
     required this.id,
@@ -14,6 +17,9 @@ class CanvasCourse {
     this.courseCode,
     this.workflowState,
     this.termName,
+    this.termId,
+    this.termStartsAt,
+    this.termEndsAt,
   });
 
   factory CanvasCourse.fromJson(Map<String, dynamic> json) {
@@ -27,18 +33,73 @@ class CanvasCourse {
     final code = payload['course_code']?.toString();
     final state = payload['workflow_state']?.toString();
 
-    String? termName;
-    if (payload['term'] is Map<String, dynamic>) {
-      termName = payload['term']['name']?.toString();
-    }
+    final term = payload['term'] is Map<String, dynamic>
+        ? payload['term'] as Map<String, dynamic>
+        : const <String, dynamic>{};
 
     return CanvasCourse(
       id: id,
       name: name,
       courseCode: code,
       workflowState: state,
-      termName: termName,
+      termName: term['name']?.toString(),
+      termId: term['id']?.toString(),
+      termStartsAt: DateTime.tryParse(term['start_at']?.toString() ?? ''),
+      termEndsAt: DateTime.tryParse(term['end_at']?.toString() ?? ''),
     );
+  }
+
+  /// Term dates take precedence; names and course codes cover undated terms.
+  bool belongsToTerm(DateTime today, {String? academicTermName}) {
+    final instant = DateTime.utc(
+      today.year,
+      today.month,
+      today.day,
+    ).subtract(const Duration(hours: 8));
+    if (termStartsAt != null && instant.isBefore(termStartsAt!)) return false;
+    if (termEndsAt != null && !instant.isBefore(termEndsAt!)) return false;
+    if (termStartsAt != null && termEndsAt != null) return true;
+    final key = termKey(termName) ?? termKey(courseCode) ?? termKey(name);
+    final current =
+        termKey(academicTermName) ??
+        '${today.month >= 8 ? today.year : today.year - 1}:${today.month >= 8 || today.month == 1 ? 1 : 2}';
+    return key != null && key == current;
+  }
+
+  /// Canonical academic year and semester, independent of Canvas/academic IDs.
+  static String? termKey(String? value) {
+    if (value == null) return null;
+    final years = RegExp(r'(20\d{2})(?:\s*[-–—/]\s*(20\d{2}))?')
+        .firstMatch(value);
+    if (years == null) return null;
+    var year = int.parse(years[1]!);
+    final isYear = years[2] != null;
+    int? term;
+    if (RegExp(
+      r'第一|第1|学年\s*1\s*学期|秋|fall|autumn',
+      caseSensitive: false,
+    ).hasMatch(value)) {
+      term = 1;
+    } else if (RegExp(
+      r'第二|第2|学年\s*2\s*学期|春|spring',
+      caseSensitive: false,
+    ).hasMatch(value)) {
+      term = 2;
+    } else if (RegExp(
+      r'第三|第3|学年\s*3\s*学期|夏|summer',
+      caseSensitive: false,
+    ).hasMatch(value)) {
+      term = 3;
+    } else if (isYear) {
+      term = int.tryParse(
+        RegExp(r'^\s*[-_/]\s*([123])(?:\D|$)')
+                .firstMatch(value.substring(years.end))?[1] ??
+            '',
+      );
+    }
+    if (term == null) return null;
+    if (!isYear && term != 1) year--;
+    return '$year:$term';
   }
 }
 

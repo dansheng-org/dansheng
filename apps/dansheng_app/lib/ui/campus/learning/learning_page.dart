@@ -2,10 +2,13 @@
 import 'package:flutter/material.dart';
 
 import 'package:dansheng_app/ui/core/dansheng_state.dart';
-import 'package:dansheng_app/ui/screens/account_balance_screen.dart';
+
+import '../../widgets/campus_account_actions.dart';
 
 import '../campus_api.dart';
 import 'course_page.dart';
+import 'chat/learning_chat_page.dart';
+import 'models/canvas_models.dart';
 import 'learning_controller.dart';
 import 'personal_agenda.dart';
 import 'models/timetable_models.dart';
@@ -67,9 +70,6 @@ class _LearningPageState extends State<LearningPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
     return ListenableBuilder(
       listenable: _learningController,
       builder: (context, _) {
@@ -81,77 +81,45 @@ class _LearningPageState extends State<LearningPage> {
             ),
             elevation: 0,
             scrolledUnderElevation: 1,
-            actions: [
-              // Manual Refresh
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded),
-                tooltip: '刷新',
-                onPressed: () => _learningController.loadAll(),
-              ),
-              // Account & Sign-in actions menu
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert_rounded),
-                tooltip: '服务选项',
-                onSelected: (val) {
-                  if (val == 'login_academic') {
-                    _learningController.loginAcademic();
-                  } else if (val == 'login_canvas') {
-                    _learningController.loginCanvas();
-                  } else if (val == 'account') {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) =>
-                            AccountBalanceScreen(controller: widget.controller),
-                      ),
-                    );
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'account',
-                    child: Row(
-                      children: [
-                        Icon(Icons.account_circle_outlined, size: 18),
-                        SizedBox(width: 8),
-                        Text('账号与卡包'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'login_academic',
-                    child: Row(
-                      children: [
-                        Icon(Icons.school_outlined, size: 18),
-                        SizedBox(width: 8),
-                        Text('登录教务系统'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'login_canvas',
-                    child: Row(
-                      children: [
-                        Icon(Icons.computer_outlined, size: 18),
-                        SizedBox(width: 8),
-                        Text('登录 Canvas 平台'),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
+            actions: [CampusAccountActions(controller: widget.controller)],
           ),
           body: RefreshIndicator(
             onRefresh: () => _learningController.loadAll(),
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      TextButton.icon(
+                        icon: const Icon(
+                          Icons.chat_bubble_outline_rounded,
+                          size: 18,
+                        ),
+                        label: const Text('课程消息'),
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => LearningChatPage(
+                              controller: _learningController,
+                            ),
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        icon: const Icon(Icons.event_note_outlined, size: 18),
+                        label: const Text('个人日程'),
+                        onPressed: _openAgenda,
+                      ),
+                    ],
+                  ),
+                ),
                 // Week timetable grid / month calendar
                 CalendarHeader(
                   controller: _learningController,
                   onOpenCourses: _openTimetableCourses,
                 ),
-                _buildFilterBar(context, colorScheme),
                 const SizedBox(height: 6),
 
                 // Schedule of the selected day: courses + due assignments
@@ -159,20 +127,12 @@ class _LearningPageState extends State<LearningPage> {
                   controller: _learningController,
                   onOpenCourse: (course) => _openTimetableCourses([course]),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: PersonalAgenda(
-                    api: _campusApi,
-                    day: _learningController.selectedDate,
-                    account: widget.controller.activeAccountId,
-                  ),
-                ),
-
                 const SizedBox(height: 8),
 
                 // Every enrolled eLearning course
                 CourseListView(
                   controller: _learningController,
+                  onOpenArchive: _openArchive,
                   onOpen: (course) => _openCourse(canvasCourseId: course.id),
                 ),
 
@@ -185,129 +145,65 @@ class _LearningPageState extends State<LearningPage> {
     );
   }
 
-  /// Compact bar displaying academic level toggle (UG/PG) and Semester selector.
-  Widget _buildFilterBar(BuildContext context, ColorScheme colorScheme) {
-    final ctrl = _learningController;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          // UG / PG toggle
-          SegmentedButton<bool>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(
-                value: true,
-                label: Text('本科生', style: TextStyle(fontSize: 12)),
-              ),
-              ButtonSegment(
-                value: false,
-                label: Text('研究生', style: TextStyle(fontSize: 12)),
-              ),
-            ],
-            selected: {ctrl.isUndergraduate},
-            onSelectionChanged: (set) {
-              if (set.isNotEmpty) {
-                ctrl.setUndergraduate(set.first);
-              }
-            },
-            style: ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              padding: WidgetStateProperty.all(
-                const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
-              ),
-            ),
-          ),
-
-          // Semester Dropdown
-          if (ctrl.semesters.isNotEmpty)
-            SizedBox(
-              width: 154,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: colorScheme.outlineVariant.withValues(alpha: 0.4),
-                  ),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: ctrl.selectedSemester?.externalId,
-                    isExpanded: true,
-                    icon: const Icon(Icons.arrow_drop_down, size: 20),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    items: ctrl.semesters.map((Semester s) {
-                      return DropdownMenuItem<String>(
-                        value: s.externalId,
-                        child: Text(
-                          s.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (newId) {
-                      if (newId != null) {
-                        final found = ctrl.semesters.firstWhere(
-                          (s) => s.externalId == newId,
-                        );
-                        ctrl.selectSemester(found);
-                      }
-                    },
-                  ),
-                ),
-              ),
-            )
-          else
-            SizedBox(
-              width: 100,
-              child: Text(
-                '暂无学期列表',
-                style: TextStyle(fontSize: 12, color: colorScheme.outline),
-              ),
-            ),
-
-          // PG Endpoint Toggle (if postgraduate)
-          if (!ctrl.isUndergraduate) ...[
-            SegmentedButton<String>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(
-                  value: 'primary',
-                  label: Text('主端', style: TextStyle(fontSize: 11)),
-                ),
-                ButtonSegment(
-                  value: 'secondary',
-                  label: Text('次端', style: TextStyle(fontSize: 11)),
+  void _openAgenda() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => Scaffold(
+          appBar: AppBar(title: const Text('个人日程')),
+          body: ListenableBuilder(
+            listenable: _learningController,
+            builder: (_, _) => ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                PersonalAgenda(
+                  api: _campusApi,
+                  day: _learningController.selectedDate,
+                  account: widget.controller.activeAccountId,
                 ),
               ],
-              selected: {ctrl.pgEndpoint},
-              onSelectionChanged: (set) {
-                if (set.isNotEmpty) {
-                  ctrl.setPgEndpoint(set.first);
-                }
-              },
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                padding: WidgetStateProperty.all(
-                  const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-                ),
-              ),
             ),
-          ],
-        ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openArchive() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => Scaffold(
+          appBar: AppBar(title: const Text('过往学期与其他课程')),
+          body: ListenableBuilder(
+            listenable: _learningController,
+            builder: (context, _) {
+              final groups = <String, List<CanvasCourse>>{};
+              for (final course in _learningController.archivedCourses) {
+                final term = course.termName?.trim();
+                final name = term == null || term.isEmpty ? '未标明学期' : term;
+                groups.putIfAbsent(name, () => []).add(course);
+              }
+              final terms = groups.keys.toList()
+                ..sort((a, b) => b.compareTo(a));
+              return ListView(
+                children: [
+                  if (terms.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('暂无其他学期课程'),
+                    ),
+                  for (final term in terms)
+                    CourseListView(
+                      controller: _learningController,
+                      courses: groups[term],
+                      title: term,
+                      onOpen: (course) =>
+                          _openCourse(canvasCourseId: course.id),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
       ),
     );
   }
