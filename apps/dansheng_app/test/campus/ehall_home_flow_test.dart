@@ -206,17 +206,35 @@ void main() {
     controller = DanshengController(client: DanshengClient(bridge: bridge));
     await controller.initialize();
   });
-  testWidgets('home entries have one title and make no campus reads', (
+  testWidgets('home shows each service once and reads only local data', (
     tester,
   ) async {
     await tester.pumpWidget(
       buildTestApp(home: EHallPage(controller: controller)),
     );
     await tester.pumpAndSettle();
-    expect(bridge.campusCalls, isEmpty);
-    for (final tile in tester.widgetList<ListTile>(find.byType(ListTile))) {
-      expect(tile.subtitle, isNull);
-      expect((tile.title! as Text).maxLines, 1);
+    // Opening the board never reaches a campus service: it reads the saved
+    // arrangement and what earlier reads stored on the device.
+    expect(bridge.campusCalls.map((c) => c['method']).toSet(), {
+      'ehall.layout.get',
+      'campus.cached',
+    });
+    for (final title in [
+      '校园卡',
+      '教室空位',
+      '寝室电量',
+      '场馆预约',
+      '图书馆客流',
+      '食堂实时客流',
+      '校车班次时刻',
+      '校园邮箱',
+      '教务公告',
+      '课程成绩',
+      '学分与绩点',
+      '考试安排',
+    ]) {
+      await tester.scrollUntilVisible(find.text(title), 200);
+      expect(find.text(title), findsOneWidget, reason: title);
     }
   });
   for (final entry in {

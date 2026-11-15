@@ -20,7 +20,7 @@
 
 [HomeShell](../../apps/dansheng_app/lib/ui/screens/home_shell.dart)使用 `NavigationBar` 与 `IndexedStack`，五栏依次为 eHall、eLearning、Agent、论坛、插件，默认 eHall。`opened` 集合使页面首次选择时才创建，之后留在栈中；`TickerMode` 只启用当前栏动画。页面 key 包含当前账号与栏目编号，切换账号会重建对应页面状态。
 
-详情、设置、账号和任务页使用 `Navigator.push` / `MaterialPageRoute`，不是声明式路由表。[eHall 入口](../../apps/dansheng_app/lib/ui/campus/ehall/ehall_page.dart)只构建服务菜单，点击后进入详情。宿主事件的 `open_tasks` 通过控制器导航流让外壳切到插件栏并压入 `TasksScreen`；它不是通用 URL 深链接路由器。
+详情、设置、账号和任务页使用 `Navigator.push` / `MaterialPageRoute`，不是声明式路由表。[eHall 首页](../../apps/dansheng_app/lib/ui/campus/ehall/ehall_page.dart)是可编辑的小组件看板：每个服务一个小组件，可隐藏、长按拖动排序，并在图标 1×1、小 2×1、横条 4×1、中 2×2、大 4×2 之间切换，尺寸越大显示的信息越多（例如电量走势、各节空闲教室数、后续校车）；点击后进入详情。打开首页只读取本机 `campus.cached` 中由此前实时读取写入的结果，不访问校园服务；下拉刷新或小组件的“立即刷新”才发起实时读取，场馆与邮箱只作快捷入口。布局（顺序、尺寸、显示与内容选项）由宿主方法 `ehall.layout.get` / `ehall.layout.set` 存于设备级 SharedPreferences，不分账号、未登录也可读取，不进入 Core 的账号缓存；代码见 [board/](../../apps/dansheng_app/lib/ui/campus/ehall/board/) 与 [BoardLayoutStore.kt](../../apps/dansheng_app/android/app/src/main/kotlin/org/dansheng/app/BoardLayoutStore.kt)。宿主事件的 `open_tasks` 通过控制器导航流让外壳切到插件栏并压入 `TasksScreen`；它不是通用 URL 深链接路由器。
 
 ## 状态管理与数据流
 
@@ -37,7 +37,7 @@
 
 | 功能 | 已实现的 App 范围 | 主要源码 |
 | --- | --- | --- |
-| eHall | 校园卡、空教室、电量、场馆、图书馆/食堂客流、校车、公告、成绩/GPA/考试入口；邮箱明确显示“暂未接入” | [ehall_page.dart](../../apps/dansheng_app/lib/ui/campus/ehall/ehall_page.dart)、[life_page.dart](../../apps/dansheng_app/lib/ui/campus/ehall/life_page.dart) |
+| eHall | 校园卡、空教室、电量、场馆、图书馆/食堂客流、校车、公告、成绩/GPA/考试小组件，可显示/隐藏、排序与调整尺寸；邮箱明确显示“暂未接入” | [ehall_page.dart](../../apps/dansheng_app/lib/ui/campus/ehall/ehall_page.dart)、[life_page.dart](../../apps/dansheng_app/lib/ui/campus/ehall/life_page.dart) |
 | 校园卡 | 账号页余额；详情按单日查询完整账单，独立支出统计页选择周/月/年。UI 展示 Core 返回结果，不自行决定消费分类或完整分页规则 | [account_balance_screen.dart](../../apps/dansheng_app/lib/ui/screens/account_balance_screen.dart)、[ecard_detail.dart](../../apps/dansheng_app/lib/ui/campus/ehall/ecard_detail.dart)、[Core 统计接口](../../core/docs/campus-statistics.md) |
 | 电量 | 电量详情与走势、阈值提醒设置；规则与去重属于 Core，系统检查和通知由 Android 承担 | [power_detail.dart](../../apps/dansheng_app/lib/ui/campus/ehall/power_detail.dart)、[power_alert_settings.dart](../../apps/dansheng_app/lib/ui/campus/ehall/power_alert_settings.dart)、[PowerAlerts.kt](../../apps/dansheng_app/android/app/src/main/kotlin/org/dansheng/app/PowerAlerts.kt)、[Core 预警说明](../../core/docs/electricity-alerts.md) |
 | 场馆 | 查场馆与日期、选时段和场地优先级、手动预约、记录与取消；启用定时抢场插件后才显示定时任务入口 | [venue_page.dart](../../apps/dansheng_app/lib/ui/campus/venues/venue_page.dart)、[CampusVenueHost.kt](../../apps/dansheng_app/android/app/src/main/kotlin/org/dansheng/app/CampusVenueHost.kt)。普通手动服务与外部定时插件的产品边界不同。 |

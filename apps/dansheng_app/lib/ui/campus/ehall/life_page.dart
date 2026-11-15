@@ -29,6 +29,9 @@ enum LifeService {
   final IconData icon;
 }
 
+/// Dining areas in the order of their source area codes.
+const diningAreas = ['邯郸本部', '南区食堂', '江湾食堂', '枫林食堂', '张江食堂'];
+
 class LifePage extends StatelessWidget {
   const LifePage({
     super.key,
@@ -36,11 +39,24 @@ class LifePage extends StatelessWidget {
     required this.controller,
     this.initialBuilding,
     this.initialDate,
+    this.initialDiningArea,
+    this.initialGraduate,
+    this.initialFrom,
+    this.initialTo,
   });
   final LifeService service;
   final DanshengController controller;
   final String? initialBuilding;
   final DateTime? initialDate;
+
+  /// Dining area code (0 to 4) to show first; 邯郸本部 when not given.
+  final int? initialDiningArea;
+
+  /// Whether notices open on the graduate list.
+  final bool? initialGraduate;
+
+  /// Bus route to show first.
+  final Campus? initialFrom, initialTo;
 
   @override
   Widget build(BuildContext context) => switch (service) {
@@ -52,6 +68,8 @@ class LifePage extends StatelessWidget {
     LifeService.bus => BusDetailPage(
       controller: controller,
       initialDate: initialDate,
+      initialFrom: initialFrom,
+      initialTo: initialTo,
     ),
     LifeService.power => PowerDetailPage(controller: controller),
     LifeService.transactions => EcardDetailPage(
@@ -62,6 +80,8 @@ class LifePage extends StatelessWidget {
       service: service,
       controller: controller,
       initialDate: initialDate,
+      initialDiningArea: initialDiningArea,
+      initialGraduate: initialGraduate,
     ),
   };
 }
@@ -71,10 +91,14 @@ class _CampusDetail extends StatefulWidget {
     required this.controller,
     required this.service,
     this.initialDate,
+    this.initialDiningArea,
+    this.initialGraduate,
   });
   final DanshengController controller;
   final LifeService service;
   final DateTime? initialDate;
+  final int? initialDiningArea;
+  final bool? initialGraduate;
   @override
   State<_CampusDetail> createState() => _LifeState();
 }
@@ -150,10 +174,10 @@ class _LifeState extends State<_CampusDetail> {
   }
 
   // Dining campus area selection
-  int diningAreaCode = 0;
+  late int diningAreaCode = widget.initialDiningArea ?? 0;
 
   // Notices audience; the official list page follows the selected segment
-  bool noticesGraduate = false;
+  late bool noticesGraduate = widget.initialGraduate ?? false;
   String get noticesListUrl => noticesGraduate
       ? 'https://gs.fudan.edu.cn/tzgg/list.htm'
       : 'https://jwc.fudan.edu.cn/9397/list.htm';
@@ -642,23 +666,15 @@ class _LifeState extends State<_CampusDetail> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  for (final area in [
-                    {'name': '邯郸本部', 'code': 0},
-                    {'name': '南区食堂', 'code': 1},
-                    {'name': '江湾食堂', 'code': 2},
-                    {'name': '枫林食堂', 'code': 3},
-                    {'name': '张江食堂', 'code': 4},
-                  ])
+                  for (final (code, name) in diningAreas.indexed)
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: ChoiceChip(
-                        label: Text(area['name'] as String),
-                        selected: diningAreaCode == area['code'],
+                        label: Text(name),
+                        selected: diningAreaCode == code,
                         onSelected: (sel) {
                           if (sel) {
-                            setState(
-                              () => diningAreaCode = area['code'] as int,
-                            );
+                            setState(() => diningAreaCode = code);
                             load();
                           }
                         },
