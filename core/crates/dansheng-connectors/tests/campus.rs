@@ -1051,3 +1051,30 @@ async fn an_explicit_empty_observation_still_retains_account_source_time_and_rev
     assert_eq!(result.source_revision, DANXI_REVISION);
     assert_eq!(result.coverage, Coverage::Complete);
 }
+
+#[test]
+fn notice_attachments_keep_same_site_cms_files_only() {
+    let page = Url::parse("https://gs.fudan.edu.cn/0d/ac/c12939a789932/page.htm").unwrap();
+    let html = r#"<html><body><div class="wp_articlecontent">
+<p><a href="/_upload/article/files/aa/bb/uuid-1/f1.pdf" sudyfile-attr="{'title':'报名通知.pdf'}">报名通知.pdf</a></p>
+<p><a href="/_upload/article/files/aa/bb/uuid-1/f1.pdf">duplicate</a></p>
+<p><a href="https://evil.test/_upload/article/files/x/y/z.pdf">elsewhere</a></p>
+<p><a href="/_upload/tpl/0c/41/3137/template3137/css/index.css">template</a></p>
+<p><a href="/_upload/article/files/cc/dd/uuid-2/%E8%A1%A8.docx">附件</a></p>
+<div class="wp_pdf_player" pdfsrc="/_upload/article/files/ee/ff/uuid-3/scan.pdf"></div>
+</div></body></html>"#;
+    let found = parse_notice_attachments(html.as_bytes(), &page).unwrap();
+    let names: Vec<_> = found.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, ["报名通知.pdf", "表.docx", "scan.pdf"]);
+    assert!(found.iter().all(|a| {
+        a.url
+            .starts_with("https://gs.fudan.edu.cn/_upload/article/files/")
+    }));
+    assert!(notice_page("https://jwc.fudan.edu.cn/28/3d/c25325a796733/page.htm").is_ok());
+    assert!(notice_page("http://jwc.fudan.edu.cn/a/page.htm").is_err());
+    assert!(notice_page("https://evil.test/a/page.htm").is_err());
+    assert!(notice_attachment_url("https://gs.fudan.edu.cn/_upload/tpl/x.css").is_err());
+    assert!(
+        notice_attachment_url("https://gs.fudan.edu.cn/_upload/article/files/a/b.pdf?x=1").is_err()
+    );
+}
