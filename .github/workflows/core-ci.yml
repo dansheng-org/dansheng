@@ -26,6 +26,7 @@ jobs:
     defaults:
       run:
         shell: pwsh
+        working-directory: core
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -58,6 +59,10 @@ jobs:
       - name: Dependency cache isolation fixtures
         if: runner.os == 'Windows' && !inputs.smoke
         run: ./tools/workspace/tests/Test-Environment.ps1 -OutputRoot (Join-Path $env:DANSHENG_TASK_RUNTIME 'environment-fixtures')
+      - name: Remove this job's Rust build outputs
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/ci/Clear-BuildOutputs.ps1
   sdk:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, 1402ubuntu]
@@ -118,3 +123,8 @@ jobs:
             export CLANG_PATH="$compiler"
             cargo build --package dansheng-ffi --target "$target" --release --locked
           done
+      - name: Remove this job's Rust build outputs
+        if: always()
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/ci/Clear-BuildOutputs.ps1

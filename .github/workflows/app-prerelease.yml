@@ -111,6 +111,10 @@ jobs:
       - name: Remove this job's temporary signing files
         if: always()
         run: ../../scripts/ci/Clear-Signing.ps1
+      - name: Remove this job's Rust build outputs
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/ci/Clear-BuildOutputs.ps1
 
   publish:
     needs: build
