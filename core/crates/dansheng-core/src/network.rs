@@ -24,6 +24,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
 use url::Url;
 
+#[cfg(test)]
+#[path = "network_csrf_tests.rs"]
+mod csrf_tests;
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct HttpRequest {
     pub url: String,
@@ -161,6 +165,109 @@ struct Session {
     secret_headers: BTreeMap<String, String>,
     jar: Arc<SessionJar>,
 }
+
+/// Policy supplied by a trusted native adapter, never by serialized HTTP/IPC.
+/// No credentials are carried in this policy or returned to the adapter.
+#[derive(Clone)]
+pub struct CookieCsrf {
+    pub origin: String,
+    pub cookie_name: String,
+    pub header_name: String,
+}
+
+fn csrf_required() -> CoreError {
+    CoreError::new(
+        "CsrfRequired",
+        "the HTTP session needs a valid CSRF cookie before sending",
+    )
+}
+
+fn validate_cookie_csrf_request(
+    principal: &Principal,
+    grant: &Grant,
+    input: &HttpRequest,
+    policy: &CookieCsrf,
+) -> CoreResult<()> {
+    grant.check(principal, "http.request")?;
+    grant.check(principal, "http.write")?;
+    grant.check_account(principal, input.account_id.as_deref())?;
+    let url = Url::parse(&input.url).map_err(|_| CoreError::invalid("invalid request URL"))?;
+    validate_url(&url, principal, grant)?;
+    let name = HeaderName::from_bytes(policy.header_name.as_bytes())
+        .map_err(|_| CoreError::invalid("invalid CSRF header name"))?;
+    validate_secret_headers([(name.to_string(), "validation".into())].into())?;
+    if url.scheme() != "https"
+        || url.origin().ascii_serialization() != policy.origin
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || input.method != "POST"
+        || input.follow_redirects
+        || input.account_id.as_deref().is_none_or(str::is_empty)
+        || policy.cookie_name.is_empty()
+        || policy.cookie_name.len() > 128
+        || !policy
+            .cookie_name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        || matches!(
+            name.as_str(),
+            "origin" | "referer" | "content-type" | "accept"
+        )
+        || input.headers.keys().any(|key| {
+            key.eq_ignore_ascii_case(name.as_str())
+                || matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "origin"
+                        | "referer"
+                        | "host"
+                        | "cookie"
+                        | "cookie2"
+                        | "authorization"
+                        | "proxy-authorization"
+                )
+        })
+    {
+        return Err(CoreError::new(
+            "PermissionDenied",
+            "unsupported cookie-CSRF request",
+        ));
+    }
+    Ok(())
+}
+
+/// Decode exactly once like decodeURIComponent, not form decoding: '+' stays '+'.
+/// The result never leaves this module or enters HttpRequest/IPC/logs.
+fn cookie_csrf_header(jar: &SessionJar, url: &Url, cookie_name: &str) -> CoreResult<HeaderValue> {
+    let store = jar.0.lock().map_err(|_| csrf_required())?;
+    let matches = store.matches(url);
+    let mut tokens = matches.iter().filter(|cookie| cookie.name() == cookie_name);
+    let raw = tokens.next().ok_or_else(csrf_required)?.value();
+    if tokens.next().is_some() || raw.is_empty() || raw.len() > 8192 {
+        return Err(csrf_required());
+    }
+    let mut decoded = Vec::with_capacity(raw.len());
+    let mut bytes = raw.bytes();
+    while let Some(byte) = bytes.next() {
+        let byte = if byte == b'%' {
+            let high = bytes.next().and_then(|b| (b as char).to_digit(16));
+            let low = bytes.next().and_then(|b| (b as char).to_digit(16));
+            match (high, low) {
+                (Some(high), Some(low)) => (high * 16 + low) as u8,
+                _ => return Err(csrf_required()),
+            }
+        } else {
+            byte
+        };
+        if !(0x21..=0x7e).contains(&byte) {
+            return Err(csrf_required());
+        }
+        decoded.push(byte);
+    }
+    let mut value = HeaderValue::from_bytes(&decoded).map_err(|_| csrf_required())?;
+    value.set_sensitive(true);
+    Ok(value)
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CredentialKind {
     #[default]
@@ -282,6 +389,7 @@ pub(crate) fn secret_headers_from_value(
 }
 #[derive(Clone)]
 struct Transfer {
+    cookie_csrf: Option<CookieCsrf>,
     sink: Option<PathBuf>,
     max_bytes: u64,
     resume: bool,
@@ -292,6 +400,7 @@ struct Transfer {
 impl Transfer {
     fn buffered(credentials: CredentialKind) -> Self {
         Self {
+            cookie_csrf: None,
             sink: None,
             max_bytes: 8 * 1024 * 1024,
             resume: false,
@@ -637,6 +746,24 @@ impl Network {
             .into_text()
     }
 
+    /// Trusted Rust adapter only: no IPC selector and no cookie/token getter.
+    /// One direct, origin/account-bound POST; redirects and gateways are rejected.
+    /// All errors after dispatch have code NeedsReconciliation, including decoding.
+    pub async fn request_with_cookie_csrf(
+        &self,
+        principal: &Principal,
+        grant: &Grant,
+        input: HttpRequest,
+        policy: CookieCsrf,
+    ) -> CoreResult<HttpResponse> {
+        validate_cookie_csrf_request(principal, grant, &input, &policy)?;
+        let mut transfer = Transfer::buffered(CredentialKind::Cookie);
+        transfer.cookie_csrf = Some(policy);
+        self.execute(principal, grant, input, transfer)
+            .await?
+            .into_text()
+    }
+
     /// Send an optional raw body and receive raw bytes, without UTF-8, JSON,
     /// charset or base64 conversion. The request and response buffer limit is
     /// 8 MiB. Text `input.body` is rejected to avoid two competing body sources.
@@ -679,6 +806,7 @@ impl Network {
             grant,
             input,
             Transfer {
+                cookie_csrf: None,
                 sink: Some(path),
                 max_bytes,
                 resume,
@@ -775,6 +903,7 @@ impl Network {
         routes: &[GatewayRoute],
     ) -> CoreResult<WireResponse> {
         let Transfer {
+            cookie_csrf,
             sink,
             max_bytes,
             resume,
@@ -875,6 +1004,29 @@ impl Network {
                 input.account_id.as_deref(),
                 &url.origin().ascii_serialization(),
             )?;
+            // CSRF and Cookie come from the same account/origin session snapshot.
+            // Gateway cookie translation has no proven CSRF contract; fail closed.
+            if let Some(policy) = &cookie_csrf {
+                if route.is_some() {
+                    return Err(CoreError::new(
+                        "CapabilityUnavailable",
+                        "cookie-CSRF writes require a direct route",
+                    ));
+                }
+                let (_, _, jar, _) = native.as_ref().ok_or_else(csrf_required)?;
+                let name = HeaderName::from_bytes(policy.header_name.as_bytes())
+                    .map_err(|_| CoreError::invalid("invalid CSRF header name"))?;
+                headers.insert(
+                    name.clone(),
+                    cookie_csrf_header(jar, &url, &policy.cookie_name)?,
+                );
+                headers.insert(
+                    "origin",
+                    HeaderValue::from_str(&policy.origin)
+                        .map_err(|_| CoreError::invalid("invalid CSRF origin"))?,
+                );
+                hidden_headers.insert(name.to_string());
+            }
             let session = if route.is_some() {
                 self.copy_session(
                     input.account_id.as_deref(),

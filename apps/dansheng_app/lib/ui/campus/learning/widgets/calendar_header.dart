@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../learning_controller.dart';
 import '../models/timetable_models.dart';
 import 'week_timetable.dart';
+import 'learning_common.dart';
 
 /// Browsable schedule card: the week timetable grid or a month calendar,
 /// with period paging, jumping to today and day selection.
@@ -44,6 +45,20 @@ class CalendarHeader extends StatelessWidget {
               child: _buildNavigationRow(context, colorScheme),
             ),
             const SizedBox(height: 8),
+            if (controller.academicAuthRequired)
+              InfoBanner(
+                signIn: true,
+                message: '登录教务系统以同步课表',
+                actionLabel: '登录教务',
+                onAction: controller.loginAcademic,
+              )
+            else if (controller.academicError != null)
+              InfoBanner(
+                message: controller.academicError!,
+                actionLabel: '重试课表',
+                onAction: controller.loadAcademic,
+              ),
+            if (controller.academicLoading) const LinearProgressIndicator(),
             if (controller.calendarViewMode == 'week')
               WeekTimetable(
                 controller: controller,

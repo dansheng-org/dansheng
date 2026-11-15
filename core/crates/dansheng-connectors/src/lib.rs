@@ -27,6 +27,7 @@ pub mod mail;
 pub mod models;
 #[cfg(feature = "services")]
 mod page_transport;
+pub mod postgraduate_calendar;
 pub mod transport;
 #[cfg(feature = "webvpn")]
 pub mod webvpn;

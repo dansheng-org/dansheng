@@ -107,23 +107,6 @@ class DayScheduleView extends StatelessWidget {
           ),
           const SizedBox(height: 10),
 
-          // Academic Auth/Error Banners (Per-source isolation)
-          if (controller.academicAuthRequired)
-            _buildAuthBanner(
-              context,
-              colorScheme,
-              message: '教务系统需要登录以同步课表',
-              buttonText: '登录教务',
-              onLogin: controller.loginAcademic,
-            )
-          else if (controller.academicError != null)
-            _buildErrorBanner(
-              context,
-              colorScheme,
-              error: controller.academicError!,
-              onRetry: controller.loadAcademic,
-            ),
-
           // Courses Section
           _buildCoursesSection(context, colorScheme, courses),
           const SizedBox(height: 16),
@@ -183,7 +166,9 @@ class DayScheduleView extends StatelessWidget {
               ),
             ),
           )
-        else if (courses.isEmpty)
+        else if (courses.isEmpty &&
+            !controller.academicAuthRequired &&
+            controller.academicError == null)
           _buildEmptyPlaceholder(
             context,
             colorScheme,

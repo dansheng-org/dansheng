@@ -23,7 +23,7 @@ internal class CampusServices(
     private val reads=setOf(
         "fudan.ecard.statement","fudan.ecard.statistics","fudan.electricity.statistics",
         "fudan.rooms","fudan.electricity","fudan.electricity.history","fudan.ecard.transactions","fudan.library.occupancy","fudan.dining.occupancy","fudan.bus","fudan.notices",
-        "fudan.semesters","fudan.timetable.sync","fudan.postgraduate.sync","fudan.student_association","fudan.exams","fudan.grades","fudan.gpa","fudan.pe",
+        "fudan.semesters","fudan.postgraduate.semester","fudan.timetable.sync","fudan.postgraduate.sync","fudan.student_association","fudan.exams","fudan.grades","fudan.gpa","fudan.pe",
         "canvas.courses.sync","canvas.announcements.sync","canvas.assignments.sync","canvas.materials.sync","canvas.modules.sync","canvas.module_items.sync","canvas.folders.sync","canvas.pages.sync","canvas.page.read",
         "community.tea.divisions","community.tea.holes","community.tea.hole","community.tea.floors","community.danke.search","community.danke.group","community.danke.reviews",
     )
@@ -56,6 +56,19 @@ internal class CampusServices(
         }
         if(method.startsWith("agenda."))return CampusAgenda.call(rt,account,method.removePrefix("agenda."),p).also{checked(account)}
         if(method=="campus.login")return login(p.getString("service"),account,p.optBoolean("replace"))
+        // Private inbox data bypasses the generic persistent UI cache. Only reads
+        // may restore login and retry; sends run exactly once after the UI action.
+        if(method in setOf("canvas.conversations.sync","canvas.conversation.read","canvas.recipients.search","canvas.course_users.sync")){
+            return read(method,p,account).also{checked(account)}
+        }
+        if(method in setOf("canvas.conversation.reply","canvas.conversation.create")){
+            checked(account)
+            val result=rt.request(method,p)
+            // A successful send followed by an account switch is still a send.
+            // Report uncertainty instead of suggesting it is safe to retry.
+            if(account!=rt.account())throw PortError("NeedsReconciliation")
+            return result
+        }
         if(method=="campus.verifyDining")return verifyPortal(account,
             if(p.optString("service")=="power_history")"power_history" else "dining")
         if(method=="venues.visibleLogin" && rt.visiblePage.hasForeground() && !rt.campusLogins.canRestoreVenue(account)){

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/dansheng_state.dart';
-import '../../screens/account_balance_screen.dart';
-import '../../screens/settings_screen.dart';
+import '../../widgets/campus_account_actions.dart';
 import '../venues/venue_page.dart';
 import 'life_page.dart';
 
@@ -35,20 +34,7 @@ class EHallPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('eHall'),
-        actions: [
-          IconButton(
-            tooltip: '账号与校园卡',
-            onPressed: () =>
-                _open(context, AccountBalanceScreen(controller: controller)),
-            icon: const Icon(Icons.account_circle_outlined),
-          ),
-          IconButton(
-            tooltip: '设置',
-            onPressed: () =>
-                _open(context, SettingsScreen(controller: controller)),
-            icon: const Icon(Icons.tune_outlined),
-          ),
-        ],
+        actions: [CampusAccountActions(controller: controller)],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),

@@ -124,6 +124,8 @@ pub enum ConnectorError {
     Timeout,
     #[error("required platform capability unavailable")]
     CapabilityUnavailable,
+    #[error("Canvas session needs a valid CSRF cookie before sending")]
+    CanvasCsrfRequired,
     #[error("remote HTTP status {0}")]
     HttpStatus(u16),
     #[error("invalid connector configuration: {0}")]
@@ -143,12 +145,26 @@ pub enum ConnectorError {
 
 #[async_trait]
 pub trait ConnectorTransport: Send + Sync {
+    /// Trusted native host opt-in. The implementation must inject CSRF internally,
+    /// bind account/origin, and dispatch at most once. Never fall back to execute.
+    async fn execute_canvas_session_write(
+        &self,
+        _request: ConnectorRequest,
+    ) -> Result<ConnectorResponse, crate::canvas::CanvasWriteError> {
+        Err(ConnectorError::CapabilityUnavailable.into())
+    }
     async fn execute(&self, request: ConnectorRequest)
     -> Result<ConnectorResponse, ConnectorError>;
 }
 
 #[async_trait]
 impl<T: ConnectorTransport + ?Sized> ConnectorTransport for Arc<T> {
+    async fn execute_canvas_session_write(
+        &self,
+        request: ConnectorRequest,
+    ) -> Result<ConnectorResponse, crate::canvas::CanvasWriteError> {
+        self.as_ref().execute_canvas_session_write(request).await
+    }
     async fn execute(
         &self,
         request: ConnectorRequest,

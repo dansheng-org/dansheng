@@ -2,7 +2,7 @@
 //! Trusted bridge: official clients use the same permissions, sessions and data store as UI/MCP.
 use crate::{
     ConnectorError, ConnectorRequest, ConnectorResponse, ConnectorTransport, TransportAuth,
-    canvas::{CanvasAccess, CanvasClient},
+    canvas::{CanvasAccess, CanvasClient, CanvasId, CanvasWriteError},
     fudan::{FudanTimetableClient, PostgraduateEndpoint},
     models::{Semester, SourceContext},
 };
@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use dansheng_core::{
     api::{CoreError, CoreResult, Principal, required_string},
-    network::{CredentialKind, HttpRequest, Network},
+    network::{CookieCsrf, CredentialKind, HttpRequest, Network},
     platform::PlatformPort,
     policy::Grant,
     services::{CoreService, ServiceContext},
@@ -86,7 +86,118 @@ impl BoundTransport<'_> {
 
 #[async_trait]
 impl ConnectorTransport for BoundTransport<'_> {
+    async fn execute_canvas_session_write(
+        &self,
+        input: ConnectorRequest,
+    ) -> Result<ConnectorResponse, CanvasWriteError> {
+        if self.source_capability != "canvas.write"
+            || input.method != crate::HttpMethod::Post
+            || !matches!(&input.auth, TransportAuth::HostSession { account_id } if account_id == self.account)
+        {
+            return Err(ConnectorError::PermissionDenied.into());
+        }
+        let reply_id = input
+            .url
+            .path()
+            .strip_prefix("/api/v1/conversations/")
+            .and_then(|tail| tail.strip_suffix("/add_message"));
+        let endpoint = input.url.path() == "/api/v1/conversations"
+            || reply_id.is_some_and(|id| {
+                !id.is_empty() && id.len() <= 32 && id.bytes().all(|b| b.is_ascii_digit())
+            });
+        if input.url.origin().ascii_serialization() != "https://elearning.fudan.edu.cn"
+            || !input.url.username().is_empty()
+            || input.url.password().is_some()
+            || input.url.query().is_some()
+            || input.url.fragment().is_some()
+            || !endpoint
+            || input.headers.iter().any(|(key, _)| {
+                !matches!(key.to_ascii_lowercase().as_str(), "accept" | "content-type")
+            })
+            || !input.headers.iter().any(|(key, value)| {
+                key.eq_ignore_ascii_case("content-type")
+                    && value == "application/x-www-form-urlencoded"
+            })
+        {
+            return Err(ConnectorError::PermissionDenied.into());
+        }
+        let current = self.current_authority()?;
+        let mut io_grant = self.grant.clone();
+        io_grant.allow_private_network &= current.allow_private_network;
+        io_grant.expires_at = current.expires_at;
+        let challenge = crate::AuthChallenge {
+            connector: "canvas".into(),
+            origin: input.url.origin().ascii_serialization(),
+            account_id: self.account.into(),
+            mode: crate::AuthMode::HttpSession,
+        };
+        self.check_native_lease(&challenge)?;
+        let mut request = HttpRequest {
+            url: input.url.to_string(),
+            method: "POST".into(),
+            headers: input.headers.into_iter().collect(),
+            body: input
+                .body
+                .map(|bytes| String::from_utf8(bytes).map(Value::String))
+                .transpose()
+                .map_err(|_| ConnectorError::InvalidConfiguration("request body encoding"))?,
+            account_id: Some(self.account.into()),
+            timeout_ms: Some(15000),
+            follow_redirects: false,
+        };
+        request
+            .headers
+            .insert("X-Requested-With".into(), "XMLHttpRequest".into());
+        let response = self
+            .network
+            .request_with_cookie_csrf(
+                self.principal,
+                &io_grant,
+                request,
+                CookieCsrf {
+                    origin: "https://elearning.fudan.edu.cn".into(),
+                    cookie_name: "_csrf_token".into(),
+                    header_name: "X-CSRF-Token".into(),
+                },
+            )
+            .await
+            .map_err(|error| {
+                // The dedicated native method has no downloads/gateways/redirects.
+                // Every failure after send() is classified by Network as uncertain.
+                if error.code == "NeedsReconciliation" {
+                    CanvasWriteError::NeedsReconciliation
+                } else if error.code == "AuthenticationRequired" {
+                    ConnectorError::AuthRequired(challenge.clone()).into()
+                } else {
+                    transport_error(error).into()
+                }
+            })?;
+        // Revocation/replacement after dispatch must never become a safe retry.
+        self.current_authority()
+            .map_err(|_| CanvasWriteError::NeedsReconciliation)?;
+        self.check_native_lease(&challenge)
+            .map_err(|_| CanvasWriteError::NeedsReconciliation)?;
+        Ok(ConnectorResponse {
+            status: response.status,
+            final_url: url::Url::parse(&response.url)
+                .map_err(|_| CanvasWriteError::NeedsReconciliation)?,
+            headers: response.headers.into_iter().collect(),
+            body: response.body.into_bytes(),
+        })
+    }
     async fn execute(&self, input: ConnectorRequest) -> Result<ConnectorResponse, ConnectorError> {
+        if self.source_capability == "canvas.write"
+            && input.method == crate::HttpMethod::Post
+            && matches!(input.auth, TransportAuth::HostSession { .. })
+        {
+            return self
+                .execute_canvas_session_write(input)
+                .await
+                .map_err(|error| match error {
+                    CanvasWriteError::Rejected(error) => error,
+                    CanvasWriteError::NeedsReconciliation => ConnectorError::TransportUnavailable,
+                });
+        }
         let current = self.current_authority()?;
         if match &input.auth {
             TransportAuth::Anonymous => false,
@@ -233,29 +344,23 @@ impl ConnectorTransport for BoundTransport<'_> {
         ) && input.method == crate::HttpMethod::Get
             && input.url.origin().ascii_serialization() == "https://elearning.fudan.edu.cn"
             && input.url.path().starts_with("/api/v1/courses/");
+        let request = HttpRequest {
+            url: input.url.to_string(),
+            method: input.method.as_str().into(),
+            headers: input.headers.into_iter().collect::<BTreeMap<_, _>>(),
+            body: input
+                .body
+                .map(|b| String::from_utf8(b).map(Value::String))
+                .transpose()
+                .map_err(|_| ConnectorError::InvalidConfiguration("request body encoding"))?,
+            account_id: account,
+            timeout_ms: Some(15000),
+            follow_redirects: false,
+        };
         let response = isolated
             .as_ref()
             .unwrap_or(self.network)
-            .request_with_credentials(
-                self.principal,
-                &io_grant,
-                HttpRequest {
-                    url: input.url.to_string(),
-                    method: input.method.as_str().into(),
-                    headers: input.headers.into_iter().collect::<BTreeMap<_, _>>(),
-                    body: input
-                        .body
-                        .map(|b| String::from_utf8(b).map(Value::String))
-                        .transpose()
-                        .map_err(|_| {
-                            ConnectorError::InvalidConfiguration("request body encoding")
-                        })?,
-                    account_id: account,
-                    timeout_ms: Some(15000),
-                    follow_redirects: false,
-                },
-                credential_kind,
-            )
+            .request_with_credentials(self.principal, &io_grant, request, credential_kind)
             .await
             .map_err(|error| {
                 if error.code == "AuthenticationRequired" {
@@ -308,6 +413,7 @@ fn transport_error(error: CoreError) -> ConnectorError {
         "PermissionDenied" => ConnectorError::PermissionDenied,
         "Timeout" => ConnectorError::Timeout,
         "CapabilityUnavailable" => ConnectorError::CapabilityUnavailable,
+        "CsrfRequired" => ConnectorError::CanvasCsrfRequired,
         "UnsupportedContent" => ConnectorError::Parse {
             source_name: "HTTP transport",
             field: "text encoding",
@@ -333,6 +439,10 @@ pub(crate) fn source_error(error: ConnectorError) -> CoreError {
         ConnectorError::CapabilityUnavailable => {
             CoreError::new("CapabilityUnavailable", "source transport unavailable")
         }
+        ConnectorError::CanvasCsrfRequired => CoreError::new(
+            "CanvasCsrfRequired",
+            "refresh the Canvas HTTP session before explicitly sending again",
+        ),
         ConnectorError::Timeout => CoreError::new("Timeout", "source request timed out"),
         ConnectorError::Parse { source_name, field } => {
             CoreError::new("SourceSchemaChanged", format!("{source_name}.{field}"))
@@ -345,11 +455,25 @@ pub(crate) fn source_error(error: ConnectorError) -> CoreError {
     }
 }
 
+fn canvas_write_error(error: CanvasWriteError) -> CoreError {
+    match error {
+        CanvasWriteError::Rejected(ConnectorError::InvalidConfiguration(_)) => {
+            CoreError::invalid("invalid Canvas conversation input")
+        }
+        CanvasWriteError::Rejected(error) => source_error(error),
+        CanvasWriteError::NeedsReconciliation => CoreError::new(
+            "NeedsReconciliation",
+            "Canvas send outcome is unknown; refresh the conversation before sending again",
+        ),
+    }
+}
+
 #[async_trait]
 impl CoreService for CampusService {
     fn methods(&self) -> Vec<(&'static str, &'static str)> {
         let mut methods = vec![
             ("fudan.semesters", "fudan.academic.read"),
+            ("fudan.postgraduate.semester", "fudan.catalog.read"),
             ("fudan.timetable.sync", "fudan.academic.read"),
             ("fudan.postgraduate.sync", "fudan.academic.read"),
             ("fudan.student_association", "fudan.academic.read"),
@@ -389,6 +513,12 @@ impl CoreService for CampusService {
             ("canvas.token.bind", "canvas.login"),
             ("canvas.uis.login", "canvas.login"),
             ("canvas.courses.sync", "canvas.read"),
+            ("canvas.conversations.sync", "canvas.read"),
+            ("canvas.conversation.read", "canvas.read"),
+            ("canvas.recipients.search", "canvas.read"),
+            ("canvas.course_users.sync", "canvas.read"),
+            ("canvas.conversation.reply", "canvas.write"),
+            ("canvas.conversation.create", "canvas.write"),
             ("canvas.assignments.sync", "canvas.read"),
             ("canvas.materials.sync", "canvas.read"),
             ("canvas.material.download", "canvas.read"),
@@ -445,6 +575,35 @@ impl CoreService for CampusService {
                 .await;
         }
         grant.check_account(principal, Some(account))?;
+        if method == "fudan.postgraduate.semester" {
+            let mut io_grant = grant.clone();
+            io_grant.capabilities.insert("http.request".into());
+            io_grant
+                .origins
+                .insert(crate::academic_catalog::CATALOG_ORIGIN.into());
+            let source = SourceContext {
+                account_id: account.into(),
+                source_id: "official.fudan.postgraduate.semester".into(),
+                observed_at: Utc::now(),
+            };
+            let client = crate::academic_catalog::FudanAcademicCatalogClient::new(BoundTransport {
+                account,
+                store: context.store,
+                source_capability: capability,
+                credential_lease: Default::default(),
+                network: context.network,
+                platform: context.platform,
+                principal,
+                grant: &io_grant,
+            });
+            let semester = crate::postgraduate_calendar::current_semester(&client, &source).await
+                .map_err(|error| match error {
+                    crate::postgraduate_calendar::PostgraduateCalendarError::Source(error) => campus_error(error),
+                    crate::postgraduate_calendar::PostgraduateCalendarError::SemesterCalendarUnavailable =>
+                        CoreError::new("SemesterCalendarUnavailable", "this postgraduate semester has no verified calendar"),
+                })?;
+            return Ok(serde_json::to_value(semester)?);
+        }
         if method.starts_with("fudan.electricity.alert.") {
             if !principal.is_owner() {
                 return Err(CoreError::new(
@@ -897,9 +1056,9 @@ impl CoreService for CampusService {
         }
         let mut io_grant = grant.clone();
         io_grant.capabilities.insert("http.request".into());
-        // Only statically defined, read-only campus clients use this bridge. Some
-        // source query protocols use POST; this does not grant raw plugin HTTP writes.
-        if method.starts_with("fudan.") {
+        // Typed capabilities delegate only fixed protocol operations. Canvas
+        // sends require their own capability; reads never acquire http.write.
+        if method.starts_with("fudan.") || capability == "canvas.write" {
             io_grant.capabilities.insert("http.write".into());
         }
         // Typed source capabilities delegate only their built-in/configured origin,
@@ -1357,6 +1516,23 @@ impl CoreService for CampusService {
         let origin = required_string(&config, "origin")?;
         io_grant.origins.insert(origin.into());
         let access: CanvasAccess = serde_json::from_value(config["access"].clone())?;
+        if capability == "canvas.write" && access == CanvasAccess::BrowserSession {
+            return Err(CoreError::new(
+                "CapabilityUnavailable",
+                "Canvas page sessions cannot send without a trusted CSRF facility",
+            ));
+        }
+        if capability == "canvas.write"
+            && access == CanvasAccess::HostToken
+            && !context
+                .network
+                .credential_available(account, origin, CredentialKind::Bearer)
+        {
+            return Err(CoreError::new(
+                "AuthenticationRequired",
+                "bind an active Canvas token before sending",
+            ));
+        }
         if method == "canvas.material.download" {
             return download_canvas_material(context, principal, grant, account, &config, &params)
                 .await;
@@ -1376,6 +1552,77 @@ impl CoreService for CampusService {
             access,
         )
         .map_err(source_error)?;
+        // Sends return the confirmed response directly, without a fallible local
+        // cache write that could mask success. Search terms/results are not cached.
+        match method {
+            "canvas.conversation.reply" => {
+                let row = client
+                    .reply_conversation(
+                        &source,
+                        required_string(&params, "conversation_id")?,
+                        required_string(&params, "body")?,
+                    )
+                    .await
+                    .map_err(canvas_write_error)?;
+                return serde_json::to_value(row)
+                    .map_err(|_| canvas_write_error(CanvasWriteError::NeedsReconciliation));
+            }
+            "canvas.conversation.create" => {
+                let recipients: Vec<CanvasId> =
+                    serde_json::from_value(params["recipients"].clone()).map_err(|_| {
+                        CoreError::invalid("recipients must be an array of Canvas user IDs")
+                    })?;
+                let rows = client
+                    .create_conversation(
+                        &source,
+                        required_string(&params, "course_id")?,
+                        &recipients,
+                        required_string(&params, "subject")?,
+                        required_string(&params, "body")?,
+                    )
+                    .await
+                    .map_err(canvas_write_error)?;
+                return serde_json::to_value(rows)
+                    .map_err(|_| canvas_write_error(CanvasWriteError::NeedsReconciliation));
+            }
+            "canvas.course_users.sync" => {
+                let search = match params.get("search") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(value)) => Some(value.as_str()),
+                    _ => return Err(CoreError::invalid("search must be a string")),
+                };
+                return Ok(serde_json::to_value(
+                    client
+                        .course_users(&source, required_string(&params, "course_id")?, search)
+                        .await
+                        .map_err(source_error)?,
+                )?);
+            }
+            "canvas.recipients.search" => {
+                return Ok(serde_json::to_value(
+                    client
+                        .recipients(
+                            &source,
+                            required_string(&params, "course_id")?,
+                            params
+                                .get("search")
+                                .and_then(Value::as_str)
+                                .ok_or_else(|| CoreError::invalid("search must be a string"))?,
+                        )
+                        .await
+                        .map_err(source_error)?,
+                )?);
+            }
+            "canvas.conversation.read" => {
+                return Ok(serde_json::to_value(
+                    client
+                        .conversation(&source, required_string(&params, "conversation_id")?)
+                        .await
+                        .map_err(source_error)?,
+                )?);
+            }
+            _ => {}
+        }
         if method == "canvas.page.read" {
             let row = client
                 .page(
@@ -1396,6 +1643,21 @@ impl CoreService for CampusService {
             return Ok(serde_json::to_value(row)?);
         }
         let (kind, records) = match method {
+            "canvas.conversations.sync" => (
+                "lms_conversation",
+                serde_json::to_value(
+                    client
+                        .conversations(
+                            &source,
+                            params
+                                .get("course_id")
+                                .map(|_| required_string(&params, "course_id"))
+                                .transpose()?,
+                        )
+                        .await
+                        .map_err(source_error)?,
+                )?,
+            ),
             "canvas.courses.sync" => (
                 "lms_course",
                 serde_json::to_value(client.courses(&source).await.map_err(source_error)?)?,
@@ -2058,6 +2320,23 @@ mod qr_presentation_tests {
 }
 fn source_partition(method: &str, params: &Value) -> CoreResult<String> {
     let mut source = format!("official.{}", method.trim_end_matches(".sync"));
+    if matches!(
+        method,
+        "canvas.conversation.read" | "canvas.conversation.reply"
+    ) {
+        let id = required_string(params, "conversation_id")?;
+        if id.is_empty() || id.len() > 32 || !id.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(CoreError::invalid("invalid Canvas conversation id"));
+        }
+        return Ok(format!("{source}:{id}"));
+    }
+    if method == "canvas.conversations.sync"
+        && !params
+            .as_object()
+            .is_some_and(|p| p.contains_key("course_id"))
+    {
+        return Ok(format!("{source}:all"));
+    }
     if method.starts_with("canvas.")
         && method != "canvas.courses.sync"
         && method != "canvas.material.download"

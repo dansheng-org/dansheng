@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 
 import 'learning_controller.dart';
+import 'people/course_people_page.dart';
+import 'chat/learning_chat_page.dart';
 import 'models/canvas_models.dart';
 import 'models/timetable_models.dart';
 import 'widgets/course_files_view.dart';
@@ -86,6 +88,17 @@ class _CoursePageState extends State<CoursePage> {
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
             ),
             actions: [
+              if (canvas != null)
+                IconButton(
+                  tooltip: '课程聊天',
+                  icon: const Icon(Icons.forum_outlined),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          LearningChatPage(controller: ctrl, course: canvas),
+                    ),
+                  ),
+                ),
               IconButton(
                 icon: const Icon(Icons.refresh_rounded),
                 tooltip: '刷新',
@@ -100,6 +113,22 @@ class _CoursePageState extends State<CoursePage> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: [
                 _buildSummary(scheme, name, lead, sessions, canvas),
+                if (canvas != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.people_outline),
+                      label: const Text('课程人员'),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => CoursePeoplePage(
+                            controller: ctrl,
+                            course: canvas,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 18),
                 SectionHeader(
                   icon: Icons.school_rounded,
