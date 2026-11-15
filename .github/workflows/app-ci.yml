@@ -44,8 +44,10 @@ jobs:
           ./scripts/tests/apk-archive.tests.ps1
           ./scripts/tests/prerelease.tests.ps1
           ./scripts/tests/android-host.tests.ps1
+          ./scripts/tests/build-parallelism.tests.ps1
           ./scripts/tests/monorepo-paths.tests.ps1
           ../../scripts/ci/tests/Runner.Tests.ps1
+          ../../scripts/ci/tests/PublicCaches.Tests.ps1
           ../../scripts/ci/tests/BuildOutputs.Tests.ps1
           python ./scripts/tests/audit-paths.test.py
           if ($LASTEXITCODE -ne 0) { throw 'APK audit path fixtures failed.' }

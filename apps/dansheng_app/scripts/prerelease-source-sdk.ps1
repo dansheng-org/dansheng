@@ -5,6 +5,8 @@ param(
     [Parameter(Mandatory)][string]$Commit
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'build-parallelism.ps1')
+$sourceParallelism = Get-DanshengBuildParallelism
 $app = Split-Path -Parent $PSScriptRoot
 $repo = [IO.Path]::GetFullPath((Join-Path $app '../..'))
 $core = Join-Path $repo 'core'
@@ -62,7 +64,7 @@ try {
     # Resolve AGP/Kotlin/Android dependencies online in the runtime copy. This
     # warmup has no Rust payload and is never consumed as an SDK. prepare-native
     # subsequently builds both real Rust ABIs and the JNI adapter offline.
-    & (Join-Path $project 'platform/android/gradlew.ps1') -GradleArguments @(':adapter:assembleRelease','--max-workers=2','--console=plain')
+    & (Join-Path $project 'platform/android/gradlew.ps1') -GradleArguments @(':adapter:assembleRelease',"--max-workers=$($sourceParallelism.gradle)",'--parallel','--console=plain')
     if ($LASTEXITCODE -ne 0) { throw 'Cannot populate the native Gradle dependencies.' }
     Assert-DanshengPrereleaseCheckout -AppRoot $app -CoreRoot $core -Commit $Commit -RequireClean
     & (Join-Path $PSScriptRoot 'prepare-native.ps1') -CoreRoot $core -CoreToolsRoot (Join-Path $core 'tools/workspace') `

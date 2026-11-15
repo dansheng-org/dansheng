@@ -19,6 +19,8 @@ function Reject([scriptblock]$Action, [string]$Pattern) {
     Assert ($message -match $Pattern) "Expected rejection: $Pattern; got: $message"
 }
 try {
+    $env:CARGO_BUILD_JOBS = '24'
+    $env:DANSHENG_GRADLE_WORKERS = '12'
     # A runner's checkout may live beneath CI_ROOT; only runtime/cache must be separate.
     $env:DANSHENG_CI_ROOT = Join-Path $fixture 'ci'
     $env:GITHUB_WORKSPACE = Join-Path $env:DANSHENG_CI_ROOT 'runner/_work/checkout'
@@ -34,6 +36,9 @@ try {
     $env:_JAVA_OPTIONS = '-Duser.home=inherited-config'
     & (Join-Path $scripts 'Initialize-Runner.ps1') -Role Publish
     $runtime = $env:DANSHENG_TASK_RUNTIME
+    Assert ($env:CARGO_BUILD_JOBS -eq '24' -and $env:DANSHENG_GRADLE_WORKERS -eq '12') 'Runner discarded its concurrency budget.'
+    Assert ($env:GRADLE_OPTS -match '-Dorg.gradle.workers.max=12' -and $env:GRADLE_OPTS -match '-Dorg.gradle.parallel=true') 'Gradle did not receive parallel worker settings.'
+    Assert ((Get-Content -LiteralPath $env:GITHUB_ENV -Raw) -match '(?m)^CARGO_BUILD_JOBS=24\s*$') 'Cargo concurrency was not exported to later Actions steps.'
     Assert ($runtime -eq (Join-Path $env:DANSHENG_CI_ROOT 'runtime/12345/publish/1')) 'Runtime lost run/job/attempt isolation.'
     Assert ($env:CARGO_TARGET_DIR.StartsWith($runtime)) 'Cargo build outputs escaped runtime.'
     Assert ($env:CARGO_HOME -eq (Join-Path $env:DANSHENG_CI_ROOT 'cache/main/publish/cargo-home')) 'Dependency cache is not persistent and CI-owned.'

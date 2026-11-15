@@ -24,6 +24,8 @@ if (Test-Path -LiteralPath $layout.runtime) { throw 'CI runtime already exists; 
 $env:DANSHENG_TASK_RUNTIME = $layout.runtime
 $env:DANSHENG_CI_CACHE_ROOT = $layout.cache
 $taskHome = Assert-CiPlainPath (Join-Path $layout.runtime 'home')
+. (Join-Path $PSScriptRoot '../../apps/dansheng_app/scripts/build-parallelism.ps1')
+$parallelism = Get-DanshengBuildParallelism
 $values = @{
     DANSHENG_CI_ROOT=$layout.root; DANSHENG_TASK_RUNTIME=$layout.runtime; DANSHENG_CI_CACHE_ROOT=$layout.cache
     DANSHENG_TASK_HOME=$taskHome
@@ -39,12 +41,15 @@ $values = @{
     APPDATA=(Join-Path $layout.runtime 'home/appdata'); LOCALAPPDATA=(Join-Path $layout.runtime 'home/localappdata')
     TEMP=(Join-Path $layout.runtime 'tmp'); TMP=(Join-Path $layout.runtime 'tmp'); TMPDIR=(Join-Path $layout.runtime 'tmp')
     GIT_CONFIG_GLOBAL=(Join-Path $layout.runtime 'home/.gitconfig'); GIT_CONFIG_NOSYSTEM='1'; GIT_TERMINAL_PROMPT='0'
-    GRADLE_OPTS='-Dorg.gradle.daemon=false'
+    CARGO_BUILD_JOBS=[string]$parallelism.cargo
+    DANSHENG_GRADLE_WORKERS=[string]$parallelism.gradle
+    CMAKE_BUILD_PARALLEL_LEVEL=[string]$parallelism.gradle
+    GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=$($parallelism.gradle)"
     JAVA_TOOL_OPTIONS=('"-Duser.home={0}"' -f $taskHome.Replace('\','/'))
 }
 foreach ($name in $values.Keys) {
     [Environment]::SetEnvironmentVariable($name, $values[$name], 'Process')
-    if ($name -notin @('GIT_CONFIG_GLOBAL','npm_config_userconfig','GIT_CONFIG_NOSYSTEM','GIT_TERMINAL_PROMPT','GRADLE_OPTS','JAVA_TOOL_OPTIONS')) {
+    if ($name -notin @('GIT_CONFIG_GLOBAL','npm_config_userconfig','GIT_CONFIG_NOSYSTEM','GIT_TERMINAL_PROMPT','GRADLE_OPTS','JAVA_TOOL_OPTIONS','CARGO_BUILD_JOBS','DANSHENG_GRADLE_WORKERS','CMAKE_BUILD_PARALLEL_LEVEL')) {
         [void][IO.Directory]::CreateDirectory((Assert-CiPlainPath $values[$name]))
     }
 }
