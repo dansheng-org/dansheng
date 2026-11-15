@@ -57,7 +57,7 @@ pub enum LoginTarget {
 }
 
 impl LoginTarget {
-    fn origin(self) -> &'static str {
+    pub fn origin(self) -> &'static str {
         match self {
             Self::Academic => "https://fdjwgl.fudan.edu.cn",
             Self::Postgraduate => "http://yjsxk.fudan.edu.cn",
@@ -137,6 +137,8 @@ pub enum LoginError {
     SessionUnavailable,
     ServiceUnavailable,
     CryptoError,
+    /// The WebVPN session behind a gateway sign-in is missing or expired.
+    GatewaySessionRequired,
 }
 
 impl LoginError {
@@ -155,6 +157,7 @@ impl LoginError {
             Self::SessionUnavailable => "SessionUnavailable",
             Self::ServiceUnavailable => "ServiceUnavailable",
             Self::CryptoError => "CryptoError",
+            Self::GatewaySessionRequired => "WebVpnLoginRequired",
         }
     }
 
@@ -169,8 +172,8 @@ impl LoginError {
                 "The login flow requested an unsafe destination or credential replay."
             }
             Self::ProtocolChanged => "The identity service returned an unsupported login protocol.",
-            Self::NetworkError => "The HTTPS login request failed; no automatic retry was made.",
-            Self::Timeout => "The login deadline expired; no automatic retry was made.",
+            Self::NetworkError => "The HTTPS login request failed; no credential was resent.",
+            Self::Timeout => "The login deadline expired; no credential was resent.",
             Self::ResponseTooLarge => "The login response exceeded the configured size limit.",
             Self::LimitExceeded => "The login flow exceeded the configured operation limit.",
             Self::AuthenticationRejected => {
@@ -179,6 +182,9 @@ impl LoginError {
             Self::SessionUnavailable => "No importable target-service session was obtained.",
             Self::ServiceUnavailable => "The identity service is unavailable or under maintenance.",
             Self::CryptoError => "The identity service public key could not be used safely.",
+            Self::GatewaySessionRequired => {
+                "Sign in to WebVPN before reaching this service through it."
+            }
         }
     }
 }
@@ -230,10 +236,14 @@ pub async fn login_with_progress(
     progress: LoginProgress,
 ) -> Result<LoginSession, LoginError> {
     validate_input(student_id, password)?;
-    let client = verified_login_client()?
-        .https_only(!target.plain_http())
-        .build()
-        .map_err(|_| LoginError::NetworkError)?;
+    let mut builder = verified_login_client()?.https_only(!target.plain_http());
+    if target == LoginTarget::WebVpn {
+        // Observed live: a WebVPN sign-in takes ~0.3 s, but about one in three
+        // first requests never answers. A short deadline plus the flow's single
+        // pre-credential retry on a fresh connection beats waiting longer.
+        builder = builder.timeout(Duration::from_secs(6));
+    }
+    let client = builder.build().map_err(|_| LoginError::NetworkError)?;
     let mut flow = Flow::new(target, Https { client });
     flow.progress = progress.clone();
     let result = tokio::time::timeout(LOGIN_TIMEOUT, flow.run(student_id, password))
@@ -296,6 +306,11 @@ struct Page {
 #[async_trait]
 trait Transport: Send {
     async fn exchange(&mut self, request: Request) -> Result<Reply, LoginError>;
+    /// A gateway transport keeps the site session on the gateway; its own
+    /// cookies are the session to import instead of target-issued ones.
+    fn gateway_session(&self) -> Option<LoginSession> {
+        None
+    }
 }
 struct Https {
     client: Client,
@@ -341,6 +356,159 @@ impl Transport for Https {
         })
     }
 }
+/// Runs the same sign-in through WebVPN: every logical URL is rewritten to the
+/// gateway, gateway cookies stay in this transport, and redirects are read
+/// back as logical URLs so the flow's own destination checks still apply.
+/// The site session then lives in the gateway session, which is exported.
+#[cfg(feature = "webvpn")]
+struct GatewayHttps {
+    client: Client,
+    jar: CookieStore,
+    gateway: Url,
+}
+#[cfg(feature = "webvpn")]
+#[async_trait]
+impl Transport for GatewayHttps {
+    async fn exchange(&mut self, request: Request) -> Result<Reply, LoginError> {
+        let physical =
+            crate::webvpn::encode_url(&request.url).map_err(|_| LoginError::UnsafeRedirect)?;
+        let mut builder = self.client.request(request.body.method(), physical.clone());
+        // The flow's own jar only ever holds logical-host cookies, which the
+        // gateway keeps server-side; send the gateway's cookies instead.
+        if let Some(cookies) = cookie_header(&self.jar, &physical)? {
+            builder = builder.header(COOKIE, cookies);
+        }
+        if !matches!(request.body, Body::Empty) {
+            builder = builder.header(ORIGIN, crate::webvpn::GATEWAY_ORIGIN);
+        }
+        builder = match request.body {
+            Body::Empty => builder,
+            Body::Json(value) | Body::NeoPassword(value) => builder.json(&value),
+            Body::UisPassword(fields) | Body::Token(fields) => builder.form(&fields),
+        };
+        let mut response = builder.send().await.map_err(network_error)?;
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_BODY as u64)
+        {
+            return Err(LoginError::ResponseTooLarge);
+        }
+        let status = response.status();
+        let mut headers = response.headers().clone();
+        for header in headers.get_all(SET_COOKIE) {
+            if header.len() > MAX_COOKIE {
+                return Err(LoginError::ResponseTooLarge);
+            }
+            let text = header.to_str().map_err(|_| LoginError::ProtocolChanged)?;
+            if let Ok(cookie) = Cookie::parse(text, &self.gateway)
+                && cookie.domain.as_cow().as_deref() == self.gateway.host_str()
+            {
+                let _ = self.jar.insert(cookie.into_owned(), &self.gateway);
+            }
+        }
+        if self.jar.iter_any().count() > MAX_COOKIES {
+            return Err(LoginError::LimitExceeded);
+        }
+        headers.remove(SET_COOKIE);
+        if let Some(location) = headers.get(LOCATION) {
+            let text = location.to_str().map_err(|_| LoginError::ProtocolChanged)?;
+            let next = physical
+                .join(text)
+                .map_err(|_| LoginError::UnsafeRedirect)?;
+            let logical = if next.origin() == self.gateway.origin() {
+                // The gateway's own pages (its sign-in) mean its session ended.
+                crate::webvpn::decode_url(&next).ok_or(LoginError::GatewaySessionRequired)?
+            } else {
+                next
+            };
+            headers.insert(
+                LOCATION,
+                HeaderValue::from_str(logical.as_str()).map_err(|_| LoginError::ProtocolChanged)?,
+            );
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(network_error)? {
+            if chunk.len() > MAX_BODY - bytes.len() {
+                return Err(LoginError::ResponseTooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body = String::from_utf8(bytes).map_err(|_| LoginError::ProtocolChanged)?;
+        // Ticket hand-off pages carry gateway-rewritten links; read them as
+        // the site's own so the flow's destination checks apply unchanged.
+        let body = crate::webvpn::decode_text(&body).into_owned();
+        Ok(Reply {
+            status,
+            headers,
+            body,
+        })
+    }
+
+    fn gateway_session(&self) -> Option<LoginSession> {
+        let cookies = self
+            .jar
+            .iter_unexpired()
+            .filter(|cookie| cookie.domain.matches(&self.gateway))
+            .map(|cookie| {
+                let mut raw = cookie.deref().clone();
+                raw.set_path(cookie.path.as_ref().to_owned());
+                raw.set_max_age(None);
+                if let CookieExpiration::AtUtc(expiry) = cookie.expires {
+                    raw.set_expires(expiry);
+                }
+                raw.to_string()
+            })
+            .collect();
+        Some(LoginSession {
+            origin: crate::webvpn::GATEWAY_ORIGIN.into(),
+            cookies,
+        })
+    }
+}
+
+/// Signs in to `target` through WebVPN, continuing the gateway session given
+/// as Set-Cookie strings. Returns the updated gateway session to import for
+/// [`crate::webvpn::GATEWAY_ORIGIN`]; no site cookie exists outside it.
+/// `GatewaySessionRequired` means WebVPN itself needs a sign-in first.
+#[cfg(feature = "webvpn")]
+pub async fn login_via_gateway(
+    student_id: &str,
+    password: &str,
+    target: LoginTarget,
+    gateway_cookies: &[String],
+) -> Result<LoginSession, LoginError> {
+    validate_input(student_id, password)?;
+    if target == LoginTarget::WebVpn {
+        return Err(LoginError::InvalidInput);
+    }
+    let gateway =
+        Url::parse(crate::webvpn::GATEWAY_ORIGIN).map_err(|_| LoginError::InvalidInput)?;
+    let mut jar = CookieStore::default();
+    for cookie in gateway_cookies {
+        let _ = jar.parse(cookie, &gateway);
+    }
+    if jar.iter_unexpired().next().is_none() {
+        return Err(LoginError::GatewaySessionRequired);
+    }
+    // Every hop is proxied by the gateway: allow a little more than a direct
+    // hop; a stalled request before any credential gets one fresh retry.
+    let client = verified_login_client()?
+        .timeout(Duration::from_secs(12))
+        .build()
+        .map_err(|_| LoginError::NetworkError)?;
+    let mut flow = Flow::new(
+        target,
+        GatewayHttps {
+            client,
+            jar,
+            gateway,
+        },
+    );
+    tokio::time::timeout(Duration::from_secs(60), flow.run(student_id, password))
+        .await
+        .map_err(|_| LoginError::Timeout)?
+}
+
 fn network_error(error: reqwest::Error) -> LoginError {
     if error.is_timeout() {
         LoginError::Timeout
@@ -444,14 +612,40 @@ impl<T: Transport> Flow<T> {
             .requests
             .store(self.requests, Ordering::Release);
         let cookies = cookie_header(&self.jar, &url)?;
-        let reply = self
+        let password_submitted = self.password_submitted;
+        // A plain GET before any password or ticket has gone out carries no
+        // credential and changes nothing, so a stalled one may be sent once
+        // more on a fresh connection. Nothing after that point is ever resent.
+        let resendable =
+            matches!(body, Body::Empty) && !self.password_submitted && !self.ticket_consumed;
+        let first = self
             .transport
             .exchange(Request {
                 url: url.clone(),
                 body,
-                cookies,
+                cookies: cookies.clone(),
             })
-            .await?;
+            .await;
+        let reply = match first {
+            Err(LoginError::Timeout | LoginError::NetworkError) if resendable => {
+                self.transport
+                    .exchange(Request {
+                        url: url.clone(),
+                        body: Body::Empty,
+                        cookies,
+                    })
+                    .await
+            }
+            other => other,
+        }
+        .map_err(|error| match error {
+            // Re-signing in to WebVPN and retrying is only safe while no
+            // password has gone out in this flow.
+            LoginError::GatewaySessionRequired if password_submitted => {
+                LoginError::AuthenticationRejected
+            }
+            other => other,
+        })?;
         if reply.body.len() > MAX_BODY || reply.body.len() > MAX_TOTAL_BODY - self.total_body {
             return Err(LoginError::ResponseTooLarge);
         }
@@ -650,6 +844,13 @@ impl<T: Transport> Flow<T> {
     }
 
     fn export(&self) -> Result<LoginSession, LoginError> {
+        if let Some(session) = self.transport.gateway_session() {
+            return if session.cookies.is_empty() {
+                Err(LoginError::SessionUnavailable)
+            } else {
+                Ok(session)
+            };
+        }
         let origin = Url::parse(self.target.origin()).map_err(|_| LoginError::ProtocolChanged)?;
         let mut cookies = Vec::new();
         for cookie in self.jar.iter_unexpired() {
@@ -2015,12 +2216,58 @@ mod tests {
             LoginError::SessionUnavailable,
             LoginError::ServiceUnavailable,
             LoginError::CryptoError,
+            LoginError::GatewaySessionRequired,
         ] {
             assert!(!error.message().contains(PASSWORD));
             assert!(!error.to_string().contains("http"));
             assert!(std::error::Error::source(&error).is_none());
             assert!(!error.code().is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn only_a_stalled_credential_free_get_is_sent_once_more() {
+        let entry = LoginTarget::WebVpn.entry();
+        let stalled = |url: &str| Step {
+            url: url.into(),
+            reply: Err(LoginError::Timeout),
+        };
+        // Before any credential: one fresh retry, then the reply is used.
+        let mut flow = Flow::new(
+            LoginTarget::WebVpn,
+            mock(vec![stalled(entry), step(entry, reply(200, &[], "ok"))]),
+        );
+        let page = flow
+            .send(entry.parse().unwrap(), Body::Empty)
+            .await
+            .unwrap();
+        assert_eq!(page.reply.status, 200);
+        assert_eq!(flow.transport.seen.len(), 2);
+        // Never twice in a row, and never anything carrying a body.
+        let mut flow = Flow::new(
+            LoginTarget::WebVpn,
+            mock(vec![stalled(entry), stalled(entry)]),
+        );
+        assert_eq!(
+            flow.send(entry.parse().unwrap(), Body::Empty).await.err(),
+            Some(LoginError::Timeout)
+        );
+        let methods = "https://id.fudan.edu.cn/idp/authn/queryAuthMethods";
+        let mut flow = Flow::new(LoginTarget::WebVpn, mock(vec![stalled(methods)]));
+        assert_eq!(
+            flow.send(methods.parse().unwrap(), Body::Json(json!({})))
+                .await
+                .err(),
+            Some(LoginError::Timeout)
+        );
+        // After the password went out, even a plain GET is not resent.
+        let mut flow = Flow::new(LoginTarget::WebVpn, mock(vec![stalled(entry)]));
+        flow.password_submitted = true;
+        assert_eq!(
+            flow.send(entry.parse().unwrap(), Body::Empty).await.err(),
+            Some(LoginError::Timeout)
+        );
+        assert_eq!(flow.transport.seen.len(), 1);
     }
 
     #[test]

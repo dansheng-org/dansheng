@@ -274,7 +274,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // Verify MCP running status
-        expect(find.text('服务已就绪 (端口: 19888)'), findsOneWidget);
+        expect(find.text('服务已就绪 (端口：19888)'), findsOneWidget);
         expect(find.text('http://127.0.0.1:19888/mcp'), findsOneWidget);
 
         // Verify token is masked on screen

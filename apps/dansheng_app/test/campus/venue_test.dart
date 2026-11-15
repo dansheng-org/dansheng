@@ -296,7 +296,7 @@ void main() {
       expect(button.enabled, isTrue);
 
       // Verify selected slot details are shown in the bottom bar
-      expect(find.textContaining('已选: 正大体育馆羽毛球场 · 1 个时段'), findsOneWidget);
+      expect(find.textContaining('已选：正大体育馆羽毛球场 · 1 个时段'), findsOneWidget);
     },
   );
 
@@ -576,7 +576,7 @@ void main() {
         reconcileCancelCall['params']['params']['appointment_id'],
         equals(302),
       );
-      expect(find.textContaining('核对完成: 预约已取消'), findsOneWidget);
+      expect(find.textContaining('核对完成：预约已取消'), findsOneWidget);
     },
   );
 

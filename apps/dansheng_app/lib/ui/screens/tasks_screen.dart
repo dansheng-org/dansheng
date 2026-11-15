@@ -200,25 +200,19 @@ class _TasksScreenState extends State<TasksScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            Text('所属: $owner', style: Theme.of(context).textTheme.bodySmall),
+            Text('所属：$owner', style: Theme.of(context).textTheme.bodySmall),
             if (action.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text(
-                '动作: $action',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
+              Text('动作：$action', style: Theme.of(context).textTheme.bodyMedium),
             ],
             if (runAt != null) ...[
               const SizedBox(height: 4),
-              Text(
-                '执行计划: $runAt',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              Text('执行计划：$runAt', style: Theme.of(context).textTheme.bodySmall),
             ],
             if (updatedAt != null) ...[
               const SizedBox(height: 2),
               Text(
-                '更新于: $updatedAt',
+                '更新于：$updatedAt',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -229,7 +223,7 @@ class _TasksScreenState extends State<TasksScreen> {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    '唤醒时间: ${_formatWakeTime(wakeUp)}',
+                    '唤醒时间：${_formatWakeTime(wakeUp)}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),

@@ -151,7 +151,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(SettingsScreen), findsOneWidget);
-        expect(find.text('系统设置与权限'), findsOneWidget);
+        expect(find.text('设置'), findsOneWidget);
 
         navigator.pop();
         await tester.pumpAndSettle();

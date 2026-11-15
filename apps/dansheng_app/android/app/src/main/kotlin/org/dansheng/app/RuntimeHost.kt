@@ -204,7 +204,9 @@ class RuntimeHost(private val context: Context, browserIsolated:Boolean=true, pa
             if(networkConfigured)return
             val origins=listOf("auth.fduhole.com","forum.fduhole.com","danke.fduhole.com","elearning.fudan.edu.cn",
                 "fdjwgl.fudan.edu.cn","ecard.fudan.edu.cn","zlapp.fudan.edu.cn","webvpn.fudan.edu.cn",
-                "my.fudan.edu.cn","mlibrary.fudan.edu.cn").map { "https://$it" }
+                "my.fudan.edu.cn","mlibrary.fudan.edu.cn",
+                // The cloud drive only has a campus address (10.x) in public DNS too.
+                "cloud.fudan.edu.cn").map { "https://$it" }
             callCore("http.policy.set",JSONObject().put("private_network_origins",JSONArray(origins)))
             networkConfigured=true
         }

@@ -295,16 +295,10 @@ class LearningController extends ChangeNotifier {
 
   /// Every weekly session of the timetable course with this name.
   List<TimetableCourse> sessionsNamed(String name) {
-    final list = [
+    return mergeCourseSessions([
       for (final course in _timetableData?.courses ?? const <TimetableCourse>[])
         if (course.name == name) course,
-    ];
-    list.sort(
-      (a, b) => a.weekday != b.weekday
-          ? a.weekday.compareTo(b.weekday)
-          : a.startUnit.compareTo(b.startUnit),
-    );
-    return list;
+    ], sameWeeks: true);
   }
 
   /// Weekly sessions of the timetable course matched to an eLearning course.
@@ -838,18 +832,64 @@ class LearningController extends ChangeNotifier {
       }
       notifyListeners();
     }
-    // Own status of current deadlines, including ones that just passed.
+    // Own status of every assignment. The last known status shows at once
+    // (it survives a restart); recent deadlines are always re-read, older
+    // ones only while they are not known to be handed in.
+    final work = _assignments[courseId] ?? const <CanvasAssignment>[];
+    await _seedSubmissionsFromCache(work, curToken);
+    if (curToken != _requestToken) return;
     final since = currentTime().subtract(const Duration(days: 14));
     await loadSubmissions(
       [
-        for (final a in _assignments[courseId] ?? const <CanvasAssignment>[])
+        for (final a in work)
           if ((a.dueAt != null && a.dueAt!.isAfter(since)) ||
-              _submissions.containsKey(_submissionKey(a)))
+              _submissions[_submissionKey(a)]?.isDone != true)
             a,
       ],
       token: curToken,
       refresh: true,
     );
+  }
+
+  /// Fills in submissions the host kept from an earlier session, without
+  /// touching the network.
+  Future<void> _seedSubmissionsFromCache(
+    List<CanvasAssignment> assignments,
+    int token,
+  ) async {
+    final missing = [
+      for (final a in assignments)
+        if (!a.isQuiz &&
+            a.id.isNotEmpty &&
+            !_submissions.containsKey(_submissionKey(a)))
+          a,
+    ];
+    var found = false;
+    for (var i = 0; i < missing.length && token == _requestToken; i += 8) {
+      await Future.wait(
+        missing.skip(i).take(8).map((a) async {
+          dynamic cached;
+          try {
+            cached = await api.call('campus.cached', {
+              'course_id': a.courseId,
+              'assignment_id': a.id,
+              'method': 'canvas.submission.self',
+            });
+          } catch (_) {
+            return;
+          }
+          final row = rowsOf(cached).firstOrNull;
+          final key = _submissionKey(a);
+          if (token == _requestToken &&
+              row != null &&
+              !_submissions.containsKey(key)) {
+            _submissions[key] = CanvasSubmission.fromJson(row);
+            found = true;
+          }
+        }),
+      );
+    }
+    if (found && token == _requestToken) notifyListeners();
   }
 
   /// Reads a Canvas list with cache fallback. A required read records its
@@ -1100,7 +1140,7 @@ class LearningController extends ChangeNotifier {
         'file_id': fileId,
         'course_id': courseId,
       });
-      showFeedback('已打开文件: $fileName');
+      showFeedback('已打开文件：$fileName');
     } catch (e) {
       _downloadingFileIds.remove(fileId);
       notifyListeners();

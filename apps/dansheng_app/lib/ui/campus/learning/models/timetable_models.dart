@@ -226,6 +226,33 @@ class TimetableCourse {
     );
   }
 
+  /// Same course held in the same place: candidates for one merged span.
+  bool isSameCourseAs(TimetableCourse other) {
+    String fold(String? s) => (s ?? '').trim();
+    final code = fold(courseCode), otherCode = fold(other.courseCode);
+    if (code.isNotEmpty && otherCode.isNotEmpty && code != otherCode) {
+      return false;
+    }
+    return fold(name) == fold(other.name) && fold(room) == fold(other.room);
+  }
+
+  /// One session covering this one and [other] (same weekday, adjacent).
+  TimetableCourse mergedWith(TimetableCourse other) => TimetableCourse(
+    lessonId: lessonId ?? other.lessonId,
+    courseCode: courseCode ?? other.courseCode,
+    name: name,
+    teachers: [
+      ...teachers,
+      for (final t in other.teachers)
+        if (!teachers.contains(t)) t,
+    ],
+    room: room ?? other.room,
+    weekday: weekday,
+    startUnit: startUnit < other.startUnit ? startUnit : other.startUnit,
+    endUnit: endUnit > other.endUnit ? endUnit : other.endUnit,
+    weeks: ({...weeks, ...other.weeks}.toList()..sort()),
+  );
+
   /// Formatted time span string e.g. "08:00 - 09:40 · 第1-2节".
   String get timeSpanFormatted {
     final start = TeachingUnit.get(startUnit);
@@ -267,6 +294,50 @@ class TimetableCourse {
     final dayOfWeek = target.weekday; // 1 = Monday, 7 = Sunday
     return weekday == dayOfWeek && weeks.contains(week);
   }
+}
+
+/// Merges sessions of one course that touch or overlap on the same weekday
+/// into a single span. With [sameWeeks], only sessions held in exactly the
+/// same teaching weeks merge (for weekly listings that are not date-bound).
+/// The result is ordered by weekday, then first unit.
+List<TimetableCourse> mergeCourseSessions(
+  Iterable<TimetableCourse> sessions, {
+  bool sameWeeks = false,
+}) {
+  final sorted = sessions.toList()
+    ..sort(
+      (a, b) => a.weekday != b.weekday
+          ? a.weekday.compareTo(b.weekday)
+          : a.startUnit != b.startUnit
+          ? a.startUnit.compareTo(b.startUnit)
+          : a.endUnit.compareTo(b.endUnit),
+    );
+  final merged = <TimetableCourse>[];
+  for (final next in sorted) {
+    var joined = false;
+    for (var i = merged.length - 1; i >= 0; i--) {
+      final prev = merged[i];
+      if (prev.weekday != next.weekday) break;
+      if (!prev.isSameCourseAs(next) ||
+          next.startUnit > prev.endUnit + 1 ||
+          (sameWeeks && !_sameWeeks(prev.weeks, next.weeks))) {
+        continue;
+      }
+      merged[i] = prev.mergedWith(next);
+      joined = true;
+      break;
+    }
+    if (!joined) merged.add(next);
+  }
+  return merged;
+}
+
+bool _sameWeeks(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 /// Collapses week numbers into ranges, e.g. `1-4, 6, 8-16`.
@@ -344,13 +415,11 @@ class TimetableData {
     return TimetableData(semester: sem, courses: courses);
   }
 
-  /// Get all courses that occur on a specific date.
-  List<TimetableCourse> coursesOn(DateTime date) {
-    final list = courses.where((c) => c.occursOn(date, semester)).toList();
-    // Sort by startUnit ascending
-    list.sort((a, b) => a.startUnit.compareTo(b.startUnit));
-    return list;
-  }
+  /// Get all courses that occur on a specific date. Back-to-back sessions of
+  /// the same course (as JWGL often lists each teaching unit separately) are
+  /// merged into one span, the way DanXi shows them.
+  List<TimetableCourse> coursesOn(DateTime date) =>
+      mergeCourseSessions(courses.where((c) => c.occursOn(date, semester)));
 
   /// Check if there are any courses on a specific date.
   bool hasCoursesOn(DateTime date) {

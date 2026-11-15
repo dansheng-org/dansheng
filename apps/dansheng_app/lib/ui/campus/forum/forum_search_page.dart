@@ -100,7 +100,7 @@ class _ForumSearchPageState extends State<ForumSearchPage> {
       if (mounted) {
         setState(() => _isLoadingMore = false);
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('加载更多失败: ${campusError(e)}')));
+            .showSnackBar(SnackBar(content: Text('加载更多失败：${campusError(e)}')));
       }
     }
   }
@@ -118,7 +118,7 @@ class _ForumSearchPageState extends State<ForumSearchPage> {
           textInputAction: TextInputAction.search,
           onSubmitted: (_) => _performSearch(),
           decoration: InputDecoration(
-            hintText: '搜索树洞内容...',
+            hintText: '搜索树洞内容…',
             border: InputBorder.none,
             hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
             suffixIcon: _searchController.text.isNotEmpty

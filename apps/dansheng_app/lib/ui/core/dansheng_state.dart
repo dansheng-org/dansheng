@@ -2,7 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../campus/campus_api.dart' show campusError;
 import 'dansheng_client.dart';
+
+/// A readable reason for the user, never a raw exception dump.
+String _reason(Object error) => campusError(error);
 
 /// Central state coordinator for Dansheng app.
 class DanshengController extends ChangeNotifier {
@@ -83,7 +87,7 @@ class DanshengController extends ChangeNotifier {
       await refreshAll();
       _isInitialized = true;
     } catch (e) {
-      _errorMessage = '初始化失败: $e';
+      _errorMessage = '初始化失败：${_reason(e)}';
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -125,7 +129,7 @@ class DanshengController extends ChangeNotifier {
 
       // Loading the plugin catalog must never log in to an unrelated campus service.
     } catch (e) {
-      _errorMessage = '刷新失败: $e';
+      _errorMessage = '刷新失败：${_reason(e)}';
       rethrow;
     } finally {
       notifyListeners();
@@ -160,7 +164,7 @@ class DanshengController extends ChangeNotifier {
       _balanceData = null;
       await refreshAll();
     } catch (e) {
-      _errorMessage = '切换账号失败: $e';
+      _errorMessage = '切换账号失败：${_reason(e)}';
       rethrow;
     } finally {
       _isChangingAccount = false;
@@ -226,7 +230,7 @@ class DanshengController extends ChangeNotifier {
       await client.importPackage(packagePath);
       _plugins = await client.getPlugins();
     } catch (e) {
-      _errorMessage = '导入插件失败: $e';
+      _errorMessage = '导入插件失败：${_reason(e)}';
       rethrow;
     } finally {
       _isLoading = false;
@@ -244,7 +248,7 @@ class DanshengController extends ChangeNotifier {
       await client.enablePlugin(pluginId);
       _plugins = await client.getPlugins();
     } catch (e) {
-      _errorMessage = '启用插件失败: $e';
+      _errorMessage = '启用插件失败：${_reason(e)}';
       rethrow;
     } finally {
       _isLoading = false;
@@ -262,7 +266,7 @@ class DanshengController extends ChangeNotifier {
       await client.disablePlugin(pluginId);
       _plugins = await client.getPlugins();
     } catch (e) {
-      _errorMessage = '停用插件失败: $e';
+      _errorMessage = '停用插件失败：${_reason(e)}';
       rethrow;
     } finally {
       _isLoading = false;
@@ -280,7 +284,7 @@ class DanshengController extends ChangeNotifier {
       await client.removePlugin(pluginId);
       _plugins = await client.getPlugins();
     } catch (e) {
-      _errorMessage = '卸载插件失败: $e';
+      _errorMessage = '卸载插件失败：${_reason(e)}';
       rethrow;
     } finally {
       _isLoading = false;
