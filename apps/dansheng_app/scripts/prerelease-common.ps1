@@ -1,5 +1,26 @@
 #Requires -Version 7.0
 # App release orchestration; Core's pinned tools remain the dependency authority.
+function Resolve-DanshengPrereleaseGradle {
+    param([string]$CommandPath, [string]$GradleHome)
+    # Flutter's generated gradlew.bat is intentionally not a checkout input.
+    # CI installs the pinned distribution before this script (setup-gradle).
+    if (-not $CommandPath -and -not $GradleHome) {
+        $command = Get-Command gradle.bat -ErrorAction SilentlyContinue
+        if ($command) { $CommandPath = $command.Source }
+        if (-not $CommandPath) { $GradleHome = $env:GRADLE_HOME }
+    }
+    if (-not $CommandPath -and $GradleHome) { $CommandPath = Join-Path $GradleHome 'bin/gradle.bat' }
+    if (-not $CommandPath -or -not (Test-Path -LiteralPath $CommandPath -PathType Leaf)) {
+        throw 'Install Gradle 9.7.1 on PATH or set GRADLE_HOME before building the source SDK.'
+    }
+    $CommandPath = [IO.Path]::GetFullPath($CommandPath)
+    $homePath = Split-Path -Parent (Split-Path -Parent $CommandPath)
+    if (-not (Test-Path -LiteralPath (Join-Path $homePath 'lib/gradle-launcher-9.7.1.jar') -PathType Leaf)) {
+        throw 'Source SDK requires the pinned Gradle 9.7.1 installation.'
+    }
+    $CommandPath
+}
+
 function Resolve-DanshengPrereleaseManifest {
     param([Parameter(Mandatory)][string]$AppRoot)
     $appPath=[IO.Path]::GetFullPath($AppRoot).TrimEnd('\','/')

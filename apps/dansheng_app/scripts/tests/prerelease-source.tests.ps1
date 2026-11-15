@@ -23,6 +23,19 @@ function Reject([scriptblock]$Body, [string]$Pattern, [string]$Name) {
     if (-not $message -or $message -notmatch $Pattern) { throw "Expected $Name ($Pattern); received: $message" }
     $checks.Add($Name)
 }
+# A clean clone has no generated Android wrapper. An external pinned Gradle
+# installation must work independently of anything on the developer machine.
+$gradleHome = Join-Path $fixture 'tools/gradle-9.7.1'
+Put (Join-Path $gradleHome 'bin/gradle.bat') '@echo fixture'
+Put (Join-Path $gradleHome 'lib/gradle-launcher-9.7.1.jar') 'fixture, never executed'
+$launcher = Resolve-DanshengPrereleaseGradle -GradleHome $gradleHome
+if ($launcher -ne [IO.Path]::GetFullPath((Join-Path $gradleHome 'bin/gradle.bat'))) { throw 'Pinned Gradle was not resolved.' }
+$checks.Add('clean checkout resolves external Gradle without a generated wrapper')
+Reject { Resolve-DanshengPrereleaseGradle -GradleHome (Join-Path $fixture 'missing-gradle') } 'Install Gradle' 'missing Gradle gives an actionable error'
+$wrongGradle = Join-Path $fixture 'tools/gradle-old'
+Put (Join-Path $wrongGradle 'bin/gradle.bat') '@echo old'
+Put (Join-Path $wrongGradle 'lib/gradle-launcher-8.0.jar') 'fixture'
+Reject { Resolve-DanshengPrereleaseGradle -CommandPath (Join-Path $wrongGradle 'bin/gradle.bat') } 'pinned Gradle' 'wrong preinstalled Gradle is rejected'
 Put (Join-Path $core 'Cargo.toml') "[workspace.package]`nversion = `"0.1.0`"`n"
 Put (Join-Path $core 'Cargo.lock') "version = 4`n"
 Put (Join-Path $core 'rust-toolchain.toml') "[toolchain]`nchannel = `"1.99.1`"`n"

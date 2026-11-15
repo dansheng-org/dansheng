@@ -88,6 +88,11 @@ jobs:
           flutter-version: '3.47.7'
           channel: stable
           cache: false
+      - name: Install pinned Gradle for clean source builds
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          gradle-version: '9.7.1'
+          cache-disabled: true
       - name: Prepare isolated runtime and pinned Android/Rust tools
         run: |
           $runtime = Join-Path $env:RUNNER_TEMP "dansheng-native-check-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"

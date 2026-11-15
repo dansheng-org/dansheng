@@ -38,13 +38,11 @@ try {
         & cargo fetch --locked
         if ($LASTEXITCODE -ne 0) { throw 'Cannot populate the locked Cargo dependencies.' }
     } finally { Pop-Location }
-    # The App wrapper and Core launcher use the same pinned Gradle distribution.
-    & (Join-Path $app 'android/gradlew.bat') --version
+    # Use a pinned installation, not Flutter's untracked generated wrapper.
+    $launcher = Resolve-DanshengPrereleaseGradle
+    $env:GRADLE_HOME = Split-Path -Parent (Split-Path -Parent $launcher)
+    & $launcher --version
     if ($LASTEXITCODE -ne 0) { throw 'Cannot initialize the pinned Gradle distribution.' }
-    $launchers = @(Get-ChildItem -LiteralPath (Join-Path $env:GRADLE_USER_HOME 'wrapper/dists/gradle-9.7.1-bin') -Filter gradle.bat -File -Recurse)
-    if ($launchers.Count -ne 1) { throw 'Expected one pinned Gradle 9.7.1 distribution in the task cache.' }
-    # Hosted runners can export GRADLE_HOME for another preinstalled version.
-    $env:GRADLE_HOME = Split-Path -Parent (Split-Path -Parent $launchers[0].FullName)
     $project = Join-Path $RuntimeRoot 'core-android-project'
     $inputs = @(& git --no-optional-locks -c core.quotepath=false -C $core ls-files --cached -- 'platform/android' 'include/dansheng.h')
     if ($LASTEXITCODE -ne 0) { throw 'Cannot enumerate committed native build inputs.' }
