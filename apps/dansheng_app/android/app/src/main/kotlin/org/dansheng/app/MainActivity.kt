@@ -184,7 +184,12 @@ class MainActivity : FlutterActivity(), DanshengApi {
         serviceLogin("ecard",account,false)
     }
     private suspend fun serviceLogin(service:String,account:String,replace:Boolean):Any? {
-        return rt.campusLogins.connect(service,account,replace) { previous ->
+        val confirmForumRisk: (suspend () -> Unit)? = if(service=="forum") ({
+            sheet.confirm(ForumRiskConsent.TITLE,ForumRiskConsent.MESSAGE,"同意并继续",
+                acknowledgement=ForumRiskConsent.ACKNOWLEDGEMENT,
+                link=ForumRiskConsent.AGREEMENT_LABEL to ForumRiskConsent.AGREEMENT_URL)
+        }) else null
+        return rt.campusLogins.connect(service,account,replace,confirmForumRisk) { previous ->
             val forum=service=="forum"
             val emails=if(forum)CampusLogins.forumEmails(account) else emptyList()
             val title=when(service) { "forum"->"登录树洞"; "canvas"->"连接 Canvas"; else->"统一身份认证" }

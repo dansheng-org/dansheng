@@ -23,6 +23,7 @@ class CampusApi {
 String campusError(Object error) {
   final code = error is PlatformException ? error.code : error.toString();
   bool any(List<String> keys) => keys.any(code.contains);
+  if (any(['ForumConsentRequired'])) return '请前往论坛页面登录，阅读风险提示并明确确认承担风险。';
   if (any(['CourseAccessDenied'])) return '这门课程未开放此项内容';
   if (any(['InteractiveLoginRequired'])) return '学校要求在登录页完成验证';
   if (any(['AccountMismatch'])) return '登录身份与当前账号不符';

@@ -869,6 +869,64 @@ async fn tea_reads_use_token_transport_without_view_count_patch_and_preserve_unz
 }
 
 #[tokio::test]
+async fn tea_hole_windows_respect_upstream_ten_item_limit_and_preserve_cursor() {
+    let hole: Value = serde_json::from_slice(fixture!("tea_hole.json")).unwrap();
+    for requested in [2, 10, 20, 100] {
+        let expected = requested.min(10);
+        let rows: Vec<Value> = (0..expected)
+            .map(|index| {
+                let mut row = hole.clone();
+                row["hole_id"] = json!(101 + index);
+                row
+            })
+            .collect();
+        let body = serde_json::to_vec(&rows).unwrap();
+        let fake = Offline::new(&[&body]);
+        let before = source().observed_at;
+        let result = CommunityClient::new(fake.clone())
+            .tea_holes_with_tag(
+                &source(),
+                Some(1),
+                before,
+                requested,
+                TeaOrder::LastCreated,
+                Some("合成"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.records.len(), usize::from(expected));
+        assert_eq!(
+            result.coverage,
+            Coverage::Window {
+                position: before.to_rfc3339()
+            }
+        );
+        let requests = fake.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        let query: std::collections::BTreeMap<_, _> = requests[0].url.query_pairs().collect();
+        assert_eq!(query["size"], expected.to_string());
+        assert_eq!(query["length"], expected.to_string());
+        assert_eq!(query["start_time"], before.to_rfc3339());
+        assert_eq!(query["division_id"], "1");
+        assert_eq!(query["order"], "time_created");
+        assert_eq!(query["tag"], "合成");
+    }
+
+    // Validate against the actual upstream page size, even for older clients requesting 20.
+    let oversized = serde_json::to_vec(&vec![hole; 11]).unwrap();
+    let result = CommunityClient::new(Offline::new(&[&oversized]))
+        .tea_holes(
+            &source(),
+            None,
+            source().observed_at,
+            20,
+            TeaOrder::LastReplied,
+        )
+        .await;
+    assert!(matches!(result, Err(CampusError::PaginationInconsistent)));
+}
+
+#[tokio::test]
 async fn danke_search_group_and_reviews_use_verified_v3_v1_routes_and_bounded_pages() {
     let fake = Offline::new(&[
         fixture!("danke_search.json"),

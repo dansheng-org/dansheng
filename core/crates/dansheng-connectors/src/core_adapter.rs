@@ -1269,8 +1269,9 @@ impl CoreService for CampusService {
                         .or_else(|| params.get("length"))
                         .or_else(|| params.get("size"))
                         .and_then(Value::as_u64)
-                        .unwrap_or(20)
-                        .clamp(1, 100) as u16;
+                        .unwrap_or(u64::from(crate::community::TEA_HOLES_PAGE_SIZE))
+                        .clamp(1, u64::from(crate::community::TEA_HOLES_PAGE_SIZE))
+                        as u16;
                     serde_json::to_value(
                         client
                             .tea_holes_with_tag(
