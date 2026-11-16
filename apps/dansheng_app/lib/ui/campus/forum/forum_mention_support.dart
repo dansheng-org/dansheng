@@ -66,7 +66,10 @@ Future<void> showFloorDetailModal(
   final displayContent = prefs.filterContent(floor.content);
 
   final name = floor.anonyname?.trim();
-  final nameColor = getHashColor(name ?? '热心同学', isDark: theme.brightness == Brightness.dark);
+  final nameColor = getHashColor(
+    name ?? '热心同学',
+    isDark: theme.brightness == Brightness.dark,
+  );
   final rankText = floor.ranking != null
       ? (floor.ranking == 0 ? '首楼' : '${floor.ranking! + 1}楼')
       : (floor.floorId > 0 ? '##${floor.floorId}' : '');
@@ -113,14 +116,20 @@ Future<void> showFloorDetailModal(
                         const SizedBox(width: 8),
                         Text(
                           rankText,
-                          style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colors.onSurfaceVariant,
+                          ),
                         ),
                       ],
                       if (floor.timeCreated?.isNotEmpty == true) ...[
                         const SizedBox(width: 8),
                         Text(
                           formatFriendlyTime(floor.timeCreated),
-                          style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colors.onSurfaceVariant,
+                          ),
                         ),
                       ],
                     ],
@@ -206,7 +215,10 @@ class ForumMentionQuoteWidget extends StatelessWidget {
 
     if (cachedFloor != null && !cachedFloor.deleted) {
       final name = cachedFloor.anonyname?.trim();
-      final nameColor = getHashColor(name ?? '热心同学', isDark: theme.brightness == Brightness.dark);
+      final nameColor = getHashColor(
+        name ?? '热心同学',
+        isDark: theme.brightness == Brightness.dark,
+      );
       final snippet = cleanPreviewText(cachedFloor.content);
 
       return Padding(
@@ -217,9 +229,7 @@ class ForumMentionQuoteWidget extends StatelessWidget {
           child: Container(
             decoration: BoxDecoration(
               color: colors.surfaceContainerHighest.withValues(alpha: 0.4),
-              border: Border(
-                left: BorderSide(color: nameColor, width: 3),
-              ),
+              border: Border(left: BorderSide(color: nameColor, width: 3)),
               borderRadius: BorderRadius.circular(6),
             ),
             padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
@@ -230,7 +240,11 @@ class ForumMentionQuoteWidget extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.format_quote_rounded, size: 14, color: nameColor),
+                    Icon(
+                      Icons.format_quote_rounded,
+                      size: 14,
+                      color: nameColor,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       name?.isNotEmpty == true ? name! : '热心同学',
@@ -243,13 +257,19 @@ class ForumMentionQuoteWidget extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       '##${cachedFloor.floorId}',
-                      style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                     if (cachedFloor.timeCreated?.isNotEmpty == true) ...[
                       const SizedBox(width: 6),
                       Text(
                         formatFriendlyTime(cachedFloor.timeCreated),
-                        style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colors.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ],
@@ -285,9 +305,7 @@ class ForumMentionQuoteWidget extends StatelessWidget {
           child: Container(
             decoration: BoxDecoration(
               color: colors.surfaceContainerHighest.withValues(alpha: 0.4),
-              border: Border(
-                left: BorderSide(color: colors.primary, width: 3),
-              ),
+              border: Border(left: BorderSide(color: colors.primary, width: 3)),
               borderRadius: BorderRadius.circular(6),
             ),
             padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
@@ -312,7 +330,10 @@ class ForumMentionQuoteWidget extends StatelessWidget {
                       const SizedBox(width: 6),
                       Text(
                         '${cachedHole.reply} 回复',
-                        style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colors.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ],
@@ -348,7 +369,11 @@ class ForumMentionQuoteWidget extends StatelessWidget {
         ),
         label: Text(
           isFloor ? '##$id' : '#$id',
-          style: TextStyle(fontSize: 12, color: colors.primary, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 12,
+            color: colors.primary,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
         onPressed: onTap,

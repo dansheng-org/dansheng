@@ -61,12 +61,15 @@ void main() {
       ),
     );
 
-    test('FoldBehavior.fold shows folded hole with shouldHideHole == false', () {
-      final prefs = ForumPreferences.instance;
-      prefs.setFoldBehavior(FoldBehavior.fold);
-      expect(prefs.shouldHideHole(normalHole), isFalse);
-      expect(prefs.shouldHideHole(foldedHole), isFalse);
-    });
+    test(
+      'FoldBehavior.fold shows folded hole with shouldHideHole == false',
+      () {
+        final prefs = ForumPreferences.instance;
+        prefs.setFoldBehavior(FoldBehavior.fold);
+        expect(prefs.shouldHideHole(normalHole), isFalse);
+        expect(prefs.shouldHideHole(foldedHole), isFalse);
+      },
+    );
 
     test('FoldBehavior.hide completely hides folded hole', () {
       final prefs = ForumPreferences.instance;
@@ -114,7 +117,9 @@ void main() {
       expect(getHashColor(''), equals(Colors.red));
     });
 
-    testWidgets('RectangularChip and LeadingChip render cleanly', (tester) async {
+    testWidgets('RectangularChip and LeadingChip render cleanly', (
+      tester,
+    ) async {
       var tagTapped = false;
       await tester.pumpWidget(
         MaterialApp(
@@ -122,10 +127,7 @@ void main() {
             body: Row(
               children: [
                 LeadingChip(label: '置顶', color: Colors.blue),
-                RectangularChip(
-                  label: '学习交流',
-                  onTap: () => tagTapped = true,
-                ),
+                RectangularChip(label: '学习交流', onTap: () => tagTapped = true),
               ],
             ),
           ),
@@ -156,50 +158,51 @@ void main() {
       expect(cache.getFloor(999), isNotNull);
     });
 
-    testWidgets('showFloorDetailModal renders complete quoted floor and action buttons', (
-      tester,
-    ) async {
-      var jumped = false;
-      var quoted = false;
-      const floor = TeaFloor(
-        floorId: 200,
-        holeId: 100,
-        anonyname: '引用楼主',
-        ranking: 3,
-        content: '被引用的详细讨论内容',
-      );
+    testWidgets(
+      'showFloorDetailModal renders complete quoted floor and action buttons',
+      (tester) async {
+        var jumped = false;
+        var quoted = false;
+        const floor = TeaFloor(
+          floorId: 200,
+          holeId: 100,
+          anonyname: '引用楼主',
+          ranking: 3,
+          content: '被引用的详细讨论内容',
+        );
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Builder(
-              builder: (context) => ElevatedButton(
-                onPressed: () => showFloorDetailModal(
-                  context,
-                  floor: floor,
-                  onJumpToFloor: () => jumped = true,
-                  onQuoteReply: () => quoted = true,
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () => showFloorDetailModal(
+                    context,
+                    floor: floor,
+                    onJumpToFloor: () => jumped = true,
+                    onQuoteReply: () => quoted = true,
+                  ),
+                  child: const Text('打开引用详情'),
                 ),
-                child: const Text('打开引用详情'),
               ),
             ),
           ),
-        ),
-      );
+        );
 
-      await tester.tap(find.text('打开引用详情'));
-      await tester.pumpAndSettle();
+        await tester.tap(find.text('打开引用详情'));
+        await tester.pumpAndSettle();
 
-      expect(find.textContaining('引用楼主'), findsOneWidget);
-      expect(find.text('4楼'), findsOneWidget);
-      expect(find.textContaining('被引用的详细讨论内容'), findsOneWidget);
-      expect(find.text('跳转至该楼'), findsOneWidget);
-      expect(find.text('引用此楼'), findsOneWidget);
+        expect(find.textContaining('引用楼主'), findsOneWidget);
+        expect(find.text('4楼'), findsOneWidget);
+        expect(find.textContaining('被引用的详细讨论内容'), findsOneWidget);
+        expect(find.text('跳转至该楼'), findsOneWidget);
+        expect(find.text('引用此楼'), findsOneWidget);
 
-      await tester.tap(find.text('跳转至该楼'));
-      await tester.pumpAndSettle();
-      expect(jumped, isTrue);
-      expect(quoted, isFalse);
-    });
+        await tester.tap(find.text('跳转至该楼'));
+        await tester.pumpAndSettle();
+        expect(jumped, isTrue);
+        expect(quoted, isFalse);
+      },
+    );
   });
 }

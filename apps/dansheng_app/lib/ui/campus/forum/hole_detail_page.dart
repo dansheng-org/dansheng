@@ -112,7 +112,9 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
           context: context,
           builder: (ctx) => AlertDialog(
             title: const Text('楼层属于其他帖子'),
-            content: Text('楼层 ##$floorId 属于帖子 #${cachedFloor.holeId}。是否前往该帖子查看？'),
+            content: Text(
+              '楼层 ##$floorId 属于帖子 #${cachedFloor.holeId}。是否前往该帖子查看？',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -509,8 +511,8 @@ class _HighlightFadeWrapperState extends State<_HighlightFadeWrapper>
 
   @override
   Widget build(BuildContext context) {
-    final highlightColor =
-        Theme.of(context).colorScheme.primary.withValues(alpha: 0.35);
+    final highlightColor = Theme.of(context).colorScheme.primary
+        .withValues(alpha: 0.35);
 
     return Stack(
       children: [

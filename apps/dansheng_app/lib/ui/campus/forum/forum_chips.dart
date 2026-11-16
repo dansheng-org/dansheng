@@ -54,7 +54,9 @@ class LeadingChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = color.computeLuminance() <= 0.5 ? Colors.white : Colors.black;
+    final textColor = color.computeLuminance() <= 0.5
+        ? Colors.white
+        : Colors.black;
     final container = Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
       decoration: BoxDecoration(

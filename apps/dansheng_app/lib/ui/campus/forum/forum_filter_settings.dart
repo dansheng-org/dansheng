@@ -126,7 +126,9 @@ class ForumPreferences extends ChangeNotifier {
 
   void setTagFilter(String? tag) {
     final clean = tag?.trim().replaceFirst(RegExp(r'^#'), '');
-    final next = (clean == null || clean.isEmpty || clean == '默认') ? null : clean;
+    final next = (clean == null || clean.isEmpty || clean == '默认')
+        ? null
+        : clean;
     if (_selectedTagFilter != next) {
       _selectedTagFilter = next;
       notifyListeners();
@@ -140,7 +142,9 @@ class ForumPreferences extends ChangeNotifier {
 
     // 2. Blocked tags
     if (_hiddenTags.isNotEmpty &&
-        hole.tags.any((t) => _hiddenTags.contains(t.replaceFirst(RegExp(r'^#'), '')))) {
+        hole.tags.any(
+          (t) => _hiddenTags.contains(t.replaceFirst(RegExp(r'^#'), '')),
+        )) {
       return true;
     }
 
@@ -245,7 +249,9 @@ class _ForumFilterDialogState extends State<ForumFilterDialog> {
               // Fold behavior selector
               Text(
                 '折叠帖子显示方式',
-                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 4),
               for (final behavior in FoldBehavior.values)
@@ -266,7 +272,9 @@ class _ForumFilterDialogState extends State<ForumFilterDialog> {
               // Blocked tags section
               Text(
                 '屏蔽标签管理',
-                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
@@ -282,7 +290,10 @@ class _ForumFilterDialogState extends State<ForumFilterDialog> {
                       decoration: const InputDecoration(
                         hintText: '输入要屏蔽的标签名称',
                         isDense: true,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
                         border: OutlineInputBorder(),
                       ),
                       onSubmitted: (_) => _handleAddTag(),
@@ -322,7 +333,9 @@ class _ForumFilterDialogState extends State<ForumFilterDialog> {
                 children: [
                   Text(
                     '已屏蔽帖子 (${_prefs.hiddenHoles.length}篇)',
-                    style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   if (_prefs.hiddenHoles.isNotEmpty)
                     TextButton(

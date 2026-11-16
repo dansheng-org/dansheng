@@ -85,9 +85,8 @@ class _ForumFloorTileState extends State<ForumFloorTile> {
                   await Clipboard.setData(ClipboardData(text: floor.content!));
                   if (context.mounted) {
                     Navigator.of(ctx).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('已复制楼层内容')),
-                    );
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(const SnackBar(content: Text('已复制楼层内容')));
                   }
                 }
               },
@@ -126,7 +125,9 @@ class _ForumFloorTileState extends State<ForumFloorTile> {
     final colors = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
-    final nameColor = isOp ? colors.primary : getHashColor(name ?? '热心同学', isDark: isDark);
+    final nameColor = isOp
+        ? colors.primary
+        : getHashColor(name ?? '热心同学', isDark: isDark);
     final infoStyle = TextStyle(fontSize: 12, color: colors.onSurfaceVariant);
     final folded =
         !floor.deleted &&
@@ -216,7 +217,10 @@ class _ForumFloorTileState extends State<ForumFloorTile> {
                       child: ActionChip(
                         avatar: const Icon(Icons.reply_rounded, size: 14),
                         label: Text('回复 ##${floor.replyTo}'),
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 0,
+                        ),
                         onPressed: widget.onTapFloor == null
                             ? null
                             : () => widget.onTapFloor!(floor.replyTo!),

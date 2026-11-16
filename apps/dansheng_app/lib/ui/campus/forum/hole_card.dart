@@ -76,9 +76,8 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
                 onTap: () {
                   prefs.addHiddenTag(tag);
                   Navigator.of(ctx).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('已屏蔽标签 #$tag')),
-                  );
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text('已屏蔽标签 #$tag')));
                 },
               ),
           ],
@@ -105,40 +104,15 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
     // Badges matching DanXi
     final badges = <Widget>[
       if (widget.divisionName?.isNotEmpty == true)
-        LeadingChip(
-          label: widget.divisionName!,
-          color: colors.primary,
-        ),
-      if (widget.isPinned)
-        LeadingChip(
-          label: '置顶',
-          color: colors.primary,
-        ),
-      if (hole.hidden)
-        const LeadingChip(
-          label: '已隐藏',
-          color: Colors.red,
-        ),
+        LeadingChip(label: widget.divisionName!, color: colors.primary),
+      if (widget.isPinned) LeadingChip(label: '置顶', color: colors.primary),
+      if (hole.hidden) const LeadingChip(label: '已隐藏', color: Colors.red),
       if (hole.timeDeleted != null)
-        const LeadingChip(
-          label: '已删除',
-          color: Colors.red,
-        ),
-      if (hole.locked)
-        LeadingChip(
-          label: '已锁定',
-          color: colors.primary,
-        ),
-      if (hole.frozen)
-        LeadingChip(
-          label: '已冻结',
-          color: colors.primary,
-        ),
+        const LeadingChip(label: '已删除', color: Colors.red),
+      if (hole.locked) LeadingChip(label: '已锁定', color: colors.primary),
+      if (hole.frozen) LeadingChip(label: '已冻结', color: colors.primary),
       if (first?.specialTag?.isNotEmpty == true)
-        LeadingChip(
-          label: first!.specialTag!,
-          color: Colors.red,
-        ),
+        LeadingChip(label: first!.specialTag!, color: Colors.red),
     ];
 
     return Card(
