@@ -2,6 +2,9 @@
 // ignore_for_file: deprecated_member_use
 // Content filtering and preferences adapted from DanXi lib/util/forum/clean_mode_filter.dart
 // and lib/provider/settings_provider.dart. Copyright (C) 2021 DanXi-Dev; GPL-3.0-or-later.
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'forum_models.dart';
@@ -63,23 +66,84 @@ enum FoldBehavior {
 class ForumPreferences extends ChangeNotifier {
   static final ForumPreferences instance = ForumPreferences._internal();
 
-  ForumPreferences._internal();
+  ForumPreferences._internal() {
+    _initStorage();
+  }
 
   bool _cleanMode = false;
   FoldBehavior _foldBehavior = FoldBehavior.fold;
   final Set<String> _hiddenTags = {};
   final Set<int> _hiddenHoles = {};
+  final Set<int> _favoriteHoles = {};
+  final Map<int, TeaHole> _favoriteHolesMap = {};
   String? _selectedTagFilter;
+  File? _storageFile;
 
   bool get cleanMode => _cleanMode;
   FoldBehavior get foldBehavior => _foldBehavior;
   List<String> get hiddenTags => _hiddenTags.toList();
   List<int> get hiddenHoles => _hiddenHoles.toList();
+  List<int> get favoriteHoles => _favoriteHoles.toList();
+  List<TeaHole> get favoriteHolesList => _favoriteHolesMap.values.toList();
   String? get selectedTagFilter => _selectedTagFilter;
+
+  Future<void> _initStorage() async {
+    try {
+      final dir = Directory.systemTemp;
+      _storageFile = File('${dir.path}/dansheng_forum_prefs.json');
+      if (await _storageFile!.exists()) {
+        final content = await _storageFile!.readAsString();
+        final json = jsonDecode(content);
+        if (json is Map) {
+          _cleanMode = json['cleanMode'] == true;
+          if (json['foldBehavior'] != null) {
+            _foldBehavior = FoldBehavior.fromString(json['foldBehavior']);
+          }
+          if (json['hiddenTags'] is List) {
+            _hiddenTags.addAll(
+              (json['hiddenTags'] as List).map((e) => e.toString()),
+            );
+          }
+          if (json['hiddenHoles'] is List) {
+            _hiddenHoles.addAll(
+              (json['hiddenHoles'] as List)
+                  .map((e) => int.tryParse(e.toString()))
+                  .whereType<int>(),
+            );
+          }
+          if (json['favoriteHoles'] is List) {
+            _favoriteHoles.addAll(
+              (json['favoriteHoles'] as List)
+                  .map((e) => int.tryParse(e.toString()))
+                  .whereType<int>(),
+            );
+          }
+          notifyListeners();
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _saveStorage() {
+    try {
+      _storageFile ??= File(
+        '${Directory.systemTemp.path}/dansheng_forum_prefs.json',
+      );
+      final data = {
+        'cleanMode': _cleanMode,
+        'foldBehavior': _foldBehavior.value,
+        'hiddenTags': _hiddenTags.toList(),
+        'hiddenHoles': _hiddenHoles.toList(),
+        'favoriteHoles': _favoriteHoles.toList(),
+      };
+      _storageFile!.writeAsStringSync(jsonEncode(data));
+    } catch (_) {}
+  }
 
   void setCleanMode(bool value) {
     if (_cleanMode != value) {
       _cleanMode = value;
+      _saveStorage();
       notifyListeners();
     }
   }
@@ -87,6 +151,7 @@ class ForumPreferences extends ChangeNotifier {
   void setFoldBehavior(FoldBehavior value) {
     if (_foldBehavior != value) {
       _foldBehavior = value;
+      _saveStorage();
       notifyListeners();
     }
   }
@@ -94,6 +159,7 @@ class ForumPreferences extends ChangeNotifier {
   void addHiddenTag(String tag) {
     final clean = tag.trim().replaceFirst(RegExp(r'^#'), '');
     if (clean.isNotEmpty && _hiddenTags.add(clean)) {
+      _saveStorage();
       notifyListeners();
     }
   }
@@ -101,18 +167,21 @@ class ForumPreferences extends ChangeNotifier {
   void removeHiddenTag(String tag) {
     final clean = tag.trim().replaceFirst(RegExp(r'^#'), '');
     if (_hiddenTags.remove(clean)) {
+      _saveStorage();
       notifyListeners();
     }
   }
 
   void hideHole(int holeId) {
     if (holeId > 0 && _hiddenHoles.add(holeId)) {
+      _saveStorage();
       notifyListeners();
     }
   }
 
   void unhideHole(int holeId) {
     if (_hiddenHoles.remove(holeId)) {
+      _saveStorage();
       notifyListeners();
     }
   }
@@ -120,7 +189,28 @@ class ForumPreferences extends ChangeNotifier {
   void clearHiddenHoles() {
     if (_hiddenHoles.isNotEmpty) {
       _hiddenHoles.clear();
+      _saveStorage();
       notifyListeners();
+    }
+  }
+
+  bool isFavorite(int holeId) => _favoriteHoles.contains(holeId);
+
+  void toggleFavorite(TeaHole hole) {
+    if (_favoriteHoles.contains(hole.holeId)) {
+      _favoriteHoles.remove(hole.holeId);
+      _favoriteHolesMap.remove(hole.holeId);
+    } else {
+      _favoriteHoles.add(hole.holeId);
+      _favoriteHolesMap[hole.holeId] = hole;
+    }
+    _saveStorage();
+    notifyListeners();
+  }
+
+  void cacheFavoriteHole(TeaHole hole) {
+    if (_favoriteHoles.contains(hole.holeId)) {
+      _favoriteHolesMap[hole.holeId] = hole;
     }
   }
 
@@ -141,11 +231,13 @@ class ForumPreferences extends ChangeNotifier {
     if (_hiddenHoles.contains(hole.holeId)) return true;
 
     // 2. Blocked tags
-    if (_hiddenTags.isNotEmpty &&
-        hole.tags.any(
-          (t) => _hiddenTags.contains(t.replaceFirst(RegExp(r'^#'), '')),
-        )) {
-      return true;
+    if (_hiddenTags.isNotEmpty) {
+      for (final t in hole.tags) {
+        final clean = t.trim().replaceFirst(RegExp(r'^#'), '').toLowerCase();
+        if (_hiddenTags.any((ht) => ht.toLowerCase() == clean)) {
+          return true;
+        }
+      }
     }
 
     // 3. Completely hide folded posts if foldBehavior == FoldBehavior.hide
@@ -154,8 +246,12 @@ class ForumPreferences extends ChangeNotifier {
     }
 
     // 4. Tag filter
-    if (_selectedTagFilter != null && !hole.tags.contains(_selectedTagFilter)) {
-      return true;
+    if (_selectedTagFilter != null) {
+      final target = _selectedTagFilter!.toLowerCase();
+      final matches = hole.tags.any(
+        (t) => t.trim().replaceFirst(RegExp(r'^#'), '').toLowerCase() == target,
+      );
+      if (!matches) return true;
     }
 
     return false;

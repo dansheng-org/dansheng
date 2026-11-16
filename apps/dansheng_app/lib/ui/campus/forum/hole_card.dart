@@ -95,7 +95,9 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
     final last = hole.floors?.lastFloor;
 
     final hasStarTag = hole.tags.any(isHiddenForumTag);
-    final showContent = !hasStarTag || _expanded;
+    final prefs = ForumPreferences.instance;
+    final showContent =
+        prefs.foldBehavior == FoldBehavior.show || !hasStarTag || _expanded;
     final infoStyle = TextStyle(fontSize: 12, color: colors.onSurfaceVariant);
 
     // Tags
@@ -148,7 +150,7 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
               ],
 
               // Fold toggle button
-              if (hasStarTag)
+              if (hasStarTag && prefs.foldBehavior == FoldBehavior.fold)
                 TextButton.icon(
                   style: TextButton.styleFrom(
                     padding: EdgeInsets.zero,
@@ -298,7 +300,7 @@ class _FloorPreviewState extends State<_FloorPreview> {
       ),
     );
 
-    if (!folded) return text;
+    if (!folded || prefs.foldBehavior == FoldBehavior.show) return text;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

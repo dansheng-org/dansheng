@@ -90,9 +90,9 @@ $$\sum_{i=1}^{n} i = \frac{n(n+1)}{2}$$
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tapOnText(find.textRange.ofSubstring('#123'));
+      await tester.tap(find.text('#123'), warnIfMissed: false);
       expect(hole, 123);
-      await tester.tapOnText(find.textRange.ofSubstring('##456'));
+      await tester.tap(find.text('##456'), warnIfMissed: false);
       expect(floor, 456);
       await tester.tapOnText(find.textRange.ofSubstring('网页'));
       expect(link.toString(), 'https://example.org');

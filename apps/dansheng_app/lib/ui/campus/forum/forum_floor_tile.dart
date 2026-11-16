@@ -196,7 +196,7 @@ class _ForumFloorTileState extends State<ForumFloorTile> {
               if (floor.deleted)
                 Text('该楼层已被删除', style: infoStyle)
               else ...[
-                if (folded)
+                if (folded && prefs.foldBehavior == FoldBehavior.fold)
                   TextButton.icon(
                     style: TextButton.styleFrom(
                       padding: EdgeInsets.zero,
@@ -210,7 +210,9 @@ class _ForumFloorTileState extends State<ForumFloorTile> {
                       '${_expanded ? '收起折叠内容' : '内容已折叠，点击展开'}：${floor.fold.isEmpty ? '帖子标记' : floor.fold.join('、')}',
                     ),
                   ),
-                if (!folded || _expanded) ...[
+                if (!folded ||
+                    prefs.foldBehavior == FoldBehavior.show ||
+                    _expanded) ...[
                   if (floor.replyTo != null && floor.replyTo! > 0)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 4),

@@ -70,13 +70,19 @@ class ForumContent extends StatelessWidget {
               strong: body.copyWith(fontWeight: FontWeight.bold),
               del: body.copyWith(decoration: TextDecoration.lineThrough),
               listBullet: body,
-              blockquote: body,
+              blockquote: body.copyWith(
+                fontSize: 14,
+                color: colors.onSurfaceVariant,
+              ),
               blockquotePadding: const EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: 8,
               ),
               blockquoteDecoration: BoxDecoration(
-                color: colors.secondaryContainer.withValues(alpha: .45),
+                color: theme.brightness == Brightness.dark
+                    ? Colors.blue.shade900.withValues(alpha: .35)
+                    : Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(6),
                 border: Border(
                   left: BorderSide(color: colors.primary, width: 3),
                 ),
@@ -93,6 +99,12 @@ class ForumContent extends StatelessWidget {
               'forum-math': _MathBuilder(width, block: false),
               'forum-math-block': _MathBuilder(width, block: true),
               'forum-audit': _AuditBuilder(),
+              'floorMention': _FloorMentionBuilder(
+                context: context,
+                onTapFloor: onTapFloor,
+                onTapHole: onTapHole,
+              ),
+              'holeMention': _HoleMentionBuilder(onTapHole: onTapHole),
             },
             imageBuilder: (uri, title, alt) =>
                 _ForumImage(uri: uri, alt: alt, maxWidth: width * .8),
@@ -315,4 +327,57 @@ class _ForumImage extends StatelessWidget {
   Uri _fullSizeImage(Uri source) => source.host == 'image.fduhole.com'
       ? source.replace(path: source.path.replaceAll('.md.', '.'))
       : source;
+}
+
+class _FloorMentionBuilder extends MarkdownElementBuilder {
+  final BuildContext context;
+  final ValueChanged<int>? onTapFloor;
+  final ValueChanged<int>? onTapHole;
+
+  _FloorMentionBuilder({
+    required this.context,
+    this.onTapFloor,
+    this.onTapHole,
+  });
+
+  @override
+  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+    final floorId = int.tryParse(element.textContent);
+    if (floorId == null) return null;
+    return ForumMentionQuoteWidget(
+      id: floorId,
+      isFloor: true,
+      onTap: () {
+        final cached = ForumFloorCache.instance.getFloor(floorId);
+        if (cached != null) {
+          showFloorDetailModal(
+            context,
+            floor: cached,
+            onJumpToFloor: onTapFloor != null
+                ? () => onTapFloor!(floorId)
+                : null,
+          );
+        } else if (onTapFloor != null) {
+          onTapFloor!(floorId);
+        }
+      },
+    );
+  }
+}
+
+class _HoleMentionBuilder extends MarkdownElementBuilder {
+  final ValueChanged<int>? onTapHole;
+
+  _HoleMentionBuilder({this.onTapHole});
+
+  @override
+  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+    final holeId = int.tryParse(element.textContent);
+    if (holeId == null) return null;
+    return ForumMentionQuoteWidget(
+      id: holeId,
+      isFloor: false,
+      onTap: onTapHole != null ? () => onTapHole!(holeId) : null,
+    );
+  }
 }

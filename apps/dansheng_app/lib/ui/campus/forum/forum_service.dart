@@ -21,6 +21,7 @@ class ForumService {
   Future<List<TeaHole>> fetchHoles({
     int? divisionId,
     DateTime? before,
+    String? tag,
     int pageSize = forumPageSize,
     ForumSortOrder order = ForumSortOrder.lastReplied,
   }) async {
@@ -36,6 +37,12 @@ class ForumService {
     }
     if (before != null) {
       params['before'] = before.toUtc().toIso8601String();
+    }
+    if (tag != null && tag.trim().isNotEmpty) {
+      final cleanTag = tag.trim().replaceFirst(RegExp(r'^#'), '');
+      if (cleanTag.isNotEmpty) {
+        params['tag'] = cleanTag;
+      }
     }
 
     final response = await api.call('community.tea.holes', params);
