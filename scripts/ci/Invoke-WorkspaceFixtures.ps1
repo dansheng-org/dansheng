@@ -30,12 +30,22 @@ $runs = foreach ($name in @('Workspace', 'Monorepo')) {
         process = $process
         stdout = $process.StandardOutput.ReadToEndAsync()
         stderr = $process.StandardError.ReadToEndAsync()
+        seconds = $null
     }
+}
+# Note each suite's own duration as it finishes (Process.ExitTime is not
+# available on every platform).
+$clock = [Diagnostics.Stopwatch]::StartNew()
+while (@($runs | Where-Object { $null -eq $_.seconds }).Count) {
+    foreach ($run in $runs) {
+        if ($null -eq $run.seconds -and $run.process.HasExited) { $run.seconds = $clock.Elapsed.TotalSeconds }
+    }
+    Start-Sleep -Milliseconds 200
 }
 $failed = @()
 foreach ($run in $runs) {
     $run.process.WaitForExit()
-    $seconds = ($run.process.ExitTime - $run.process.StartTime).TotalSeconds
+    $seconds = $run.seconds
     $exit = $run.process.ExitCode
     Write-Host "::group::$($run.name) (exit $exit, $([math]::Round($seconds))s)"
     Write-Host $run.stdout.GetAwaiter().GetResult()
