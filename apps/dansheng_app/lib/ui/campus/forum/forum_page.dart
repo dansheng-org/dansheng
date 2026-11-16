@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import '../campus_api.dart';
 import '../../core/dansheng_state.dart';
 import 'forum_editor_dialog.dart';
+import 'forum_filter_settings.dart';
+import 'forum_mention_support.dart';
 import 'forum_models.dart';
 import 'forum_pagination.dart';
 import 'forum_search_page.dart';
@@ -42,7 +44,18 @@ class _ForumPageState extends State<ForumPage> {
   void initState() {
     super.initState();
     _service = ForumService(CampusApi(widget.controller.client));
+    ForumPreferences.instance.addListener(_onPrefsChanged);
     _loadInitialData();
+  }
+
+  @override
+  void dispose() {
+    ForumPreferences.instance.removeListener(_onPrefsChanged);
+    super.dispose();
+  }
+
+  void _onPrefsChanged() {
+    if (mounted) setState(() {});
   }
 
   /// Initial load: fetch divisions, then fetch holes.
@@ -84,6 +97,8 @@ class _ForumPageState extends State<ForumPage> {
           _isLoading = false;
           _authRequired = false;
         });
+        ForumFloorCache.instance.putHoles(holes);
+        ForumFloorCache.instance.putHoles(_pinnedHoles);
       }
     } catch (e) {
       if (mounted) {
@@ -124,6 +139,8 @@ class _ForumPageState extends State<ForumPage> {
           _errorMessage = null;
           _authRequired = false;
         });
+        ForumFloorCache.instance.putHoles(holes);
+        ForumFloorCache.instance.putHoles(_pinnedHoles);
       }
     } catch (e) {
       if (mounted) {
@@ -173,6 +190,7 @@ class _ForumPageState extends State<ForumPage> {
           _hasMore = nextHoles.length >= _pageSize && newItems.isNotEmpty;
           _isLoadingMore = false;
         });
+        ForumFloorCache.instance.putHoles(nextHoles);
       }
     } catch (e) {
       if (mounted) {
@@ -268,6 +286,12 @@ class _ForumPageState extends State<ForumPage> {
           onPressed: _isLoggingIn ? null : _handleLogin,
         ),
         actions: [
+          // Filter settings button
+          IconButton(
+            icon: const Icon(Icons.tune_rounded),
+            tooltip: '过滤与偏好设置',
+            onPressed: () => ForumFilterDialog.show(context),
+          ),
           // Sort order toggle
           IconButton(
             icon: Icon(
@@ -443,10 +467,11 @@ class _ForumPageState extends State<ForumPage> {
       );
     }
 
-    final pinned = _pinnedHoles;
-    final pinnedIds = pinned.map((h) => h.holeId).toSet();
+    final prefs = ForumPreferences.instance;
+    final pinned = _pinnedHoles.where((h) => !prefs.shouldHideHole(h)).toList();
+    final pinnedIds = _pinnedHoles.map((h) => h.holeId).toSet();
     final nonPinnedHoles = _holes
-        .where((h) => !pinnedIds.contains(h.holeId))
+        .where((h) => !pinnedIds.contains(h.holeId) && !prefs.shouldHideHole(h))
         .toList();
 
     return RefreshIndicator(
@@ -456,7 +481,7 @@ class _ForumPageState extends State<ForumPage> {
         itemCount:
             1 + pinned.length + nonPinnedHoles.length + (_hasMore ? 1 : 0),
         itemBuilder: (context, index) {
-          // Status bar row (sort order indicator + total count)
+          // Status bar row (sort order indicator + active tag filter + total count)
           if (index == 0) {
             return _buildStatusHeader(pinned.length + nonPinnedHoles.length);
           }
@@ -471,6 +496,7 @@ class _ForumPageState extends State<ForumPage> {
               divisionName: _getDivisionName(ph.divisionId),
               isPinned: true,
               onTap: () => _openHoleDetail(ph),
+              onTapTag: (tag) => prefs.setTagFilter(tag),
             );
           }
 
@@ -484,6 +510,7 @@ class _ForumPageState extends State<ForumPage> {
               divisionName: _getDivisionName(h.divisionId),
               isPinned: false,
               onTap: () => _openHoleDetail(h),
+              onTapTag: (tag) => prefs.setTagFilter(tag),
             );
           }
 
@@ -507,31 +534,50 @@ class _ForumPageState extends State<ForumPage> {
 
   Widget _buildStatusHeader(int totalShowing) {
     final colorScheme = Theme.of(context).colorScheme;
+    final prefs = ForumPreferences.instance;
     final divisionTitle = _selectedDivisionId == null
         ? '全站'
         : (_getDivisionName(_selectedDivisionId!) ?? '分区');
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '$divisionTitle · ${_sortOrder.label}',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const Spacer(),
-          if (totalShowing == 0 && !_isLoading)
-            Text(
-              '暂无帖子',
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.onSurfaceVariant,
+          Row(
+            children: [
+              Text(
+                '$divisionTitle · ${_sortOrder.label}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
+              const Spacer(),
+              if (totalShowing == 0 && !_isLoading)
+                Text(
+                  '暂无帖子',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+          if (prefs.selectedTagFilter != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                InputChip(
+                  avatar: const Icon(Icons.filter_alt_rounded, size: 16),
+                  label: Text('按标签筛选: #${prefs.selectedTagFilter}'),
+                  onDeleted: () => prefs.setTagFilter(null),
+                  deleteIconColor: colorScheme.primary,
+                ),
+              ],
             ),
+          ],
         ],
       ),
     );

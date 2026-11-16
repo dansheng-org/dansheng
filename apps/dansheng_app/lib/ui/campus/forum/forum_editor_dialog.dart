@@ -554,6 +554,7 @@ class _ForumPublishDialogState extends State<ForumPublishDialog> {
 /// Modal dialog for replying to a hole with preview & confirmation.
 class ForumReplyDialog extends StatefulWidget {
   final int holeId;
+  final String? initialContent;
   final Future<int?> Function({required int holeId, required String content})
   onReply;
   final Future<Map<String, dynamic>?> Function({
@@ -566,6 +567,7 @@ class ForumReplyDialog extends StatefulWidget {
   const ForumReplyDialog({
     super.key,
     required this.holeId,
+    this.initialContent,
     required this.onReply,
     this.onReconcile,
   });
@@ -582,6 +584,14 @@ class _ForumReplyDialogState extends State<ForumReplyDialog> {
   String? _errorMessage;
   String? _successMessage;
   bool _isUncertainOutcome = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialContent != null && widget.initialContent!.isNotEmpty) {
+      _contentController.text = widget.initialContent!;
+    }
+  }
 
   @override
   void dispose() {
