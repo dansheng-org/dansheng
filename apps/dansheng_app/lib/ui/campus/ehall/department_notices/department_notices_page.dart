@@ -74,7 +74,8 @@ class _DepartmentNoticesPageState extends State<DepartmentNoticesPage> {
     if (next != null && mounted) {
       setState(() {
         _subscribed = next;
-        if (_selectedFilterDept != null && !_subscribed.contains(_selectedFilterDept)) {
+        if (_selectedFilterDept != null &&
+            !_subscribed.contains(_selectedFilterDept)) {
           _selectedFilterDept = null;
         }
       });
@@ -97,9 +98,8 @@ class _DepartmentNoticesPageState extends State<DepartmentNoticesPage> {
         await api.call('campus.openNotice', {'url': notice.url});
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(campusError(e))),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(campusError(e))));
         }
       }
     }
@@ -137,20 +137,23 @@ class _DepartmentNoticesPageState extends State<DepartmentNoticesPage> {
                   ChoiceChip(
                     label: Text('全部 (${_notices.length})'),
                     selected: _selectedFilterDept == null,
-                    onSelected: (_) => setState(() => _selectedFilterDept = null),
+                    onSelected: (_) =>
+                        setState(() => _selectedFilterDept = null),
                   ),
                   const SizedBox(width: 8),
-                  for (final dept in _subscribed
-                      .map(DepartmentDirectory.byId)
-                      .whereType<DepartmentInfo>()) ...[
+                  for (final dept
+                      in _subscribed
+                          .map(DepartmentDirectory.byId)
+                          .whereType<DepartmentInfo>()) ...[
                     ChoiceChip(
                       label: Text(
                         '${dept.shortName} (${_notices.where((n) => n.departmentId == dept.id).length})',
                       ),
                       selected: _selectedFilterDept == dept.id,
                       onSelected: (_) => setState(() {
-                        _selectedFilterDept =
-                            _selectedFilterDept == dept.id ? null : dept.id;
+                        _selectedFilterDept = _selectedFilterDept == dept.id
+                            ? null
+                            : dept.id;
                       }),
                     ),
                     const SizedBox(width: 8),
@@ -160,9 +163,7 @@ class _DepartmentNoticesPageState extends State<DepartmentNoticesPage> {
             ),
 
           if (_loading && _notices.isEmpty)
-            const Expanded(
-              child: Center(child: CircularProgressIndicator()),
-            )
+            const Expanded(child: Center(child: CircularProgressIndicator()))
           else if (_subscribed.isEmpty)
             Expanded(
               child: Center(
@@ -177,10 +178,7 @@ class _DepartmentNoticesPageState extends State<DepartmentNoticesPage> {
                         color: colors.onSurfaceVariant,
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        '尚未关注任何院系通知',
-                        style: theme.textTheme.titleMedium,
-                      ),
+                      Text('尚未关注任何院系通知', style: theme.textTheme.titleMedium),
                       const SizedBox(height: 8),
                       Text(
                         '点击下方按钮，按学部自选关注的院系',
@@ -260,24 +258,28 @@ class _DepartmentNoticesPageState extends State<DepartmentNoticesPage> {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: colors.primaryContainer.withValues(alpha: 0.6),
+                                      color: colors.primaryContainer.withValues(
+                                        alpha: 0.6,
+                                      ),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
                                       notice.departmentName,
-                                      style: theme.textTheme.labelSmall?.copyWith(
-                                        color: colors.onPrimaryContainer,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                            color: colors.onPrimaryContainer,
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                     ),
                                   ),
                                   const Spacer(),
                                   if (notice.date.isNotEmpty)
                                     Text(
                                       notice.date,
-                                      style: theme.textTheme.labelSmall?.copyWith(
-                                        color: colors.onSurfaceVariant,
-                                      ),
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                            color: colors.onSurfaceVariant,
+                                          ),
                                     ),
                                 ],
                               ),

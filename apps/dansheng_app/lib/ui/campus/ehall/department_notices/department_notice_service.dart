@@ -147,8 +147,7 @@ class DepartmentNoticeService {
   Future<List<DepartmentNoticeItem>> fetchDepartmentNotices(
     DepartmentInfo department,
   ) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 5);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     try {
       final request = await client
           .getUrl(Uri.parse(department.noticeUrl))
@@ -157,7 +156,9 @@ class DepartmentNoticeService {
         HttpHeaders.userAgentHeader,
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) DanshengDepartmentNotices/1.0',
       );
-      final response = await request.close().timeout(const Duration(seconds: 5));
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
       if (response.statusCode != 200) {
         return _cache[department.id] ?? const [];
       }
@@ -233,9 +234,7 @@ class DepartmentNoticeService {
     final notices = await getNotices(departmentIds, refresh: live);
     if (notices.isEmpty) {
       return TileData(
-        TileFacts(
-          note: departmentIds.isEmpty ? '未订阅任何院系' : '暂无最新院系公告',
-        ),
+        TileFacts(note: departmentIds.isEmpty ? '未订阅任何院系' : '暂无最新院系公告'),
         observedAt: _lastObserved,
       );
     }

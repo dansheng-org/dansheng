@@ -10,10 +10,22 @@ void main() {
   group('DepartmentDirectory', () {
     test('contains comprehensive directory across all categories', () {
       expect(DepartmentDirectory.all.length, greaterThanOrEqualTo(40));
-      expect(DepartmentDirectory.categories, contains(DepartmentDirectory.catHumanities));
-      expect(DepartmentDirectory.categories, contains(DepartmentDirectory.catScienceEngineering));
-      expect(DepartmentDirectory.categories, contains(DepartmentDirectory.catMedicine));
-      expect(DepartmentDirectory.categories, contains(DepartmentDirectory.catGeneral));
+      expect(
+        DepartmentDirectory.categories,
+        contains(DepartmentDirectory.catHumanities),
+      );
+      expect(
+        DepartmentDirectory.categories,
+        contains(DepartmentDirectory.catScienceEngineering),
+      );
+      expect(
+        DepartmentDirectory.categories,
+        contains(DepartmentDirectory.catMedicine),
+      );
+      expect(
+        DepartmentDirectory.categories,
+        contains(DepartmentDirectory.catGeneral),
+      );
 
       final cs = DepartmentDirectory.byId('cs');
       expect(cs, isNotNull);
@@ -38,20 +50,18 @@ void main() {
         DepartmentDirectory.parseSubscribed(''),
         DepartmentDirectory.defaultDepartmentIds,
       );
-      expect(
-        DepartmentDirectory.parseSubscribed('cs,econ'),
-        ['cs', 'econ'],
-      );
-      expect(
-        DepartmentDirectory.parseSubscribed('invalid,econ,unknown'),
-        ['econ'],
-      );
+      expect(DepartmentDirectory.parseSubscribed('cs,econ'), ['cs', 'econ']);
+      expect(DepartmentDirectory.parseSubscribed('invalid,econ,unknown'), [
+        'econ',
+      ]);
     });
   });
 
   group('DepartmentNoticeService & HTML Parsing', () {
-    test('parses standard WebPlus table/list rows and resolves relative URLs', () {
-      const sampleHtml = '''
+    test(
+      'parses standard WebPlus table/list rows and resolves relative URLs',
+      () {
+        const sampleHtml = '''
         <ul class="wp_article_list">
           <li class="list_item">
             <span class="Article_Title"><a href="/2026/1115/c12345a67890/page.htm" title="关于开展2026-2027学年学术研讨会的通知">关于开展2026-2027学年学术研讨会的通知</a></span>
@@ -67,19 +77,23 @@ void main() {
         </ul>
       ''';
 
-      final dept = DepartmentDirectory.byId('cs')!;
-      final items = DepartmentNoticeService.parseHtml(sampleHtml, dept);
+        final dept = DepartmentDirectory.byId('cs')!;
+        final items = DepartmentNoticeService.parseHtml(sampleHtml, dept);
 
-      expect(items.length, 2);
-      expect(items[0].title, '关于开展2026-2027学年学术研讨会的通知');
-      expect(items[0].date, '2026-11-15');
-      expect(items[0].url, 'https://ai.fudan.edu.cn/2026/1115/c12345a67890/page.htm');
-      expect(items[0].departmentId, 'cs');
+        expect(items.length, 2);
+        expect(items[0].title, '关于开展2026-2027学年学术研讨会的通知');
+        expect(items[0].date, '2026-11-15');
+        expect(
+          items[0].url,
+          'https://ai.fudan.edu.cn/2026/1115/c12345a67890/page.htm',
+        );
+        expect(items[0].departmentId, 'cs');
 
-      expect(items[1].title, '推免生综合素质考核实施办法公示');
-      expect(items[1].date, '2026-11-14');
-      expect(items[1].url, 'https://other.fudan.edu.cn/info/1.htm');
-    });
+        expect(items[1].title, '推免生综合素质考核实施办法公示');
+        expect(items[1].date, '2026-11-14');
+        expect(items[1].url, 'https://other.fudan.edu.cn/info/1.htm');
+      },
+    );
 
     test('getTileData formats TileFacts note and rows', () async {
       final service = DepartmentNoticeService.instance;
@@ -112,8 +126,8 @@ void main() {
       expect(tileData!.facts.value, '2');
       expect(tileData.facts.unit, '条');
       expect(tileData.facts.note, contains('人工智能前沿报告会'));
-      expect(tileData.facts.rows?.length, 1);
-      expect(tileData.facts.rows?.first.label, contains('世界经济论坛'));
+      expect(tileData.facts.rows.length, 1);
+      expect(tileData.facts.rows.first.label, contains('世界经济论坛'));
     });
   });
 

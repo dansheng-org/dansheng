@@ -7,23 +7,17 @@ import 'department_directory.dart';
 Future<List<String>?> showDepartmentSubscriptionSheet(
   BuildContext context, {
   required List<String> currentSelected,
-}) =>
-    showModalBottomSheet<List<String>>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (_) => DepartmentSubscriptionSheet(
-        initialSelected: currentSelected,
-      ),
-    );
+}) => showModalBottomSheet<List<String>>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  showDragHandle: true,
+  builder: (_) => DepartmentSubscriptionSheet(initialSelected: currentSelected),
+);
 
 /// Sheet allowing the user to select which departments to receive notices from.
 class DepartmentSubscriptionSheet extends StatefulWidget {
-  const DepartmentSubscriptionSheet({
-    super.key,
-    required this.initialSelected,
-  });
+  const DepartmentSubscriptionSheet({super.key, required this.initialSelected});
 
   final List<String> initialSelected;
 
@@ -137,7 +131,9 @@ class _DepartmentSubscriptionSheetState
                     : null,
                 isDense: true,
                 filled: true,
-                fillColor: colors.surfaceContainerHighest.withValues(alpha: 0.4),
+                fillColor: colors.surfaceContainerHighest.withValues(
+                  alpha: 0.4,
+                ),
                 contentPadding: const EdgeInsets.symmetric(
                   vertical: 10,
                   horizontal: 14,
@@ -190,7 +186,8 @@ class _DepartmentSubscriptionSheetState
                 ),
                 const Spacer(),
                 FilledButton(
-                  onPressed: () => Navigator.of(context).pop(_selected.toList()),
+                  onPressed: () =>
+                      Navigator.of(context).pop(_selected.toList()),
                   child: const Text('确认保存'),
                 ),
               ],

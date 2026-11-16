@@ -432,7 +432,12 @@ class DepartmentDirectory {
       all.where((d) => d.category == category).toList();
 
   /// Default subscribed departments when first configured.
-  static const List<String> defaultDepartmentIds = ['cs', 'econ', 'basicmed', 'math'];
+  static const List<String> defaultDepartmentIds = [
+    'cs',
+    'econ',
+    'basicmed',
+    'math',
+  ];
 
   /// Parses a comma-separated options string into a validated list of department IDs.
   static List<String> parseSubscribed(String? raw) {

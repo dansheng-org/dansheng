@@ -41,7 +41,11 @@ enum EHallTile {
   grades('grades', '课程成绩', Icons.checklist_outlined),
   gpa('gpa', '学分与绩点', Icons.school_outlined),
   exams('exams', '考试安排', Icons.event_note_outlined),
-  departmentNotices('department_notices', '院系通知', Icons.mark_email_unread_outlined);
+  departmentNotices(
+    'department_notices',
+    '院系通知',
+    Icons.mark_email_unread_outlined,
+  );
 
   const EHallTile(this.id, this.title, this.icon);
 
