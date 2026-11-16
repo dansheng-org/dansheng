@@ -25,6 +25,7 @@ class HoleDetailPage extends StatefulWidget {
   /// Locate an already-loaded floor by its global ID after the initial fetch.
   /// An unloaded target produces a notice without changing pagination.
   final int? initialFloorId;
+  final bool autoLoadOnScroll;
 
   const HoleDetailPage({
     super.key,
@@ -32,6 +33,7 @@ class HoleDetailPage extends StatefulWidget {
     required this.holeId,
     this.initialHole,
     this.initialFloorId,
+    this.autoLoadOnScroll = true,
   });
 
   @override
@@ -66,10 +68,23 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
       ForumFloorCache.instance.putHole(_hole!);
     }
     _loadInitialData();
+    _scrollController.addListener(_onDetailScroll);
+  }
+
+  void _onDetailScroll() {
+    if (!widget.autoLoadOnScroll || !_scrollController.hasClients) return;
+    final current = _scrollController.position.pixels;
+    final max = _scrollController.position.maxScrollExtent;
+    if (current > 0 && current >= max - 300) {
+      if (!_isLoadingMore && _hasMore && !_isLoading) {
+        _loadMoreFloors();
+      }
+    }
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onDetailScroll);
     _highlightTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
@@ -293,6 +308,34 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
             tooltip: '刷新',
             onPressed: _loadInitialData,
           ),
+          IconButton(
+            icon: Icon(
+              ForumPreferences.instance.isFavorite(widget.holeId)
+                  ? Icons.star_rounded
+                  : Icons.star_outline_rounded,
+              color: ForumPreferences.instance.isFavorite(widget.holeId)
+                  ? Colors.amber
+                  : null,
+            ),
+            tooltip: ForumPreferences.instance.isFavorite(widget.holeId)
+                ? '取消收藏'
+                : '收藏此帖',
+            onPressed: () {
+              if (_hole != null) {
+                ForumPreferences.instance.toggleFavorite(_hole!);
+                setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      ForumPreferences.instance.isFavorite(widget.holeId)
+                          ? '已收藏该帖子'
+                          : '已取消收藏',
+                    ),
+                  ),
+                );
+              }
+            },
+          ),
           PopupMenuButton<String>(
             tooltip: '更多选项',
             onSelected: (val) {
@@ -469,6 +512,7 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
       floor: floor,
       firstFloor: firstFloor,
       index: index,
+      onTap: () => _openReplyDialog(quoteFloor: floor),
       onTapHole: _openHole,
       onTapFloor: _locateFloor,
       onQuoteReply: (f) => _openReplyDialog(quoteFloor: f),

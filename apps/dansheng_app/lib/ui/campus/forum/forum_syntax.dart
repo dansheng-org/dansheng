@@ -38,10 +38,7 @@ class ForumMentionSyntax extends md.InlineSyntax {
   bool onMatch(md.InlineParser parser, Match match) {
     final floor = match[1] == '##' || match[3] == 'floorMention';
     final id = match[2] ?? match[4]!;
-    parser.addNode(
-      md.Element.text('a', '${floor ? '##' : '#'}$id')
-        ..attributes['href'] = 'dansheng-${floor ? 'floor' : 'hole'}:$id',
-    );
+    parser.addNode(md.Element.text(floor ? 'floorMention' : 'holeMention', id));
     return true;
   }
 }

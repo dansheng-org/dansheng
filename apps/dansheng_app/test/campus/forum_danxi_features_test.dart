@@ -4,6 +4,7 @@
 import 'package:dansheng_app/ui/campus/forum/forum_chips.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_filter_settings.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_mention_support.dart';
+import 'package:dansheng_app/ui/campus/forum/forum_messages_page.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -202,6 +203,55 @@ void main() {
         await tester.pumpAndSettle();
         expect(jumped, isTrue);
         expect(quoted, isFalse);
+      },
+    );
+  });
+
+  group('Favorite holes and ForumNotificationMessage tests', () {
+    const testHole = TeaHole(
+      holeId: 555,
+      divisionId: 1,
+      tags: ['收藏测试'],
+      floors: TeaFloorPreview(
+        firstFloor: TeaFloor(floorId: 55, holeId: 555, content: '收藏测试正文'),
+      ),
+    );
+
+    test('favorite holes toggle and cache in ForumPreferences', () {
+      final prefs = ForumPreferences.instance;
+      expect(prefs.isFavorite(555), isFalse);
+
+      prefs.toggleFavorite(testHole);
+      expect(prefs.isFavorite(555), isTrue);
+      expect(prefs.favoriteHolesList.map((h) => h.holeId), contains(555));
+
+      prefs.toggleFavorite(testHole);
+      expect(prefs.isFavorite(555), isFalse);
+      expect(
+        prefs.favoriteHolesList.map((h) => h.holeId),
+        isNot(contains(555)),
+      );
+    });
+
+    test(
+      'ForumNotificationMessage parses reply and mention types from JSON',
+      () {
+        final jsonReply = {
+          'message_id': 10,
+          'code': 'reply',
+          'message': '有人回复了你的帖子',
+          'hole_id': 123,
+          'floor_id': 456,
+          'has_read': false,
+          'time_created': '2026-11-01T12:00:00Z',
+        };
+        final msg = ForumNotificationMessage.fromJson(jsonReply);
+        expect(msg.messageId, 10);
+        expect(msg.code, 'reply');
+        expect(msg.holeId, 123);
+        expect(msg.floorId, 456);
+        expect(msg.hasRead, isFalse);
+        expect(msg.message, '有人回复了你的帖子');
       },
     );
   });

@@ -528,10 +528,14 @@ void main() {
         _paginationPage(method, 10, 2),
       ];
       final Widget page = switch (method) {
-        'community.tea.holes' => ForumPage(controller: controller),
+        'community.tea.holes' => ForumPage(
+          controller: controller,
+          autoLoadOnScroll: false,
+        ),
         'community.tea.floors' => HoleDetailPage(
           controller: controller,
           holeId: 101,
+          autoLoadOnScroll: false,
         ),
         _ => ForumSearchPage(controller: controller),
       };
@@ -596,10 +600,9 @@ void main() {
       expect(find.widgetWithText(ChoiceChip, '合成分区'), findsOneWidget);
       expect(find.widgetWithText(ChoiceChip, '校园生活'), findsOneWidget);
 
-      // 2. Verify pinned post is shown with "置顶" badge
-      expect(find.text('置顶'), findsOneWidget);
-      expect(find.textContaining('置顶公告'), findsOneWidget);
-      expect(find.text('#999'), findsOneWidget);
+      // 2. Official pinned posts are NOT shown in 全站 (DanXi behavior)
+      expect(find.text('置顶'), findsNothing);
+      expect(find.text('#999'), findsNothing);
 
       // 3. Verify normal holes are shown with tags and sanitized preview
       expect(find.text('#101'), findsOneWidget);
@@ -616,6 +619,11 @@ void main() {
       // 5. Switch division to "合成分区"
       await tester.tap(find.widgetWithText(ChoiceChip, '合成分区'));
       await tester.pumpAndSettle();
+
+      // Pinned post is shown with "置顶" badge inside specific division
+      expect(find.text('置顶'), findsOneWidget);
+      expect(find.textContaining('置顶公告'), findsOneWidget);
+      expect(find.text('#999'), findsOneWidget);
 
       // Verify holes fetch called with division: 1
       final lastHolesCall = mockBridge.invocationLog.lastWhere(

@@ -51,6 +51,12 @@ String cleanPreviewText(String? content) {
           ? '[表情]'
           : '[图片]';
     }
+    if (node.tag == 'floorMention') {
+      return mentions ? '##${node.textContent}' : '';
+    }
+    if (node.tag == 'holeMention') {
+      return mentions ? '#${node.textContent}' : '';
+    }
     if (node.tag == 'a' &&
         (node.attributes['href'] ?? '').startsWith('dansheng-') &&
         !mentions) {

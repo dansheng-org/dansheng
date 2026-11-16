@@ -6,6 +6,7 @@ import '../../core/dansheng_state.dart';
 import 'forum_editor_dialog.dart';
 import 'forum_filter_settings.dart';
 import 'forum_mention_support.dart';
+import 'forum_messages_page.dart';
 import 'forum_models.dart';
 import 'forum_pagination.dart';
 import 'forum_search_page.dart';
@@ -16,8 +17,13 @@ import 'hole_detail_page.dart';
 /// Main Forum tab/page providing DanXi-style OpenTreeHole campus community experience.
 class ForumPage extends StatefulWidget {
   final DanshengController controller;
+  final bool autoLoadOnScroll;
 
-  const ForumPage({super.key, required this.controller});
+  const ForumPage({
+    super.key,
+    required this.controller,
+    this.autoLoadOnScroll = true,
+  });
 
   @override
   State<ForumPage> createState() => _ForumPageState();
@@ -35,8 +41,11 @@ class _ForumPageState extends State<ForumPage> {
   bool _isLoadingMore = false;
   bool _isLoggingIn = false;
   bool _hasMore = true;
+  bool _showFavoritesOnly = false;
   String? _errorMessage;
   bool _authRequired = false;
+  String? _activeTagFilter;
+  final ScrollController _scrollController = ScrollController();
 
   static const int _pageSize = forumPageSize;
 
@@ -44,18 +53,40 @@ class _ForumPageState extends State<ForumPage> {
   void initState() {
     super.initState();
     _service = ForumService(CampusApi(widget.controller.client));
+    _scrollController.addListener(_onScroll);
+    _activeTagFilter = ForumPreferences.instance.selectedTagFilter;
     ForumPreferences.instance.addListener(_onPrefsChanged);
     _loadInitialData();
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     ForumPreferences.instance.removeListener(_onPrefsChanged);
     super.dispose();
   }
 
+  void _onScroll() {
+    if (!widget.autoLoadOnScroll || !_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.position.pixels;
+    if (currentScroll > 0 && currentScroll >= maxScroll - 300) {
+      if (!_isLoadingMore && _hasMore && !_isLoading && !_showFavoritesOnly) {
+        _loadMoreHoles();
+      }
+    }
+  }
+
   void _onPrefsChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final newTag = ForumPreferences.instance.selectedTagFilter;
+    if (newTag != _activeTagFilter) {
+      _activeTagFilter = newTag;
+      _refreshHoles(showLoading: true);
+    } else {
+      setState(() {});
+    }
   }
 
   /// Initial load: fetch divisions, then fetch holes.
@@ -85,6 +116,7 @@ class _ForumPageState extends State<ForumPage> {
       final holes = await _service.fetchHoles(
         divisionId: _selectedDivisionId,
         before: null,
+        tag: _showFavoritesOnly ? null : _activeTagFilter,
         pageSize: _pageSize,
         order: _sortOrder,
       );
@@ -99,6 +131,9 @@ class _ForumPageState extends State<ForumPage> {
         });
         ForumFloorCache.instance.putHoles(holes);
         ForumFloorCache.instance.putHoles(_pinnedHoles);
+        for (final h in holes) {
+          ForumPreferences.instance.cacheFavoriteHole(h);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -127,6 +162,7 @@ class _ForumPageState extends State<ForumPage> {
       final holes = await _service.fetchHoles(
         divisionId: _selectedDivisionId,
         before: null,
+        tag: _showFavoritesOnly ? null : _activeTagFilter,
         pageSize: _pageSize,
         order: _sortOrder,
       );
@@ -141,6 +177,9 @@ class _ForumPageState extends State<ForumPage> {
         });
         ForumFloorCache.instance.putHoles(holes);
         ForumFloorCache.instance.putHoles(_pinnedHoles);
+        for (final h in holes) {
+          ForumPreferences.instance.cacheFavoriteHole(h);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -174,6 +213,7 @@ class _ForumPageState extends State<ForumPage> {
       final nextHoles = await _service.fetchHoles(
         divisionId: _selectedDivisionId,
         before: beforeDt,
+        tag: _showFavoritesOnly ? null : _activeTagFilter,
         pageSize: _pageSize,
         order: _sortOrder,
       );
@@ -191,6 +231,9 @@ class _ForumPageState extends State<ForumPage> {
           _isLoadingMore = false;
         });
         ForumFloorCache.instance.putHoles(nextHoles);
+        for (final h in nextHoles) {
+          ForumPreferences.instance.cacheFavoriteHole(h);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -252,26 +295,18 @@ class _ForumPageState extends State<ForumPage> {
     return null;
   }
 
-  /// Get pinned holes for the current division (or all pinned holes in 全站 mode).
+  /// Get pinned holes for the current division (never shown in 全站 or favorites mode).
   List<TeaHole> get _pinnedHoles {
-    if (_selectedDivisionId != null) {
+    if (_showFavoritesOnly) return const [];
+    if (_selectedDivisionId != null && _selectedDivisionId! > 0) {
       final div = _divisions.firstWhere(
         (d) => d.divisionId == _selectedDivisionId,
         orElse: () => TeaDivision(divisionId: _selectedDivisionId!, name: ''),
       );
       return div.pinned;
     } else {
-      // Gather pinned from all divisions
-      final List<TeaHole> allPinned = [];
-      final Set<int> seen = {};
-      for (final d in _divisions) {
-        for (final p in d.pinned) {
-          if (seen.add(p.holeId)) {
-            allPinned.add(p);
-          }
-        }
-      }
-      return allPinned;
+      // 官方置顶的帖子不显示在全站而是只会显示在各个分区的置顶
+      return const [];
     }
   }
 
@@ -279,13 +314,34 @@ class _ForumPageState extends State<ForumPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('复旦树洞'),
+        title: Text(_showFavoritesOnly ? '我的收藏' : '复旦树洞'),
         leading: IconButton(
-          tooltip: '登录树洞账号',
-          icon: const Icon(Icons.account_circle_outlined),
-          onPressed: _isLoggingIn ? null : _handleLogin,
+          tooltip: '消息通知',
+          icon: const Icon(Icons.notifications_none_rounded),
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (ctx) =>
+                    ForumMessagesPage(controller: widget.controller),
+              ),
+            );
+          },
         ),
         actions: [
+          // Favorites toggle button
+          IconButton(
+            icon: Icon(
+              _showFavoritesOnly
+                  ? Icons.star_rounded
+                  : Icons.star_outline_rounded,
+              color: _showFavoritesOnly ? Colors.amber : null,
+            ),
+            tooltip: _showFavoritesOnly ? '查看全站帖子' : '收藏的帖子',
+            onPressed: () {
+              setState(() => _showFavoritesOnly = !_showFavoritesOnly);
+              if (!_showFavoritesOnly) _refreshHoles(showLoading: true);
+            },
+          ),
           // Filter settings button
           IconButton(
             icon: const Icon(Icons.tune_rounded),
@@ -328,11 +384,19 @@ class _ForumPageState extends State<ForumPage> {
             tooltip: '刷新',
             onPressed: () => _refreshHoles(showLoading: true),
           ),
+          // Login account button
+          IconButton(
+            tooltip: '登录树洞账号',
+            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: _isLoggingIn ? null : _handleLogin,
+          ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: _buildDivisionFilterBar(),
-        ),
+        bottom: _showFavoritesOnly
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(48),
+                child: _buildDivisionFilterBar(),
+              ),
       ),
       body: _buildBody(),
       floatingActionButton: FloatingActionButton.extended(
@@ -468,6 +532,85 @@ class _ForumPageState extends State<ForumPage> {
     }
 
     final prefs = ForumPreferences.instance;
+
+    // Favorited posts mode
+    if (_showFavoritesOnly) {
+      final favHoles = prefs.favoriteHolesList;
+      if (favHoles.isEmpty) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.star_outline_rounded,
+                  size: 56,
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '暂无收藏的帖子',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '在任意帖子详情右上角点击五角星即可收藏',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () => setState(() => _showFavoritesOnly = false),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  label: const Text('返回全站帖子'),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      return ListView.builder(
+        padding: const EdgeInsets.only(top: 8, bottom: 80),
+        itemCount: 1 + favHoles.length,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.star_rounded, size: 16, color: Colors.amber),
+                  const SizedBox(width: 6),
+                  Text(
+                    '我的收藏 (${favHoles.length})',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => setState(() => _showFavoritesOnly = false),
+                    child: const Text('退出收藏'),
+                  ),
+                ],
+              ),
+            );
+          }
+          final h = favHoles[index - 1];
+          return TeaHoleCard(
+            hole: h,
+            divisionName: _getDivisionName(h.divisionId),
+            isPinned: false,
+            onTap: () => _openHoleDetail(h),
+            onTapTag: (tag) => prefs.setTagFilter(tag),
+          );
+        },
+      );
+    }
+
     final pinned = _pinnedHoles.where((h) => !prefs.shouldHideHole(h)).toList();
     final pinnedIds = _pinnedHoles.map((h) => h.holeId).toSet();
     final nonPinnedHoles = _holes
@@ -477,6 +620,7 @@ class _ForumPageState extends State<ForumPage> {
     return RefreshIndicator(
       onRefresh: () => _refreshHoles(showLoading: false),
       child: ListView.builder(
+        controller: _scrollController,
         padding: const EdgeInsets.only(top: 8, bottom: 80),
         itemCount:
             1 + pinned.length + nonPinnedHoles.length + (_hasMore ? 1 : 0),
@@ -514,17 +658,29 @@ class _ForumPageState extends State<ForumPage> {
             );
           }
 
-          // Load more indicator
+          // Load more indicator with infinite scroll support
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
             child: Center(
               child: _isLoadingMore
-                  ? const CircularProgressIndicator()
-                  : TextButton.icon(
-                      onPressed: _loadMoreHoles,
-                      icon: const Icon(Icons.expand_more_rounded),
-                      label: const Text('加载更多'),
-                    ),
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : (_hasMore
+                        ? TextButton.icon(
+                            onPressed: _loadMoreHoles,
+                            icon: const Icon(Icons.expand_more_rounded),
+                            label: const Text('加载更多'),
+                          )
+                        : Text(
+                            '已加载全部帖子',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          )),
             ),
           );
         },

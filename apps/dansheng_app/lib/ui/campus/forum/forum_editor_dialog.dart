@@ -585,6 +585,17 @@ class _ForumReplyDialogState extends State<ForumReplyDialog> {
   String? _successMessage;
   bool _isUncertainOutcome = false;
 
+  int? get _replyToFloorId {
+    final text = _contentController.text.trim();
+    if (text.startsWith('##')) {
+      final match = RegExp(r'^##(\d+)').firstMatch(text);
+      if (match != null) {
+        return int.tryParse(match.group(1)!);
+      }
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -715,7 +726,11 @@ class _ForumReplyDialogState extends State<ForumReplyDialog> {
                   Icon(Icons.reply_rounded, color: colorScheme.primary),
                   const SizedBox(width: 8),
                   Text(
-                    _isPreviewMode ? '回复确认与预览' : '回复 #${widget.holeId}',
+                    _isPreviewMode
+                        ? '回复确认与预览'
+                        : (_replyToFloorId != null
+                              ? '回复 ##$_replyToFloorId'
+                              : '回复 #${widget.holeId}'),
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
