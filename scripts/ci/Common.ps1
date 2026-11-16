@@ -27,7 +27,44 @@ function Get-DanshengCiLayout {
     $runtime = Assert-CiPlainPath (Join-Path $root "runtime/$env:GITHUB_RUN_ID/$env:GITHUB_JOB/$env:GITHUB_RUN_ATTEMPT")
     $lane = if ($env:GITHUB_REF -eq 'refs/heads/main' -and $env:GITHUB_EVENT_NAME -ne 'pull_request') { 'main' } else { 'checks' }
     $cache = Assert-CiPlainPath (Join-Path $root "cache/$lane/$env:GITHUB_JOB")
-    [pscustomobject]@{ root=$root; runtime=$runtime; cache=$cache; identity="$env:GITHUB_RUN_ID/$env:GITHUB_JOB/$env:GITHUB_RUN_ATTEMPT" }
+    [pscustomobject]@{ root=$root; runtime=$runtime; cache=$cache; lane=$lane; identity="$env:GITHUB_RUN_ID/$env:GITHUB_JOB/$env:GITHUB_RUN_ATTEMPT" }
+}
+
+# Compiled outputs kept across runs, one directory per lane, job and OS. A fresh
+# target per run recompiled every dependency and, on the Windows desktop runner,
+# recreated ~120 executables that each pay a launch-time reputation check (1-4 s,
+# not covered by Defender folder exclusions): ~20 min per native job. Cargo's
+# fingerprints keep reuse correct and its build-directory lock serializes
+# concurrent runners. The main and checks lanes never share outputs, and this
+# is not a dependency cache (nothing here is ever seeded or published).
+function Get-DanshengCiBuildCacheRoot($Layout) {
+    $os = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } else { 'linux' }
+    $job = [IO.Path]::GetFileName($Layout.cache)
+    Assert-CiPlainPath (Join-Path $Layout.root "build-cache/$($Layout.lane)/$job-$os")
+}
+
+# Release and publishing jobs always build from an empty per-run target, so a
+# published artifact never depends on outputs kept from earlier runs.
+function Test-DanshengCiKeepsBuildOutputs([string]$Role) { $Role -notin @('Release', 'Publish') }
+
+function Get-DanshengCiCargoTarget($Layout, [string]$Role) {
+    if (Test-DanshengCiKeepsBuildOutputs $Role) {
+        return Assert-CiPlainPath (Join-Path (Get-DanshengCiBuildCacheRoot $Layout) 'cargo-target')
+    }
+    Assert-CiPlainPath (Join-Path $Layout.runtime 'cargo-target')
+}
+
+# A kept build directory grows with every dependency and toolchain change;
+# start it over once it passes the budget instead of letting the disk fill.
+function Limit-DanshengCiBuildCache([string]$Path, [long]$MaxBytes) {
+    $full = Assert-CiPlainPath $Path
+    if (-not (Test-Path -LiteralPath $full)) { return }
+    $bytes = (Get-ChildItem -LiteralPath $full -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Measure-Object -Property Length -Sum).Sum
+    if ($bytes -gt $MaxBytes) {
+        Write-Host ("Kept build directory reached {0:N1} GiB; starting it over." -f ($bytes / 1GB))
+        Remove-Item -LiteralPath $full -Recurse -Force
+    }
 }
 
 function Assert-DanshengCiRuntime($Layout) {
