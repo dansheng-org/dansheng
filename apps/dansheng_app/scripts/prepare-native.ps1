@@ -15,6 +15,33 @@ $nativeCargoHome=Join-Path $RuntimeRoot 'cargo-home'
 if(-not(Test-Path -LiteralPath (Join-Path $nativeCargoHome 'registry') -PathType Container)){
     throw 'Offline Cargo cache is not initialized. Run Core tools/workspace/Initialize-DanshengTask.ps1 -Apply before prepare-native.'
 }
+# Cargo fingerprints record dependency source paths: with the same files under
+# a different CARGO_HOME every crate is rebuilt (measured: 236 crates). When CI
+# keeps the Rust outputs (DANSHENG_CI_NATIVE_TARGET_ROOT, SDK check only), use a
+# CARGO_HOME at a stable path beside them, topped up from this run's public
+# registry copy. Only registry/ (index, crate archives, unpacked sources) is
+# copied; files already present are left untouched so their timestamps hold.
+if($env:DANSHENG_CI_NATIVE_TARGET_ROOT){
+    $keptCargoHome=Join-Path $env:DANSHENG_CI_NATIVE_TARGET_ROOT 'cargo-home'
+    $registryFrom=Join-Path $nativeCargoHome 'registry'
+    $registryTo=Join-Path $keptCargoHome 'registry'
+    [void][IO.Directory]::CreateDirectory($registryTo)
+    $present=[Collections.Generic.Dictionary[string,long]]::new([StringComparer]::Ordinal)
+    foreach($file in [IO.Directory]::EnumerateFiles($registryTo,'*',[IO.SearchOption]::AllDirectories)){
+        $present[[IO.Path]::GetRelativePath($registryTo,$file)]=([IO.FileInfo]$file).Length
+    }
+    $copied=0
+    foreach($file in [IO.Directory]::EnumerateFiles($registryFrom,'*',[IO.SearchOption]::AllDirectories)){
+        $relative=[IO.Path]::GetRelativePath($registryFrom,$file)
+        $length=([IO.FileInfo]$file).Length
+        if($present.ContainsKey($relative) -and $present[$relative] -eq $length){continue}
+        $target=Join-Path $registryTo $relative
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+        [IO.File]::Copy($file,$target,$true);$copied++
+    }
+    Write-Host "Kept Cargo home: $copied new registry files."
+    $nativeCargoHome=$keptCargoHome
+}
 [void][IO.Directory]::CreateDirectory($ArtifactDirectory)
 [void][IO.Directory]::CreateDirectory($RuntimeRoot)
 $nativeEnvNames=@('CARGO_HOME','CARGO_TARGET_DIR','DANSHENG_CORE_ROOT','DANSHENG_TASK_RUNTIME','PATH','RUSTUP_HOME','RUSTUP_TOOLCHAIN','SOURCE_DATE_EPOCH','CC_SHELL_ESCAPED_FLAGS','LIBCLANG_PATH','GRADLE_USER_HOME','CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER','CC_x86_64_pc_windows_gnu','AR_x86_64_pc_windows_gnu')
