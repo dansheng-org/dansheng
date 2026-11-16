@@ -58,9 +58,8 @@ jobs:
         if: ${{ !inputs.smoke }}
       - name: Worktree workflow integration fixtures
         if: ${{ !inputs.smoke }}
-        run: |
-          ./tools/workspace/tests/Test-Workspace.ps1 -OutputDirectory (Join-Path $env:DANSHENG_TASK_RUNTIME 'workspace-fixtures')
-          ./tools/workspace/tests/Test-Monorepo.ps1 -OutputDirectory (Join-Path $env:DANSHENG_TASK_RUNTIME 'monorepo-fixtures')
+        # Both suites run side by side in separate processes (see the script).
+        run: ../scripts/ci/Invoke-WorkspaceFixtures.ps1 -CoreRoot . -OutputRoot $env:DANSHENG_TASK_RUNTIME
       - name: Dependency cache isolation fixtures
         if: runner.os == 'Windows' && !inputs.smoke
         run: ./tools/workspace/tests/Test-Environment.ps1 -OutputRoot (Join-Path $env:DANSHENG_TASK_RUNTIME 'environment-fixtures')
