@@ -30,17 +30,26 @@ function Get-DanshengCiLayout {
     [pscustomobject]@{ root=$root; runtime=$runtime; cache=$cache; lane=$lane; identity="$env:GITHUB_RUN_ID/$env:GITHUB_JOB/$env:GITHUB_RUN_ATTEMPT" }
 }
 
-# Where Cargo writes build outputs for a role. Everything stays in the run's own
-# runtime, except Windows native checks: that runner is a desktop machine where
-# every newly created executable pays a launch-time reputation check (1-4 s,
-# not covered by Defender folder exclusions), and a fresh target recreated ~120
-# executables (build scripts and test harnesses) per run, ~20 min per job.
-# There, one build directory per lane is kept across runs. Cargo's fingerprints
-# keep it correct and its build-directory lock serializes concurrent users; the
-# main and checks lanes never share outputs, and it is not a dependency cache.
+# Compiled outputs kept across runs, one directory per lane, job and OS. A fresh
+# target per run recompiled every dependency and, on the Windows desktop runner,
+# recreated ~120 executables that each pay a launch-time reputation check (1-4 s,
+# not covered by Defender folder exclusions): ~20 min per native job. Cargo's
+# fingerprints keep reuse correct and its build-directory lock serializes
+# concurrent runners. The main and checks lanes never share outputs, and this
+# is not a dependency cache (nothing here is ever seeded or published).
+function Get-DanshengCiBuildCacheRoot($Layout) {
+    $os = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } else { 'linux' }
+    $job = [IO.Path]::GetFileName($Layout.cache)
+    Assert-CiPlainPath (Join-Path $Layout.root "build-cache/$($Layout.lane)/$job-$os")
+}
+
+# Release and publishing jobs always build from an empty per-run target, so a
+# published artifact never depends on outputs kept from earlier runs.
+function Test-DanshengCiKeepsBuildOutputs([string]$Role) { $Role -notin @('Release', 'Publish') }
+
 function Get-DanshengCiCargoTarget($Layout, [string]$Role) {
-    if ($IsWindows -and $Role -eq 'Native') {
-        return Assert-CiPlainPath (Join-Path $Layout.root "build-cache/$($Layout.lane)/native-windows/cargo-target")
+    if (Test-DanshengCiKeepsBuildOutputs $Role) {
+        return Assert-CiPlainPath (Join-Path (Get-DanshengCiBuildCacheRoot $Layout) 'cargo-target')
     }
     Assert-CiPlainPath (Join-Path $Layout.runtime 'cargo-target')
 }

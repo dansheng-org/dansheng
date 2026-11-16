@@ -27,7 +27,16 @@ $taskHome = Assert-CiPlainPath (Join-Path $layout.runtime 'home')
 . (Join-Path $PSScriptRoot '../../apps/dansheng_app/scripts/build-parallelism.ps1')
 $parallelism = Get-DanshengBuildParallelism
 $cargoTarget = Get-DanshengCiCargoTarget $layout $Role
-if (-not $cargoTarget.StartsWith($layout.runtime)) { Limit-DanshengCiBuildCache $cargoTarget 40GB }
+# A full workspace test build is ~4 GiB; each kept directory starts over above 10 GiB.
+$buildCacheBudget = 10GB
+if (Test-DanshengCiKeepsBuildOutputs $Role) { Limit-DanshengCiBuildCache $cargoTarget $buildCacheBudget }
+# The Android SDK check cross-compiles into cargo-arm64/cargo-x86 under this
+# root (prepare-native.ps1); release builds keep using their per-run runtime.
+$nativeTargetRoot = $null
+if ($Role -eq 'AndroidSource') {
+    $nativeTargetRoot = Get-DanshengCiBuildCacheRoot $layout
+    foreach ($name in @('cargo-arm64', 'cargo-x86')) { Limit-DanshengCiBuildCache (Join-Path $nativeTargetRoot $name) $buildCacheBudget }
+}
 $values = @{
     DANSHENG_CI_ROOT=$layout.root; DANSHENG_TASK_RUNTIME=$layout.runtime; DANSHENG_CI_CACHE_ROOT=$layout.cache
     DANSHENG_TASK_HOME=$taskHome
@@ -49,6 +58,7 @@ $values = @{
     GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=$($parallelism.gradle)"
     JAVA_TOOL_OPTIONS=('"-Duser.home={0}"' -f $taskHome.Replace('\','/'))
 }
+if ($nativeTargetRoot) { $values.DANSHENG_CI_NATIVE_TARGET_ROOT = $nativeTargetRoot }
 foreach ($name in $values.Keys) {
     [Environment]::SetEnvironmentVariable($name, $values[$name], 'Process')
     if ($name -notin @('GIT_CONFIG_GLOBAL','npm_config_userconfig','GIT_CONFIG_NOSYSTEM','GIT_TERMINAL_PROMPT','GRADLE_OPTS','JAVA_TOOL_OPTIONS','CARGO_BUILD_JOBS','DANSHENG_GRADLE_WORKERS','CMAKE_BUILD_PARALLEL_LEVEL')) {
@@ -59,6 +69,8 @@ foreach ($name in $values.Keys) {
 foreach ($name in @('GIT_CONFIG_GLOBAL','npm_config_userconfig')) { [IO.File]::WriteAllText($values[$name], '') }
 # Drop source/SDK selections inherited from an interactive developer session.
 $resetNames = @('DANSHENG_CORE_ROOT','DANSHENG_CORE_TOOLS_ROOT','DANSHENG_CORE_SDK_DIR','DANSHENG_CORE_LOCK_FILE','DANSHENG_WORKSPACE_ROOT','DANSHENG_BETA_STORE','DANSHENG_BETA_PASSWORD','JAVA_OPTS','JDK_JAVA_OPTIONS','_JAVA_OPTIONS')
+# Only the SDK check may build into kept outputs; never inherit that into a release.
+if (-not $nativeTargetRoot) { $resetNames += 'DANSHENG_CI_NATIVE_TARGET_ROOT' }
 foreach ($name in $resetNames) {
     [Environment]::SetEnvironmentVariable($name, $null)
     Add-Content -LiteralPath $env:GITHUB_ENV -Value "$name=" -Encoding utf8

@@ -68,24 +68,27 @@ try {
     $global:ciPermissionCalls = [Collections.Generic.List[object]]::new()
     function global:chmod { $global:ciPermissionCalls.Add(@($args)); $global:LASTEXITCODE = 0 }
     $layout = Get-DanshengCiLayout
-    # Build outputs: per-run everywhere, except a per-lane kept directory for
-    # Windows native checks (see Get-DanshengCiCargoTarget).
+    # Build outputs: kept per lane/job/OS for checks; releases build from empty.
     function Same([string]$a, [string]$b) { [IO.Path]::GetFullPath($a) -eq [IO.Path]::GetFullPath($b) }
-    Assert ((Get-DanshengCiCargoTarget $layout 'Publish').StartsWith($runtime)) 'Non-native build outputs left the runtime.'
-    $nativeTarget = Get-DanshengCiCargoTarget $layout 'Native'
+    $os = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } else { 'linux' }
     $keptRoot = Join-Path $env:DANSHENG_CI_ROOT 'build-cache'
-    if ($IsWindows) {
-        Assert (Same $nativeTarget (Join-Path $keptRoot 'main/native-windows/cargo-target')) 'Windows native checks lost their kept main-lane build directory.'
-        Assert (-not $nativeTarget.StartsWith((Join-Path $env:DANSHENG_CI_ROOT 'cache'))) 'Compiled outputs entered a dependency cache.'
-        $savedRef = $env:GITHUB_REF; $savedEvent = $env:GITHUB_EVENT_NAME
-        try {
-            $env:GITHUB_REF = 'refs/pull/7/merge'; $env:GITHUB_EVENT_NAME = 'pull_request'
-            $checksTarget = Get-DanshengCiCargoTarget (Get-DanshengCiLayout) 'Native'
-            Assert (Same $checksTarget (Join-Path $keptRoot 'checks/native-windows/cargo-target')) 'Pull requests share build outputs with main.'
-        } finally { $env:GITHUB_REF = $savedRef; $env:GITHUB_EVENT_NAME = $savedEvent }
-    } else {
-        Assert ($nativeTarget.StartsWith($runtime)) 'Linux native build outputs left the runtime.'
+    foreach ($role in @('Release', 'Publish')) {
+        Assert ((Get-DanshengCiCargoTarget $layout $role).StartsWith($runtime)) "$role build outputs left the per-run runtime."
     }
+    foreach ($role in @('Native', 'Android', 'AndroidSource')) {
+        $target = Get-DanshengCiCargoTarget $layout $role
+        Assert (Same $target (Join-Path $keptRoot "main/publish-$os/cargo-target")) "$role lost its kept main-lane build directory."
+        Assert (-not $target.StartsWith((Join-Path $env:DANSHENG_CI_ROOT 'cache'))) 'Compiled outputs entered a dependency cache.'
+    }
+    $savedRef = $env:GITHUB_REF; $savedEvent = $env:GITHUB_EVENT_NAME
+    try {
+        $env:GITHUB_REF = 'refs/pull/7/merge'; $env:GITHUB_EVENT_NAME = 'pull_request'
+        $checksTarget = Get-DanshengCiCargoTarget (Get-DanshengCiLayout) 'Native'
+        Assert (Same $checksTarget (Join-Path $keptRoot "checks/publish-$os/cargo-target")) 'Pull requests share build outputs with main.'
+    } finally { $env:GITHUB_REF = $savedRef; $env:GITHUB_EVENT_NAME = $savedEvent }
+    # This Publish-role initialization must not hand a kept Android root to anything.
+    Assert (-not $env:DANSHENG_CI_NATIVE_TARGET_ROOT) 'A release-side role inherited kept Android outputs.'
+    Assert ((Get-Content -LiteralPath $env:GITHUB_ENV -Raw) -match '(?m)^DANSHENG_CI_NATIVE_TARGET_ROOT=\s*$') 'Kept Android output root was not reset for later steps.'
     $kept = Join-Path $fixture 'kept-target'
     [void][IO.Directory]::CreateDirectory($kept)
     [IO.File]::WriteAllBytes((Join-Path $kept 'artifact.bin'), [byte[]]::new(4096))

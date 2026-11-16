@@ -38,6 +38,10 @@ $jni = Join-Path $ArtifactDirectory 'jni'
 $short = 'x86_64'
 $staging = New-Item -ItemType Directory -Force -Path (Join-Path $jni $short)
 $armDir = New-Item -ItemType Directory -Force -Path (Join-Path $jni 'arm64-v8a')
+# CI checks may keep the cross-compiled Rust outputs across runs
+# (DANSHENG_CI_NATIVE_TARGET_ROOT, set only for the SDK check); release builds
+# and local tasks compile under their own runtime.
+$nativeTargetRoot=if($env:DANSHENG_CI_NATIVE_TARGET_ROOT){$env:DANSHENG_CI_NATIVE_TARGET_ROOT}else{$RuntimeRoot}
 $coreGradleOutput=Join-Path $RuntimeRoot 'core-android-build'
 $coreCmakeOutput=Join-Path $RuntimeRoot 'core-cmake'
 $coreBuildWorkspace=Join-Path $RuntimeRoot 'core-android-project'
@@ -71,7 +75,7 @@ try {
     # Build product-specific feature sets in separate caches, retaining the historical Core receipts.
     . ./scripts/android-env.ps1 -Architecture aarch64
     $env:CARGO_HOME=$nativeCargoHome
-    $env:CARGO_TARGET_DIR = Join-Path $RuntimeRoot 'cargo-arm64'
+    $env:CARGO_TARGET_DIR = Join-Path $nativeTargetRoot 'cargo-arm64'
     $env:SOURCE_DATE_EPOCH = '0'
     $env:CFLAGS_aarch64_linux_android = Get-DanshengNativePrefixFlags -TargetDirectory $env:CARGO_TARGET_DIR
     $env:CC_SHELL_ESCAPED_FLAGS = '1'
@@ -81,7 +85,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'aarch64-linux-android/release/libdansheng_ffi.so') -Destination $armSo
     . ./scripts/android-env.ps1 -Architecture x86_64
     $env:CARGO_HOME=$nativeCargoHome
-    $env:CARGO_TARGET_DIR = Join-Path $RuntimeRoot 'cargo-x86'
+    $env:CARGO_TARGET_DIR = Join-Path $nativeTargetRoot 'cargo-x86'
     cargo build -p dansheng-ffi --target x86_64-linux-android --features campus-webvpn --locked --offline -j $nativeParallelism.cargo
     if($LASTEXITCODE -ne 0){throw 'Rust x86_64 build failed'}
     $debug = Join-Path $env:CARGO_TARGET_DIR 'x86_64-linux-android/debug/libdansheng_ffi.so'
