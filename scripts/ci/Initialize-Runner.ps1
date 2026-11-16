@@ -26,10 +26,12 @@ $env:DANSHENG_CI_CACHE_ROOT = $layout.cache
 $taskHome = Assert-CiPlainPath (Join-Path $layout.runtime 'home')
 . (Join-Path $PSScriptRoot '../../apps/dansheng_app/scripts/build-parallelism.ps1')
 $parallelism = Get-DanshengBuildParallelism
+$cargoTarget = Get-DanshengCiCargoTarget $layout $Role
+if (-not $cargoTarget.StartsWith($layout.runtime)) { Limit-DanshengCiBuildCache $cargoTarget 40GB }
 $values = @{
     DANSHENG_CI_ROOT=$layout.root; DANSHENG_TASK_RUNTIME=$layout.runtime; DANSHENG_CI_CACHE_ROOT=$layout.cache
     DANSHENG_TASK_HOME=$taskHome
-    CARGO_HOME=(Join-Path $layout.cache 'cargo-home'); CARGO_TARGET_DIR=(Join-Path $layout.runtime 'cargo-target')
+    CARGO_HOME=(Join-Path $layout.cache 'cargo-home'); CARGO_TARGET_DIR=$cargoTarget
     PUB_CACHE=(Join-Path $layout.cache 'pub'); GRADLE_USER_HOME=(Join-Path $layout.cache 'gradle')
     npm_config_cache=(Join-Path $layout.cache 'npm'); npm_config_userconfig=(Join-Path $layout.runtime 'home/.npmrc')
     GH_CONFIG_DIR=(Join-Path $layout.runtime 'home/gh')

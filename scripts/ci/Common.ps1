@@ -27,7 +27,35 @@ function Get-DanshengCiLayout {
     $runtime = Assert-CiPlainPath (Join-Path $root "runtime/$env:GITHUB_RUN_ID/$env:GITHUB_JOB/$env:GITHUB_RUN_ATTEMPT")
     $lane = if ($env:GITHUB_REF -eq 'refs/heads/main' -and $env:GITHUB_EVENT_NAME -ne 'pull_request') { 'main' } else { 'checks' }
     $cache = Assert-CiPlainPath (Join-Path $root "cache/$lane/$env:GITHUB_JOB")
-    [pscustomobject]@{ root=$root; runtime=$runtime; cache=$cache; identity="$env:GITHUB_RUN_ID/$env:GITHUB_JOB/$env:GITHUB_RUN_ATTEMPT" }
+    [pscustomobject]@{ root=$root; runtime=$runtime; cache=$cache; lane=$lane; identity="$env:GITHUB_RUN_ID/$env:GITHUB_JOB/$env:GITHUB_RUN_ATTEMPT" }
+}
+
+# Where Cargo writes build outputs for a role. Everything stays in the run's own
+# runtime, except Windows native checks: that runner is a desktop machine where
+# every newly created executable pays a launch-time reputation check (1-4 s,
+# not covered by Defender folder exclusions), and a fresh target recreated ~120
+# executables (build scripts and test harnesses) per run, ~20 min per job.
+# There, one build directory per lane is kept across runs. Cargo's fingerprints
+# keep it correct and its build-directory lock serializes concurrent users; the
+# main and checks lanes never share outputs, and it is not a dependency cache.
+function Get-DanshengCiCargoTarget($Layout, [string]$Role) {
+    if ($IsWindows -and $Role -eq 'Native') {
+        return Assert-CiPlainPath (Join-Path $Layout.root "build-cache/$($Layout.lane)/native-windows/cargo-target")
+    }
+    Assert-CiPlainPath (Join-Path $Layout.runtime 'cargo-target')
+}
+
+# A kept build directory grows with every dependency and toolchain change;
+# start it over once it passes the budget instead of letting the disk fill.
+function Limit-DanshengCiBuildCache([string]$Path, [long]$MaxBytes) {
+    $full = Assert-CiPlainPath $Path
+    if (-not (Test-Path -LiteralPath $full)) { return }
+    $bytes = (Get-ChildItem -LiteralPath $full -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Measure-Object -Property Length -Sum).Sum
+    if ($bytes -gt $MaxBytes) {
+        Write-Host ("Kept build directory reached {0:N1} GiB; starting it over." -f ($bytes / 1GB))
+        Remove-Item -LiteralPath $full -Recurse -Force
+    }
 }
 
 function Assert-DanshengCiRuntime($Layout) {
