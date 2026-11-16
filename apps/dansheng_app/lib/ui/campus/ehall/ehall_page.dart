@@ -16,6 +16,8 @@ import 'board/tile_data.dart';
 import 'board/tile_sheet.dart';
 import 'board/tile_view.dart';
 import 'campus_building.dart';
+import 'department_notices/department_directory.dart';
+import 'department_notices/department_notices_page.dart';
 import 'life_page.dart';
 
 /// The eHall home: a board of service tiles the person arranges like home
@@ -307,6 +309,21 @@ class _EHallPageState extends State<EHallPage> {
       EHallTile.grades => life(LifeService.grades),
       EHallTile.gpa => life(LifeService.gpa),
       EHallTile.exams => life(LifeService.exams),
+      EHallTile.departmentNotices => DepartmentNoticesPage(
+        controller: controller,
+        initialDepartments: DepartmentDirectory.parseSubscribed(
+          options['departments'] as String?,
+        ),
+        onUpdateDepartments: (departments) {
+          _change(
+            layout.value.withOption(
+              EHallTile.departmentNotices,
+              'departments',
+              departments.join(','),
+            ),
+          );
+        },
+      ),
     };
   }
 
