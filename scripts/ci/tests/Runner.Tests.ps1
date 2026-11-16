@@ -68,6 +68,34 @@ try {
     $global:ciPermissionCalls = [Collections.Generic.List[object]]::new()
     function global:chmod { $global:ciPermissionCalls.Add(@($args)); $global:LASTEXITCODE = 0 }
     $layout = Get-DanshengCiLayout
+    # Build outputs: kept per lane/job/OS for checks; releases build from empty.
+    function Same([string]$a, [string]$b) { [IO.Path]::GetFullPath($a) -eq [IO.Path]::GetFullPath($b) }
+    $os = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } else { 'linux' }
+    $keptRoot = Join-Path $env:DANSHENG_CI_ROOT 'build-cache'
+    foreach ($role in @('Release', 'Publish')) {
+        Assert ((Get-DanshengCiCargoTarget $layout $role).StartsWith($runtime)) "$role build outputs left the per-run runtime."
+    }
+    foreach ($role in @('Native', 'Android', 'AndroidSource')) {
+        $target = Get-DanshengCiCargoTarget $layout $role
+        Assert (Same $target (Join-Path $keptRoot "main/publish-$os/cargo-target")) "$role lost its kept main-lane build directory."
+        Assert (-not $target.StartsWith((Join-Path $env:DANSHENG_CI_ROOT 'cache'))) 'Compiled outputs entered a dependency cache.'
+    }
+    $savedRef = $env:GITHUB_REF; $savedEvent = $env:GITHUB_EVENT_NAME
+    try {
+        $env:GITHUB_REF = 'refs/pull/7/merge'; $env:GITHUB_EVENT_NAME = 'pull_request'
+        $checksTarget = Get-DanshengCiCargoTarget (Get-DanshengCiLayout) 'Native'
+        Assert (Same $checksTarget (Join-Path $keptRoot "checks/publish-$os/cargo-target")) 'Pull requests share build outputs with main.'
+    } finally { $env:GITHUB_REF = $savedRef; $env:GITHUB_EVENT_NAME = $savedEvent }
+    # This Publish-role initialization must not hand a kept Android root to anything.
+    Assert (-not $env:DANSHENG_CI_NATIVE_TARGET_ROOT) 'A release-side role inherited kept Android outputs.'
+    Assert ((Get-Content -LiteralPath $env:GITHUB_ENV -Raw) -match '(?m)^DANSHENG_CI_NATIVE_TARGET_ROOT=\s*$') 'Kept Android output root was not reset for later steps.'
+    $kept = Join-Path $fixture 'kept-target'
+    [void][IO.Directory]::CreateDirectory($kept)
+    [IO.File]::WriteAllBytes((Join-Path $kept 'artifact.bin'), [byte[]]::new(4096))
+    Limit-DanshengCiBuildCache $kept 1MB
+    Assert (Test-Path -LiteralPath (Join-Path $kept 'artifact.bin')) 'A kept build directory under budget was removed.'
+    Limit-DanshengCiBuildCache $kept 1KB
+    Assert (-not (Test-Path -LiteralPath $kept)) 'A kept build directory over budget was not started over.'
     Set-CiRuntimePermissions $layout
     Assert ($global:ciPermissionCalls.Count -eq 1) 'Runtime permissions helper did not run.'
     Assert (($global:ciPermissionCalls[0] -join '|') -ceq (@('700',$runtime,(Join-Path $runtime 'home')) -join '|')) 'chmod can affect a non-runtime directory.'
