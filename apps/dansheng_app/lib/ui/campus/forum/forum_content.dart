@@ -9,7 +9,9 @@ import 'package:markdown/markdown.dart' as md;
 
 import '../../core/dansheng_client.dart';
 import '../campus_api.dart';
+import 'forum_filter_settings.dart';
 import 'forum_format.dart';
+import 'forum_mention_support.dart';
 import 'forum_syntax.dart';
 
 /// Forum body renderer. Full posts retain their formatting; previews use plain text.
@@ -31,9 +33,10 @@ class ForumContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final effectiveContent = ForumPreferences.instance.filterContent(content);
     if (preview) {
       return Text(
-        cleanPreviewText(content),
+        cleanPreviewText(effectiveContent),
         maxLines: 6,
         overflow: TextOverflow.ellipsis,
       );
@@ -51,7 +54,7 @@ class ForumContent extends StatelessWidget {
               ? constraints.maxWidth
               : MediaQuery.sizeOf(context).width;
           return MarkdownBody(
-            data: content,
+            data: effectiveContent,
             softLineBreak: true,
             selectable: false,
             fitContent: false,
@@ -104,13 +107,22 @@ class ForumContent extends StatelessWidget {
     final uri = Uri.tryParse(href ?? '');
     if (uri == null) return;
     final id = int.tryParse(uri.path);
-    if (id != null && uri.scheme == 'dansheng-hole' && onTapHole != null) {
-      onTapHole!(id);
-      return;
+    if (id != null && uri.scheme == 'dansheng-hole') {
+      if (onTapHole != null) {
+        onTapHole!(id);
+        return;
+      }
     }
-    if (id != null && uri.scheme == 'dansheng-floor' && onTapFloor != null) {
-      onTapFloor!(id);
-      return;
+    if (id != null && uri.scheme == 'dansheng-floor') {
+      if (onTapFloor != null) {
+        onTapFloor!(id);
+        return;
+      }
+      final cached = ForumFloorCache.instance.getFloor(id);
+      if (cached != null) {
+        await showFloorDetailModal(context, floor: cached);
+        return;
+      }
     }
     if (_externalUrl(uri)) {
       if (onTapLink != null) {

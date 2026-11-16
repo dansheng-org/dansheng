@@ -3,6 +3,8 @@
 // Copyright (C) 2021 DanXi-Dev; GPL-3.0-or-later.
 import 'package:flutter/material.dart';
 
+import 'forum_chips.dart';
+import 'forum_filter_settings.dart';
 import 'forum_format.dart';
 import 'forum_models.dart';
 
@@ -13,6 +15,7 @@ class TeaHoleCard extends StatefulWidget {
   final bool isPinned;
   final VoidCallback? onTap;
   final VoidCallback? onTapLatestReply;
+  final ValueChanged<String>? onTapTag;
 
   const TeaHoleCard({
     super.key,
@@ -21,6 +24,7 @@ class TeaHoleCard extends StatefulWidget {
     this.isPinned = false,
     this.onTap,
     this.onTapLatestReply,
+    this.onTapTag,
   });
 
   @override
@@ -40,24 +44,101 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
     }
   }
 
+  void _showContextMenu(BuildContext context) {
+    final prefs = ForumPreferences.instance;
+    final hole = widget.hole;
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.visibility_off_outlined),
+              title: Text('屏蔽此贴 (#${hole.holeId})'),
+              subtitle: const Text('屏蔽后该帖子将不再在列表中显示'),
+              onTap: () {
+                prefs.hideHole(hole.holeId);
+                Navigator.of(ctx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('已屏蔽帖子 #${hole.holeId}')),
+                );
+              },
+            ),
+            for (final tag in hole.tags.where(isVisibleForumTag))
+              ListTile(
+                leading: const Icon(Icons.label_off_outlined),
+                title: Text('屏蔽标签 #$tag'),
+                onTap: () {
+                  prefs.addHiddenTag(tag);
+                  Navigator.of(ctx).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('已屏蔽标签 #$tag')),
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final hole = widget.hole;
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final first = hole.floors?.firstFloor;
     final last = hole.floors?.lastFloor;
-    final folded = hole.tags.any(isHiddenForumTag);
-    final showContent = !folded || _expanded;
+
+    final hasStarTag = hole.tags.any(isHiddenForumTag);
+    final showContent = !hasStarTag || _expanded;
     final infoStyle = TextStyle(fontSize: 12, color: colors.onSurfaceVariant);
-    final labels = [
-      if (widget.divisionName?.isNotEmpty == true) widget.divisionName!,
-      ...hole.tags.where(isVisibleForumTag).map((tag) => '#$tag'),
-      if (widget.isPinned) '置顶',
-      if (hole.hidden) '已隐藏',
-      if (hole.timeDeleted != null) '已删除',
-      if (hole.locked) '已锁定',
-      if (hole.frozen) '已冻结',
-      if (first?.specialTag?.isNotEmpty == true) first!.specialTag!,
+
+    // Tags
+    final visibleTags = hole.tags.where(isVisibleForumTag).toList();
+
+    // Badges matching DanXi
+    final badges = <Widget>[
+      if (widget.divisionName?.isNotEmpty == true)
+        LeadingChip(
+          label: widget.divisionName!,
+          color: colors.primary,
+        ),
+      if (widget.isPinned)
+        LeadingChip(
+          label: '置顶',
+          color: colors.primary,
+        ),
+      if (hole.hidden)
+        const LeadingChip(
+          label: '已隐藏',
+          color: Colors.red,
+        ),
+      if (hole.timeDeleted != null)
+        const LeadingChip(
+          label: '已删除',
+          color: Colors.red,
+        ),
+      if (hole.locked)
+        LeadingChip(
+          label: '已锁定',
+          color: colors.primary,
+        ),
+      if (hole.frozen)
+        LeadingChip(
+          label: '已冻结',
+          color: colors.primary,
+        ),
+      if (first?.specialTag?.isNotEmpty == true)
+        LeadingChip(
+          label: first!.specialTag!,
+          color: Colors.red,
+        ),
     ];
 
     return Card(
@@ -65,40 +146,35 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
       elevation: 0,
       child: InkWell(
         onTap: widget.onTap,
+        onLongPress: () => _showContextMenu(context),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (labels.isNotEmpty) ...[
+              // Header tags and status chips
+              if (visibleTags.isNotEmpty || badges.isNotEmpty) ...[
                 Wrap(
                   spacing: 4,
                   runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    for (final label in labels)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: colors.secondaryContainer,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colors.onSecondaryContainer,
-                          ),
-                        ),
+                    for (final badge in badges) badge,
+                    for (final tag in visibleTags)
+                      RectangularChip(
+                        label: tag,
+                        onTap: widget.onTapTag == null
+                            ? null
+                            : () => widget.onTapTag!(tag),
                       ),
                   ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
               ],
-              if (folded)
+
+              // Fold toggle button
+              if (hasStarTag)
                 TextButton.icon(
                   style: TextButton.styleFrom(
                     padding: EdgeInsets.zero,
@@ -108,6 +184,8 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
                   icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more),
                   label: Text(_expanded ? '收起折叠帖子' : '帖子已折叠，点击展开'),
                 ),
+
+              // Content preview
               if (showContent) ...[
                 _FloorPreview(
                   key: ValueKey(('first', first?.floorId)),
@@ -115,15 +193,21 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
                   fontSize: 16,
                   maxLines: 6,
                 ),
+
+                // DanXi-style latest reply preview with left accent border
                 if (last != null && last.floorId != first?.floorId)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: InkWell(
                       onTap: widget.onTapLatestReply ?? widget.onTap,
+                      borderRadius: BorderRadius.circular(4),
                       child: Container(
                         decoration: BoxDecoration(
                           border: Border(
-                            left: BorderSide(color: colors.outline, width: 2),
+                            left: BorderSide(
+                              color: colors.outline.withValues(alpha: 0.6),
+                              width: 2,
+                            ),
                           ),
                         ),
                         padding: const EdgeInsets.only(left: 8),
@@ -132,8 +216,10 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
                           children: [
                             Text(
                               '最新回复 · ${last.anonyname?.trim().isNotEmpty == true ? last.anonyname!.trim() : '热心同学'} · ${formatFriendlyTime(last.timeCreated)}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 14,
+                                fontSize: 13,
                                 color: colors.onSurfaceVariant,
                               ),
                             ),
@@ -150,22 +236,34 @@ class _TeaHoleCardState extends State<TeaHoleCard> {
                     ),
                   ),
               ],
+
               const SizedBox(height: 12),
+
+              // DanXi-style bottom info row: #ID, friendly time, reply count with icon
               DefaultTextStyle(
                 style: infoStyle,
-                child: SizedBox(
-                  width: double.infinity,
-                  child: Wrap(
-                    alignment: WrapAlignment.spaceBetween,
-                    spacing: 16,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text('#${hole.holeId}'),
-                      Text(formatFriendlyTime(hole.timeCreated)),
-                      Text('${hole.reply} 回复'),
-                    ],
-                  ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('#${hole.holeId}'),
+                    Text(formatFriendlyTime(hole.timeCreated)),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('${hole.reply} 回复'),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.sms_outlined,
+                          size: 14,
+                          color: colors.onSurfaceVariant,
+                        ),
+                        if (hole.view > 0) ...[
+                          const SizedBox(width: 8),
+                          Text('${hole.view} 浏览'),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -211,7 +309,10 @@ class _FloorPreviewState extends State<_FloorPreview> {
     final deleted = floor?.deleted == true;
     final folded = !deleted && floor?.fold.isNotEmpty == true;
     final colors = Theme.of(context).colorScheme;
-    final preview = deleted ? '该楼层已被删除' : cleanPreviewText(floor?.content);
+    final prefs = ForumPreferences.instance;
+
+    final cleaned = prefs.filterContent(cleanPreviewText(floor?.content));
+    final preview = deleted ? '该楼层已被删除' : cleaned;
     final text = Text(
       preview.isEmpty ? '（暂无正文）' : preview,
       maxLines: widget.maxLines,
@@ -222,7 +323,9 @@ class _FloorPreviewState extends State<_FloorPreview> {
         color: deleted ? colors.onSurfaceVariant : null,
       ),
     );
+
     if (!folded) return text;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
