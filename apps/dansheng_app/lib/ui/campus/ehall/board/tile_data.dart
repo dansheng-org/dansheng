@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 
 import '../../learning/models/timetable_models.dart';
 import '../campus_building.dart';
+import '../department_notices/department_directory.dart';
+import '../department_notices/department_notice_service.dart';
 import '../life_page.dart';
 import 'board_layout.dart';
 import 'tile_facts.dart';
@@ -65,7 +67,7 @@ Duration staleAfter(EHallTile tile) => switch (tile) {
   EHallTile.library || EHallTile.dining => const Duration(minutes: 30),
   EHallTile.rooms => const Duration(hours: 6),
   EHallTile.ecard || EHallTile.power => const Duration(hours: 12),
-  EHallTile.notices => const Duration(days: 3),
+  EHallTile.notices || EHallTile.departmentNotices => const Duration(days: 3),
   _ => const Duration(days: 7),
 };
 
@@ -117,6 +119,14 @@ Future<TileData?> readTile(
       final graduate = options['graduate'] == true;
       return noticesTile(
         await source.read('fudan.notices', {if (graduate) 'level': 'graduate'}),
+      );
+    case EHallTile.departmentNotices:
+      final depts = DepartmentDirectory.parseSubscribed(
+        options['departments'] as String?,
+      );
+      return DepartmentNoticeService.instance.getTileData(
+        depts,
+        live: source.live,
       );
     case EHallTile.grades:
     case EHallTile.gpa:

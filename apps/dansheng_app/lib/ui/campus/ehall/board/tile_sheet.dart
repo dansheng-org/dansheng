@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../campus_building.dart';
+import '../department_notices/department_directory.dart';
+import '../department_notices/department_subscription_sheet.dart';
 import '../life_page.dart';
 import 'board_layout.dart';
 import 'tile_data.dart';
@@ -246,6 +248,33 @@ class TileSheet extends StatelessWidget {
           selected: {graduate},
           onSelectionChanged: (set_) =>
               set(board.withOption(tile, 'graduate', set_.first ? true : null)),
+        );
+      case EHallTile.departmentNotices:
+        final depts = DepartmentDirectory.parseSubscribed(
+          options['departments'] as String?,
+        );
+        return Row(
+          children: [
+            Expanded(
+              child: Text(
+                '已选择 ${depts.length} 个院系',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            FilledButton.tonalIcon(
+              icon: const Icon(Icons.tune, size: 18),
+              label: const Text('选择院系'),
+              onPressed: () async {
+                final chosen = await showDepartmentSubscriptionSheet(
+                  context,
+                  currentSelected: depts,
+                );
+                if (chosen != null) {
+                  set(board.withOption(tile, 'departments', chosen.join(',')));
+                }
+              },
+            ),
+          ],
         );
       default:
         return null;
