@@ -73,7 +73,7 @@ build 最后的 `always()` 步骤只删除该 run/job/attempt 的固定 `signing
 
 ```powershell
 ./scripts/ci/tests/Runner.Tests.ps1
-# 安装好 actionlint 后（声明两个自定义 self-hosted labels）：
+# 安装好 actionlint 后（声明自定义 self-hosted labels）：
 actionlint -config-file scripts/ci/actionlint.yaml .github/workflows/app-ci.yml .github/workflows/core-ci.yml .github/workflows/app-prerelease.yml
 ```
 
