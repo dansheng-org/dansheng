@@ -425,6 +425,12 @@ pub(crate) async fn call_with_origins(
             tea_divisions(context, principal, grant, params, tea_origin).await
         }
         "community.tea.pinned" => tea_pinned(context, principal, grant, params, tea_origin).await,
+        "community.tea.favorites" => {
+            tea_favorites(context, principal, grant, params, tea_origin).await
+        }
+        "community.tea.favorite" => {
+            tea_set_favorite(context, principal, grant, params, tea_origin).await
+        }
         "community.tea.hole" => tea_hole(context, principal, grant, params, tea_origin).await,
         "community.tea.holes" => tea_holes(context, principal, grant, params, tea_origin).await,
         "community.tea.floors" => tea_floors(context, principal, grant, params, tea_origin).await,
@@ -843,6 +849,146 @@ async fn tea_pinned(
         }
     }
     Ok(json!([]))
+}
+
+/// One request to `/api/user/favorites`, shared by the list and its changes.
+async fn favorites_request(
+    context: &ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    params: &Value,
+    tea_origin: &str,
+    method: &str,
+    body: Option<Value>,
+) -> CoreResult<Value> {
+    let account = required_string(params, "account_id")?;
+    validate_account(account)?;
+    grant.check_account(principal, Some(account))?;
+    grant.check(
+        principal,
+        if body.is_some() {
+            "community.write"
+        } else {
+            "community.read"
+        },
+    )?;
+    if !context
+        .network
+        .credential_available(account, tea_origin, CredentialKind::Bearer)
+    {
+        return Err(CoreError::new(
+            "AuthenticationRequired",
+            "account has no forum credentials; please login first",
+        ));
+    }
+    let io_grant = make_io_grant(grant, tea_origin, account, body.is_some());
+    let mut headers = BTreeMap::new();
+    headers.insert("accept".into(), "application/json".into());
+    if body.is_some() {
+        headers.insert("content-type".into(), "application/json".into());
+    }
+    let response = context
+        .network
+        .request_with_credentials(
+            principal,
+            &io_grant,
+            HttpRequest {
+                url: format!("{tea_origin}/api/user/favorites"),
+                method: method.into(),
+                headers,
+                body,
+                account_id: Some(account.to_string()),
+                timeout_ms: Some(15000),
+                follow_redirects: false,
+            },
+            CredentialKind::Bearer,
+        )
+        .await
+        .map_err(gateway_sign_in)?;
+    match response.status {
+        401 => Err(CoreError::new(
+            "AuthenticationRequired",
+            "forum token rejected by server",
+        )),
+        403 => Err(CoreError::new(
+            "PermissionDenied",
+            "forum favorites forbidden",
+        )),
+        status if !(200..300).contains(&status) => Err(CoreError::new(
+            "SourceHttpError",
+            format!("forum favorites returned status {status}"),
+        )),
+        _ => serde_json::from_str(&response.body).map_err(|_| {
+            CoreError::new(
+                "SourceSchemaChanged",
+                "favorites response is not valid JSON",
+            )
+        }),
+    }
+}
+
+/// The account's favourite holes, matching DanXi `getFavoriteHoles`
+/// (`GET /api/user/favorites`).
+async fn tea_favorites(
+    context: &ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    params: &Value,
+    tea_origin: &str,
+) -> CoreResult<Value> {
+    let holes =
+        favorites_request(context, principal, grant, params, tea_origin, "GET", None).await?;
+    if !holes.is_array() {
+        return Err(CoreError::new(
+            "SourceSchemaChanged",
+            "favorites response is not an array",
+        ));
+    }
+    Ok(holes)
+}
+
+/// Adds or removes one favourite, matching DanXi `setFavorite`
+/// (`POST`/`DELETE /api/user/favorites` with `{hole_id}`). Setting the state
+/// it already has changes nothing, so an unanswered request may be repeated.
+async fn tea_set_favorite(
+    context: &ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    params: &Value,
+    tea_origin: &str,
+) -> CoreResult<Value> {
+    let hole_id = params
+        .get("hole_id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| CoreError::invalid("missing or invalid hole_id"))?;
+    validate_positive_id(hole_id, "hole_id")?;
+    let favorite = params
+        .get("favorite")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| CoreError::invalid("favorite must be a boolean"))?;
+    let answer = favorites_request(
+        context,
+        principal,
+        grant,
+        params,
+        tea_origin,
+        if favorite { "POST" } else { "DELETE" },
+        Some(json!({ "hole_id": hole_id })),
+    )
+    .await
+    .map_err(|e| {
+        if e.code == "NeedsReconciliation" {
+            CoreError::new("NetworkError", "favorite change got no answer")
+        } else {
+            e
+        }
+    })?;
+    // The answer carries the account's favourite ids after the change.
+    let ids = answer
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| CoreError::new("SourceSchemaChanged", "favorite answer has no id list"))?;
+    Ok(json!({ "hole_id": hole_id, "favorite": favorite, "favorites": ids }))
 }
 
 /// Retrieve a single forum hole by ID matching DanXi `loadHoleById` (`GET /api/holes/{hole_id}`).
@@ -2211,6 +2357,97 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, "SourceSchemaChanged");
+    }
+
+    #[tokio::test]
+    async fn test_unit_favorites_list_and_change() {
+        let (tea_origin, _srv) = spawn_mock_server(|method, path, body| {
+            assert_eq!(path, "/api/user/favorites");
+            match method.as_str() {
+                "GET" => (200, json!([{"hole_id": 7, "division_id": 1}]).to_string()),
+                "POST" => {
+                    assert_eq!(body.unwrap(), json!({"hole_id": 9}));
+                    (201, json!({"message": "ok", "data": [7, 9]}).to_string())
+                }
+                "DELETE" => {
+                    assert_eq!(body.unwrap(), json!({"hole_id": 7}));
+                    (200, json!({"message": "ok", "data": [9]}).to_string())
+                }
+                other => panic!("unexpected method {other}"),
+            }
+        })
+        .await;
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let network = dansheng_core::network::Network::default();
+        let platform = UnavailablePlatform;
+        let context = ServiceContext {
+            store: &store,
+            network: &network,
+            platform: &platform,
+        };
+        let owner = Principal::owner();
+        let grant = owner_grant_for("acc_fav");
+        let list = json!({"account_id": "acc_fav"});
+
+        // Signed out: asked to sign in before anything is sent.
+        let err = call_with_origins(
+            &context,
+            &owner,
+            &grant,
+            "community.tea.favorites",
+            &list,
+            &tea_origin,
+            &tea_origin,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "AuthenticationRequired");
+
+        network
+            .set_session("acc_fav", &tea_origin, Some("token".into()), vec![])
+            .unwrap();
+        let holes = call_with_origins(
+            &context,
+            &owner,
+            &grant,
+            "community.tea.favorites",
+            &list,
+            &tea_origin,
+            &tea_origin,
+        )
+        .await
+        .unwrap();
+        assert_eq!(holes[0]["hole_id"], 7);
+
+        for (hole_id, favorite, left) in [(9, true, json!([7, 9])), (7, false, json!([9]))] {
+            let answer = call_with_origins(
+                &context,
+                &owner,
+                &grant,
+                "community.tea.favorite",
+                &json!({"account_id": "acc_fav", "hole_id": hole_id, "favorite": favorite}),
+                &tea_origin,
+                &tea_origin,
+            )
+            .await
+            .unwrap();
+            assert_eq!(answer["favorite"], favorite);
+            assert_eq!(answer["favorites"], left);
+        }
+
+        let err = call_with_origins(
+            &context,
+            &owner,
+            &grant,
+            "community.tea.favorite",
+            &json!({"account_id": "acc_fav", "hole_id": 0, "favorite": true}),
+            &tea_origin,
+            &tea_origin,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "InvalidInput");
     }
 
     #[tokio::test]

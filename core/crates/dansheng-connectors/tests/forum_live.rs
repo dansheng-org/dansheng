@@ -71,6 +71,7 @@ async fn forum_authenticated_readonly() {
             "community.tea.holes",
             json!({"account_id":account,"page_size":20,"order":"time_updated"}),
         ),
+        ("community.tea.favorites", json!({"account_id":account})),
     ] {
         let result = CampusService
             .call(
@@ -87,7 +88,10 @@ async fn forum_authenticated_readonly() {
             .await;
         match result {
             Ok(value) => {
-                let records = value.get("records").and_then(Value::as_array);
+                let records = value
+                    .get("records")
+                    .and_then(Value::as_array)
+                    .or_else(|| value.as_array());
                 if method == "community.tea.holes" {
                     hole_id = records
                         .and_then(|r| r.first())

@@ -9,9 +9,12 @@ class ForumService {
 
   ForumService(this.api);
 
-  /// Fetch all divisions.
-  Future<List<TeaDivision>> fetchDivisions() async {
-    final response = await api.call('community.tea.divisions');
+  /// Fetch all divisions; [cached] reads the host's copy of the last
+  /// successful answer instead of asking the forum.
+  Future<List<TeaDivision>> fetchDivisions({bool cached = false}) async {
+    final response = cached
+        ? await api.call('campus.cached', {'method': 'community.tea.divisions'})
+        : await api.call('community.tea.divisions');
     return _extractList(response)
         .map((item) => TeaDivision.fromJson(item))
         .toList();
@@ -57,6 +60,17 @@ class ForumService {
     final map = _extractMap(response);
     if (map.isEmpty) return null;
     return TeaHole.fromJson(map);
+  }
+
+  /// The account's favourite holes as the forum keeps them.
+  Future<List<TeaHole>> fetchFavorites() async {
+    final response = await api.call('community.tea.favorites');
+    return _extractList(response).map(TeaHole.fromJson).toList();
+  }
+
+  /// Stars or unstars a hole on the forum account.
+  Future<void> setFavorite(int holeId, bool favorite) async {
+    await api.call('forum.favorite', {'hole_id': holeId, 'favorite': favorite});
   }
 
   /// Fetch floors of a hole.

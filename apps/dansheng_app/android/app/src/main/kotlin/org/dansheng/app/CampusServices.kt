@@ -29,7 +29,7 @@ internal class CampusServices(
         "canvas.quizzes.sync","canvas.quiz.read","canvas.discussions.sync","canvas.discussion.read","canvas.discussion.view",
         "canvas.assignment_groups.sync","canvas.submission.self","canvas.grades.self","fudan.catalog.syllabus",
         "fudan.cloud.roots","fudan.cloud.list","fudan.notice.attachments","webdav.servers","webdav.list",
-        "community.tea.divisions","community.tea.holes","community.tea.hole","community.tea.floors","community.danke.search","community.danke.group","community.danke.reviews",
+        "community.tea.divisions","community.tea.holes","community.tea.hole","community.tea.floors","community.tea.favorites","community.danke.search","community.danke.group","community.danke.reviews",
     )
     /** Drive writes: run exactly once after a UI action, never cached or retried. */
     private val writes=setOf(
@@ -150,6 +150,8 @@ internal class CampusServices(
         }
         if(method=="forum.search")return read("community.tea.search",p,account,epoch).also{checked(account,epoch)}
         if(method=="forum.reconcile")return rt.request("community.tea.reconcile",p).also{checked(account,epoch)}
+        // Starring is undone by starring again, so it needs no confirmation (as in DanXi).
+        if(method=="forum.favorite")return rt.request("community.tea.favorite",p).also{checked(account,epoch)}
         if(method=="forum.publish" || method=="forum.reply") {
             val content=p.getString("content").trim()
             require(content.length in 1..8000)

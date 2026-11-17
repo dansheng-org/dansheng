@@ -786,6 +786,8 @@ impl CoreService for CampusService {
             ("community.tea.hole", "community.read"),
             ("community.tea.floors", "community.read"),
             ("community.tea.pinned", "community.read"),
+            ("community.tea.favorites", "community.read"),
+            ("community.tea.favorite", "community.write"),
             ("community.danke.search", "community.read"),
             ("community.danke.group", "community.read"),
             ("community.danke.reviews", "community.read"),
@@ -1287,6 +1289,8 @@ impl CoreService for CampusService {
                 | "community.tea.reply"
                 | "community.tea.reconcile"
                 | "community.tea.pinned"
+                | "community.tea.favorites"
+                | "community.tea.favorite"
         ) {
             return crate::forum_actions::call(&context, principal, grant, method, &params).await;
         }

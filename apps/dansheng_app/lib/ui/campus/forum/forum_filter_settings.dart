@@ -118,6 +118,16 @@ class ForumPreferences extends ChangeNotifier {
                   .whereType<int>(),
             );
           }
+          // The holes themselves, so the list survives a restart.
+          if (json['favoriteHoleData'] is List) {
+            for (final item in json['favoriteHoleData'] as List) {
+              if (item is! Map<String, dynamic>) continue;
+              final hole = TeaHole.fromJson(item);
+              if (_favoriteHoles.contains(hole.holeId)) {
+                _favoriteHolesMap[hole.holeId] = hole;
+              }
+            }
+          }
           notifyListeners();
         }
       }
@@ -135,6 +145,9 @@ class ForumPreferences extends ChangeNotifier {
         'hiddenTags': _hiddenTags.toList(),
         'hiddenHoles': _hiddenHoles.toList(),
         'favoriteHoles': _favoriteHoles.toList(),
+        'favoriteHoleData': [
+          for (final hole in _favoriteHolesMap.values) hole.toJson(),
+        ],
       };
       _storageFile!.writeAsStringSync(jsonEncode(data));
     } catch (_) {}
@@ -208,10 +221,31 @@ class ForumPreferences extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Takes the forum account's favourites as the whole list, newest first.
+  void replaceFavorites(List<TeaHole> holes) {
+    _favoriteHoles
+      ..clear()
+      ..addAll(holes.map((h) => h.holeId));
+    _favoriteHolesMap
+      ..clear()
+      ..addEntries(holes.map((h) => MapEntry(h.holeId, h)));
+    _saveStorage();
+    notifyListeners();
+  }
+
+  /// Favourite ids whose hole is not stored yet.
+  List<int> get missingFavoriteIds => [
+    for (final id in _favoriteHoles)
+      if (!_favoriteHolesMap.containsKey(id)) id,
+  ];
+
+  /// Keeps the stored copy of a favourite current with what was just read.
   void cacheFavoriteHole(TeaHole hole) {
-    if (_favoriteHoles.contains(hole.holeId)) {
-      _favoriteHolesMap[hole.holeId] = hole;
-    }
+    if (!_favoriteHoles.contains(hole.holeId)) return;
+    final added = !_favoriteHolesMap.containsKey(hole.holeId);
+    _favoriteHolesMap[hole.holeId] = hole;
+    _saveStorage();
+    if (added) notifyListeners();
   }
 
   void setTagFilter(String? tag) {
