@@ -450,14 +450,16 @@ void main() {
       await tester.tap(find.byTooltip('登录树洞账号'));
       await tester.pump();
       expect(find.text('正在登录…'), findsOneWidget);
+      // Saved credentials go first; the host asks only when they are rejected.
       expect(_methodParams(mockBridge, 'campus.login'), [
-        {'service': 'forum', 'replace': true},
+        {'service': 'forum'},
       ]);
       mockBridge.loginPending!.complete();
       await tester.pumpAndSettle();
       expect(find.text('已连接树洞账号'), findsOneWidget);
       expect(_methodParams(mockBridge, 'community.tea.holes'), hasLength(1));
       expect(find.text('需要登录论坛服务'), findsNothing);
+      // Once signed in, the account button enters another account.
       await tester.tap(find.byTooltip('登录树洞账号'));
       await tester.pumpAndSettle();
       expect(_methodParams(mockBridge, 'campus.login'), hasLength(2));

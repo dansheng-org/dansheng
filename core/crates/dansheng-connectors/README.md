@@ -108,8 +108,9 @@ Cargo accepts only one runtime filter. Focused integration Clippy uses
 `cargo clippy -p dansheng-connectors --test integration --locked -- -D warnings`
 without a runtime filter.
 
-`forum_live.rs` and `webvpn_live.rs` remain separate targets with ignored live
-tests, requiring explicit authorization and their feature/environment setup.
+`forum_live.rs`, `webvpn_live.rs` and `forum_webvpn_live.rs` remain separate
+targets with ignored live tests, requiring explicit authorization and their
+feature/environment setup.
 The ordinary suites use synthetic fixtures and fake/local transports; they do
 not establish real-service compatibility.
 JavaScript example tests: `node --test plugins/examples/tests/examples.test.mjs`

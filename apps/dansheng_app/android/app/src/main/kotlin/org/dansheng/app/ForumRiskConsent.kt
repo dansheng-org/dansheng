@@ -17,11 +17,11 @@ internal class ForumRiskConsent(
         confirm: (suspend () -> Unit)?,
         withAccount: (() -> Unit) -> Unit,
     ) {
-        withAccount { if (confirm == null) requireAccepted(account) }
-        if (confirm == null) {
-            return
-        }
-        // Every explicit login shows the notice, even if background restoration is allowed.
+        // The notice is shown once per account and version; logging out forgets it.
+        var accepted = false
+        withAccount { accepted = readVersion(account) == VERSION }
+        if (accepted) return
+        if (confirm == null) throw PortError("ForumConsentRequired")
         confirm()
         withAccount { writeVersion(account, VERSION) }
     }

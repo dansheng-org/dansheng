@@ -186,9 +186,14 @@ class ForumService {
     return false;
   }
 
-  /// Trigger forum login flow via parent CampusApi.
-  Future<void> login() async {
-    await api.call('campus.login', {'service': 'forum', 'replace': true});
+  /// Trigger forum login flow via parent CampusApi. The saved credentials are
+  /// used first and the host asks for new ones only when they are rejected;
+  /// [replace] asks right away, to switch to another forum account.
+  Future<void> login({bool replace = false}) async {
+    await api.call('campus.login', {
+      'service': 'forum',
+      if (replace) 'replace': true,
+    });
   }
 
   static int? _extractHoleId(dynamic response) {

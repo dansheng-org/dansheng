@@ -104,13 +104,17 @@ internal class CampusLogins(private val rt: RuntimeHost) {
         catch(e:PortError) {
             if(e.code!="WebVpnLoginRequired" || service=="webvpn")throw e
         }
+        restoreWebVpn(account,epoch)
+        synchronized(rt.authGuard){ checkAccount(account,epoch); recentFailures.remove(account to service) }
+        return connectOnce(service,account,replace,confirmForumRisk,epoch,prompt)
+    }
+    /** Signs in to WebVPN with the saved UIS password; never opens a prompt. */
+    suspend fun restoreWebVpn(account:String,epoch:Long=rt.accountEpoch) {
         try { connectOnce("webvpn",account,false,null,epoch,null) }
         catch(e:PortError) {
             if(e.code=="AuthenticationRequired")throw PortError("WebVpnLoginRequired")
             throw e
         }
-        synchronized(rt.authGuard){ checkAccount(account,epoch); recentFailures.remove(account to service) }
-        return connectOnce(service,account,replace,confirmForumRisk,epoch,prompt)
     }
     private suspend fun connectOnce(service:String,account:String,replace:Boolean,
         confirmForumRisk:(suspend ()->Unit)?,

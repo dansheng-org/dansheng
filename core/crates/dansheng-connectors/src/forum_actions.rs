@@ -32,7 +32,8 @@
 use chrono::{DateTime, Utc};
 use dansheng_core::{
     api::{CoreError, CoreResult, Principal, required_string},
-    network::{CredentialKind, HttpRequest},
+    network::{CredentialKind, HttpRequest, HttpResponse},
+    network_routes::{GatewayRoute, RouteMode},
     policy::Grant,
     services::ServiceContext,
 };
@@ -240,6 +241,67 @@ fn make_io_grant(grant: &Grant, origin: &str, account: &str, mutating: bool) -> 
     io
 }
 
+/// A sign-in demand from the transport itself. Callers confirm the forum
+/// token first (and signing in needs none), so what is missing is the session
+/// of the WebVPN gateway the request was routed through. Reporting it as a
+/// forum sign-in would make the host discard working forum credentials.
+fn gateway_sign_in(e: CoreError) -> CoreError {
+    if e.code == "AuthenticationRequired" {
+        CoreError::new(
+            "WebVpnLoginRequired",
+            "sign in to WebVPN to reach the forum through it",
+        )
+    } else {
+        e
+    }
+}
+
+/// Signs in through the forum's WebVPN route. The gateway answers a request
+/// without a live session with a redirect, which a POST can only report as an
+/// unconfirmed write, so the session is checked with a GET first.
+async fn login_through_gateway(
+    context: &ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    account: &str,
+    route: &GatewayRoute,
+    mut request: HttpRequest,
+) -> CoreResult<HttpResponse> {
+    let logical = Url::parse(&request.url).map_err(|_| CoreError::invalid("invalid login URL"))?;
+    let physical = route.encode(&logical)?.to_string();
+    let io_grant = make_io_grant(grant, &route.gateway_origin()?, account, true);
+    let probe = context
+        .network
+        .request_with_credentials(
+            principal,
+            &io_grant,
+            HttpRequest {
+                url: physical.clone(),
+                method: "GET".into(),
+                headers: BTreeMap::new(),
+                body: None,
+                account_id: Some(account.to_string()),
+                timeout_ms: Some(8000),
+                follow_redirects: false,
+            },
+            CredentialKind::Cookie,
+        )
+        .await
+        .map_err(gateway_sign_in)?;
+    if (300..400).contains(&probe.status) {
+        return Err(CoreError::new(
+            "WebVpnLoginRequired",
+            "the WebVPN session has expired",
+        ));
+    }
+    request.url = physical;
+    context
+        .network
+        .request_with_credentials(principal, &io_grant, request, CredentialKind::Cookie)
+        .await
+        .map_err(gateway_sign_in)
+}
+
 fn is_uncertain_error(e: &CoreError) -> bool {
     matches!(
         e.code.as_str(),
@@ -423,19 +485,41 @@ async fn tea_login(
         follow_redirects: false,
     };
 
-    let response = context
+    // WebVPN is the forum's fallback route. The transport never resends a
+    // write on another route, but a sign-in changes nothing remotely, so it
+    // may follow the reads there when the direct path gives no answer.
+    let route = context
         .network
-        .request_with_credentials(principal, &io_grant, req, CredentialKind::Anonymous)
-        .await
-        .map_err(|e| {
-            if e.code == "Timeout" {
-                CoreError::new("Timeout", "forum login timed out")
-            } else if e.code == "NetworkUnreachable" {
-                CoreError::new("NetworkUnreachable", "auth service unreachable")
-            } else {
-                e
-            }
-        })?;
+        .routes(account)?
+        .into_iter()
+        .find(|route| route.origin == auth_origin && route.mode != RouteMode::Direct);
+    let direct = if route.as_ref().is_some_and(|r| r.mode == RouteMode::Gateway) {
+        Err(CoreError::new("NetworkUnreachable", "gateway-only route"))
+    } else {
+        context
+            .network
+            .request_with_credentials(principal, &io_grant, req.clone(), CredentialKind::Anonymous)
+            .await
+    };
+    let response = match (direct, route) {
+        (Ok(response), _) => Ok(response),
+        (Err(e), Some(route))
+            if matches!(
+                e.code.as_str(),
+                "NeedsReconciliation" | "Timeout" | "NetworkUnreachable" | "NetworkError"
+            ) =>
+        {
+            login_through_gateway(context, principal, grant, account, &route, req).await
+        }
+        (Err(e), _) => Err(gateway_sign_in(e)),
+    }
+    .map_err(|e| match e.code.as_str() {
+        "Timeout" => CoreError::new("Timeout", "forum login timed out"),
+        "NetworkUnreachable" => CoreError::new("NetworkUnreachable", "auth service unreachable"),
+        // Nothing was written: an unanswered sign-in is a plain network failure.
+        "NeedsReconciliation" => CoreError::new("NetworkError", "forum login got no answer"),
+        _ => e,
+    })?;
 
     if response.status == 401 || response.status == 400 {
         return Err(CoreError::new(
@@ -621,16 +705,7 @@ async fn tea_search(
         .network
         .request_with_credentials(principal, &io_grant, req, CredentialKind::Bearer)
         .await
-        .map_err(|e| {
-            if e.code == "AuthenticationRequired" {
-                CoreError::new(
-                    "AuthenticationRequired",
-                    "forum token expired or not logged in",
-                )
-            } else {
-                e
-            }
-        })?;
+        .map_err(gateway_sign_in)?;
 
     if response.status == 401 {
         return Err(CoreError::new(
@@ -710,16 +785,7 @@ async fn tea_divisions(
         .network
         .request_with_credentials(principal, &io_grant, req, CredentialKind::Bearer)
         .await
-        .map_err(|e| {
-            if e.code == "AuthenticationRequired" {
-                CoreError::new(
-                    "AuthenticationRequired",
-                    "forum token expired or not logged in",
-                )
-            } else {
-                e
-            }
-        })?;
+        .map_err(gateway_sign_in)?;
 
     if response.status == 401 {
         return Err(CoreError::new(
@@ -826,16 +892,7 @@ async fn tea_hole(
         .network
         .request_with_credentials(principal, &io_grant, req, CredentialKind::Bearer)
         .await
-        .map_err(|e| {
-            if e.code == "AuthenticationRequired" {
-                CoreError::new(
-                    "AuthenticationRequired",
-                    "forum token expired or not logged in",
-                )
-            } else {
-                e
-            }
-        })?;
+        .map_err(gateway_sign_in)?;
 
     if response.status == 401 {
         return Err(CoreError::new(
@@ -963,16 +1020,7 @@ async fn tea_holes(
         .network
         .request_with_credentials(principal, &io_grant, req, CredentialKind::Bearer)
         .await
-        .map_err(|e| {
-            if e.code == "AuthenticationRequired" {
-                CoreError::new(
-                    "AuthenticationRequired",
-                    "forum token expired or not logged in",
-                )
-            } else {
-                e
-            }
-        })?;
+        .map_err(gateway_sign_in)?;
 
     if response.status == 401 {
         return Err(CoreError::new(
@@ -1057,16 +1105,7 @@ async fn tea_floors(
         .network
         .request_with_credentials(principal, &io_grant, req, CredentialKind::Bearer)
         .await
-        .map_err(|e| {
-            if e.code == "AuthenticationRequired" {
-                CoreError::new(
-                    "AuthenticationRequired",
-                    "forum token expired or not logged in",
-                )
-            } else {
-                e
-            }
-        })?;
+        .map_err(gateway_sign_in)?;
 
     if response.status == 401 {
         return Err(CoreError::new(
@@ -1971,6 +2010,130 @@ mod tests {
         assert!(network.has_session_for_origin("acc_unit", "http://127.0.0.1:9999"));
         // Strictly dedicated origin: no cross-origin bearer set on auth_origin
         assert!(!network.has_session_for_origin("acc_unit", &auth_origin));
+    }
+
+    /// Routed through WebVPN without a WebVPN session, neither a sign-in nor a
+    /// read may claim that the forum account needs signing in: the host would
+    /// drop the saved forum password and ask for it again.
+    #[tokio::test]
+    async fn test_unit_missing_gateway_session_is_not_a_forum_sign_in() {
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = hits.clone();
+        let (origin, _srv) = spawn_mock_server(move |_, _, _| {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            (
+                200,
+                json!({"access": "token_a", "refresh": "token_r"}).to_string(),
+            )
+        })
+        .await;
+        // Nothing listens here: the direct path gives no answer.
+        let dead = "http://127.0.0.1:9";
+
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let network = dansheng_core::network::Network::default();
+        let platform = UnavailablePlatform;
+        let context = ServiceContext {
+            store: &store,
+            network: &network,
+            platform: &platform,
+        };
+        let owner = Principal::owner();
+        let grant = owner_grant_for("acc_vpn");
+        let login = json!({"account_id": "acc_vpn", "email": "a@fudan.edu.cn", "password": "pwd"});
+        let route = |origin: &str, name: &str, mode| GatewayRoute {
+            provider: "fixture".into(),
+            origin: origin.into(),
+            gateway_prefix: format!("https://gateway.invalid/http/{name}"),
+            mode,
+        };
+
+        // Gateway-only: the auth service is never contacted directly.
+        network
+            .set_routes("acc_vpn", vec![route(&origin, "live", RouteMode::Gateway)])
+            .unwrap();
+        let err = call_with_origins(
+            &context,
+            &owner,
+            &grant,
+            "community.tea.login",
+            &login,
+            &origin,
+            &origin,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "WebVpnLoginRequired");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        // Fallback: an unanswered direct sign-in moves to WebVPN.
+        network
+            .set_routes("acc_vpn", vec![route(dead, "dead", RouteMode::Auto)])
+            .unwrap();
+        let err = call_with_origins(
+            &context,
+            &owner,
+            &grant,
+            "community.tea.login",
+            &login,
+            &origin,
+            dead,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "WebVpnLoginRequired");
+
+        // Without a WebVPN route an unanswered sign-in is a network failure,
+        // never an unconfirmed write.
+        network.set_routes("acc_vpn", vec![]).unwrap();
+        let err = call_with_origins(
+            &context,
+            &owner,
+            &grant,
+            "community.tea.login",
+            &login,
+            &origin,
+            dead,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "NetworkError");
+
+        // With the fallback route present, a reachable direct path is used.
+        network
+            .set_routes("acc_vpn", vec![route(&origin, "live", RouteMode::Auto)])
+            .unwrap();
+        call_with_origins(
+            &context,
+            &owner,
+            &grant,
+            "community.tea.login",
+            &login,
+            &origin,
+            &origin,
+        )
+        .await
+        .unwrap();
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Signed in to the forum, read routed through WebVPN.
+        network
+            .set_routes("acc_vpn", vec![route(&origin, "live", RouteMode::Gateway)])
+            .unwrap();
+        let err = call_with_origins(
+            &context,
+            &owner,
+            &grant,
+            "community.tea.search",
+            &json!({"account_id": "acc_vpn", "query": "x"}),
+            &origin,
+            &origin,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "WebVpnLoginRequired");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

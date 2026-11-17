@@ -464,6 +464,30 @@ impl ConnectorTransport for BoundTransport<'_> {
         if leased {
             self.check_native_lease(&challenge)?;
         }
+        // The forum signs in on its own, outside WebVPN. When its token is
+        // present and a read is still refused, the missing session is the
+        // gateway's; a forum sign-in would not repair it. Fudan services keep
+        // AuthRequired: their sign-in runs through the gateway and restores it.
+        #[cfg(feature = "webvpn")]
+        let gateway_session_missing = !mutating
+            && credential_kind == CredentialKind::Bearer
+            && crate::webvpn::FORUM_ORIGINS.contains(&challenge.origin.as_str())
+            && self.network.credential_available(
+                self.account,
+                &challenge.origin,
+                CredentialKind::Bearer,
+            );
+        #[cfg(not(feature = "webvpn"))]
+        let gateway_session_missing = false;
+        let request_error = |error: CoreError| {
+            if error.code != "AuthenticationRequired" {
+                transport_error(error)
+            } else if gateway_session_missing {
+                ConnectorError::GatewaySessionRequired
+            } else {
+                ConnectorError::AuthRequired(challenge.clone())
+            }
+        };
         // Bytes are an explicit connector contract. Proto/octet-stream requests
         // use the bounded byte API; page transport was selected above and can
         // never reach this native branch as a fallback.
@@ -501,13 +525,7 @@ impl ConnectorTransport for BoundTransport<'_> {
                     credential_kind,
                 )
                 .await
-                .map_err(|error| {
-                    if error.code == "AuthenticationRequired" {
-                        ConnectorError::AuthRequired(challenge.clone())
-                    } else {
-                        transport_error(error)
-                    }
-                })?;
+                .map_err(request_error)?;
             self.check_after_response(&challenge, leased, mutating)?;
             return Ok(ConnectorResponse {
                 status: response.status,
@@ -546,13 +564,7 @@ impl ConnectorTransport for BoundTransport<'_> {
             .unwrap_or(self.network)
             .request_with_credentials(self.principal, &io_grant, request, credential_kind)
             .await
-            .map_err(|error| {
-                if error.code == "AuthenticationRequired" {
-                    ConnectorError::AuthRequired(challenge.clone())
-                } else {
-                    transport_error(error)
-                }
-            })?;
+            .map_err(request_error)?;
         self.check_after_response(&challenge, leased, mutating)?;
         if canvas_course_read && matches!(response.status, 401 | 403) {
             let check = self
@@ -622,6 +634,10 @@ pub(crate) fn source_error(error: ConnectorError) -> CoreError {
         ConnectorError::AuthRequired(_) => CoreError::new(
             "AuthenticationRequired",
             "complete this source's authentication through the host",
+        ),
+        ConnectorError::GatewaySessionRequired => CoreError::new(
+            "WebVpnLoginRequired",
+            "sign in to WebVPN to reach this source through it",
         ),
         ConnectorError::CourseAccessDenied => CoreError::new(
             "CourseAccessDenied",
