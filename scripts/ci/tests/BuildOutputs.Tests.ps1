@@ -99,7 +99,7 @@ try {
         Reject { & $cleanup } 'marker differs'
     }
     Seed
-    Remove-Item -LiteralPath (Join-Path $runtime '.ci-owned')
+    Remove-Item -LiteralPath (Join-Path $runtime '.ci-owned') -Force
     Reject { & $cleanup } 'marker differs'
     Seed
     $env:DANSHENG_TASK_RUNTIME = $outside
@@ -152,7 +152,7 @@ try {
     $marker = Join-Path $runtime '.ci-owned'
     $externalMarker = Join-Path $outside 'marker'
     Put $externalMarker '987654/synthetic-job/2'
-    Remove-Item -LiteralPath $marker
+    Remove-Item -LiteralPath $marker -Force
     [IO.File]::CreateSymbolicLink($marker, $externalMarker) | Out-Null
     $links.Add($marker)
     Reject { & $cleanup } 'links'

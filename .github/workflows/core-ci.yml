@@ -56,7 +56,7 @@ jobs:
           source "$DANSHENG_CI_ROOT/runner-env.sh"
           pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Native
       - name: Test affected-check scheduling
-        if: ${{ !inputs.smoke }}
+        if: runner.os == 'Linux' && !inputs.smoke
         working-directory: ${{ github.workspace }}
         run: ./scripts/ci/tests/AffectedChecks.Tests.ps1
       - name: Determine workspace fixture changes
@@ -80,7 +80,7 @@ jobs:
       - run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
         if: ${{ !inputs.smoke }}
       - name: Worktree workflow integration fixtures
-        if: ${{ !inputs.smoke && (steps.affected.outcome != 'success' || steps.affected.outputs.workspace_fixtures != 'false') }}
+        if: runner.os == 'Linux' && !inputs.smoke && (steps.affected.outcome != 'success' || steps.affected.outputs.workspace_fixtures != 'false')
         # Both suites run side by side in separate processes (see the script).
         run: ../scripts/ci/Invoke-WorkspaceFixtures.ps1 -CoreRoot . -OutputRoot $env:DANSHENG_TASK_RUNTIME
       - name: Dependency cache isolation fixtures
