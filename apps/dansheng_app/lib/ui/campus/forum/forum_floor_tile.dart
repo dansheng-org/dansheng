@@ -25,6 +25,11 @@ class ForumFloorTile extends StatefulWidget {
     this.onTapHole,
     this.onTapFloor,
     this.onQuoteReply,
+    this.onEdit,
+    this.onDelete,
+    this.onReport,
+    this.onlyPerson,
+    this.onToggleOnlyPerson,
   });
 
   final TeaFloor floor;
@@ -36,6 +41,15 @@ class ForumFloorTile extends StatefulWidget {
   final ValueChanged<int>? onTapHole;
   final ValueChanged<int>? onTapFloor;
   final ValueChanged<TeaFloor>? onQuoteReply;
+
+  /// Own floors only: edit or delete it (DanXi `is_me`).
+  final ValueChanged<TeaFloor>? onEdit;
+  final ValueChanged<TeaFloor>? onDelete;
+  final ValueChanged<TeaFloor>? onReport;
+
+  /// The name whose floors alone are shown, if any.
+  final String? onlyPerson;
+  final ValueChanged<TeaFloor>? onToggleOnlyPerson;
 
   @override
   State<ForumFloorTile> createState() => _ForumFloorTileState();
@@ -57,54 +71,120 @@ class _ForumFloorTileState extends State<ForumFloorTile> {
     }
   }
 
+  /// Floor actions, in DanXi's order: own-floor edits first, then copying,
+  /// showing one person, and reporting.
   void _showFloorContextMenu(BuildContext context) {
     final floor = widget.floor;
+    final messenger = ScaffoldMessenger.of(context);
 
+    Widget item(
+      IconData icon,
+      String label,
+      VoidCallback onTap, {
+      bool destructive = false,
+    }) {
+      final color = destructive ? Theme.of(context).colorScheme.error : null;
+      return Builder(
+        builder: (ctx) => ListTile(
+          leading: Icon(icon, color: color),
+          title: Text(label, style: TextStyle(color: color)),
+          onTap: () {
+            Navigator.of(ctx).pop();
+            onTap();
+          },
+        ),
+      );
+    }
+
+    void copy(String text, String done) {
+      Clipboard.setData(ClipboardData(text: text));
+      messenger.showSnackBar(SnackBar(content: Text(done)));
+    }
+
+    final name = floor.anonyname?.trim();
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.format_quote_rounded),
-              title: Text('引用此楼 (##${floor.floorId})'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                widget.onQuoteReply?.call(floor);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.copy_rounded),
-              title: const Text('复制正文'),
-              onTap: () async {
-                if (floor.content?.isNotEmpty == true) {
-                  await Clipboard.setData(ClipboardData(text: floor.content!));
-                  if (context.mounted) {
-                    Navigator.of(ctx).pop();
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(const SnackBar(content: Text('已复制楼层内容')));
-                  }
-                }
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.info_outline_rounded),
-              title: const Text('查看详情'),
-              onTap: () {
-                Navigator.of(ctx).pop();
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!floor.deleted && widget.onQuoteReply != null)
+                item(
+                  Icons.reply_rounded,
+                  '回复此楼 (##${floor.floorId})',
+                  () => widget.onQuoteReply!(floor),
+                ),
+              if (floor.isMe && !floor.deleted && widget.onEdit != null)
+                item(Icons.edit_outlined, '修改', () => widget.onEdit!(floor)),
+              if (floor.isMe && !floor.deleted && widget.onDelete != null)
+                item(
+                  Icons.delete_outline_rounded,
+                  '删除',
+                  () => widget.onDelete!(floor),
+                  destructive: true,
+                ),
+              if (floor.content?.isNotEmpty == true && !floor.deleted)
+                item(
+                  Icons.copy_rounded,
+                  '复制正文',
+                  () => copy(floor.content!, '已复制楼层内容'),
+                ),
+              if (floor.content?.isNotEmpty == true && !floor.deleted)
+                item(
+                  Icons.text_fields_rounded,
+                  '选择文字',
+                  () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => Scaffold(
+                        appBar: AppBar(title: Text('##${floor.floorId}')),
+                        body: SafeArea(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(16),
+                            child: SelectableText(
+                              floor.content!,
+                              style: const TextStyle(fontSize: 16, height: 1.5),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              item(
+                Icons.tag_rounded,
+                '复制楼层号',
+                () => copy('##${floor.floorId}', '已复制楼层号'),
+              ),
+              if (name != null &&
+                  name.isNotEmpty &&
+                  widget.onToggleOnlyPerson != null)
+                item(
+                  Icons.person_search_outlined,
+                  widget.onlyPerson == null ? '只看此人' : '显示全部回复',
+                  () => widget.onToggleOnlyPerson!(floor),
+                ),
+              item(Icons.info_outline_rounded, '查看详情', () {
                 showFloorDetailModal(
                   context,
                   floor: floor,
                   onJumpToFloor: () => widget.onTapFloor?.call(floor.floorId),
                   onQuoteReply: () => widget.onQuoteReply?.call(floor),
                 );
-              },
-            ),
-          ],
+              }),
+              if (!floor.isMe && widget.onReport != null)
+                item(
+                  Icons.flag_outlined,
+                  '举报',
+                  () => widget.onReport!(floor),
+                  destructive: true,
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -233,6 +313,7 @@ class _ForumFloorTileState extends State<ForumFloorTile> {
                       content: displayContent,
                       onTapHole: widget.onTapHole,
                       onTapFloor: widget.onTapFloor,
+                      selectable: false,
                     )
                   else
                     Text('（暂无正文）', style: infoStyle),

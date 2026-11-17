@@ -125,7 +125,7 @@ class _LifeState extends State<_CampusDetail> {
     try {
       await api.call('campus.verifyDining');
       if (mounted && active == widget.controller.activeAccountId) {
-        await load();
+        await load(afterSignIn: true);
       }
     } catch (e) {
       if (mounted) {
@@ -282,7 +282,7 @@ class _LifeState extends State<_CampusDetail> {
     return null;
   }
 
-  Future<void> load() async {
+  Future<void> load({bool afterSignIn = false}) async {
     if (widget.controller.activeAccountId == null) {
       setState(() {
         problem = '未设置账号，请先绑定复旦统一身份认证账号。';
@@ -341,7 +341,9 @@ class _LifeState extends State<_CampusDetail> {
         input['level'] = 'graduate';
       }
 
-      final data = await api.call(s.method, input);
+      final data = afterSignIn
+          ? await api.readAfterSignIn(s.method, input)
+          : await api.call(s.method, input);
       if (mounted &&
           ticket == generation &&
           account == widget.controller.activeAccountId) {

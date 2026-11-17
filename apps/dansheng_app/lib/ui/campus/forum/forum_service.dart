@@ -130,6 +130,37 @@ class ForumService {
     return _extractFloorId(response);
   }
 
+  /// Replaces the text of one of the account's own floors (DanXi `modifyFloor`).
+  /// Returns the floor as the forum now has it, when it says.
+  Future<TeaFloor?> modifyFloor({
+    required int floorId,
+    required String content,
+  }) async {
+    final response = await api.call('forum.floor.modify', {
+      'floor_id': floorId,
+      'content': content,
+    });
+    return _floorIn(response);
+  }
+
+  /// Deletes one of the account's own floors (DanXi `deleteFloor`).
+  Future<TeaFloor?> deleteFloor(int floorId) async {
+    final response = await api.call('forum.floor.delete', {
+      'floor_id': floorId,
+    });
+    return _floorIn(response);
+  }
+
+  /// Reports a floor to the moderators (DanXi `reportPost`).
+  Future<void> report({required int floorId, required String reason}) async {
+    await api.call('forum.report', {'floor_id': floorId, 'reason': reason});
+  }
+
+  static TeaFloor? _floorIn(dynamic response) {
+    final floor = response is Map ? response['floor'] : null;
+    return floor is Map<String, dynamic> ? TeaFloor.fromJson(floor) : null;
+  }
+
   /// Read-only reconciliation of uncertain publish or reply submission.
   /// Calls parent forum.reconcile with {action: 'publish'|'reply', division_id|hole_id, content}.
   Future<Map<String, dynamic>?> reconcile({

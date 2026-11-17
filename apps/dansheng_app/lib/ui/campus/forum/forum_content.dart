@@ -23,6 +23,7 @@ class ForumContent extends StatelessWidget {
     this.onTapFloor,
     this.onTapLink,
     this.preview = false,
+    this.selectable = true,
   });
 
   final String content;
@@ -30,6 +31,10 @@ class ForumContent extends StatelessWidget {
   final ValueChanged<int>? onTapFloor;
   final ValueChanged<Uri>? onTapLink;
   final bool preview;
+
+  /// False inside a floor card, whose long press opens the floor menu (as in
+  /// DanXi); the menu offers copying and text selection instead.
+  final bool selectable;
 
   @override
   Widget build(BuildContext context) {
@@ -47,72 +52,69 @@ class ForumContent extends StatelessWidget {
       fontSize: 16,
       height: 1.45,
     );
-    return SelectionArea(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.hasBoundedWidth
-              ? constraints.maxWidth
-              : MediaQuery.sizeOf(context).width;
-          return MarkdownBody(
-            data: effectiveContent,
-            softLineBreak: true,
-            selectable: false,
-            fitContent: false,
-            extensionSet: md.ExtensionSet.gitHubFlavored,
-            inlineSyntaxes: forumInlineSyntaxes(),
-            styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
-              p: body,
-              a: body.copyWith(
-                color: colors.primary,
-                decoration: TextDecoration.underline,
-              ),
-              em: body.copyWith(fontStyle: FontStyle.italic),
-              strong: body.copyWith(fontWeight: FontWeight.bold),
-              del: body.copyWith(decoration: TextDecoration.lineThrough),
-              listBullet: body,
-              blockquote: body.copyWith(
-                fontSize: 14,
-                color: colors.onSurfaceVariant,
-              ),
-              blockquotePadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
-              blockquoteDecoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark
-                    ? Colors.blue.shade900.withValues(alpha: .35)
-                    : Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(6),
-                border: Border(
-                  left: BorderSide(color: colors.primary, width: 3),
-                ),
-              ),
-              code: body.copyWith(fontFamily: 'monospace', fontSize: 14),
-              codeblockDecoration: BoxDecoration(
-                color: colors.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              blockSpacing: 10,
-              tableColumnWidth: const FlexColumnWidth(),
+    final rendered = LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.hasBoundedWidth
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        return MarkdownBody(
+          data: effectiveContent,
+          softLineBreak: true,
+          selectable: false,
+          fitContent: false,
+          extensionSet: md.ExtensionSet.gitHubFlavored,
+          inlineSyntaxes: forumInlineSyntaxes(),
+          styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+            p: body,
+            a: body.copyWith(
+              color: colors.primary,
+              decoration: TextDecoration.underline,
             ),
-            builders: {
-              'forum-math': _MathBuilder(width, block: false),
-              'forum-math-block': _MathBuilder(width, block: true),
-              'forum-audit': _AuditBuilder(),
-              'floorMention': _FloorMentionBuilder(
-                context: context,
-                onTapFloor: onTapFloor,
-                onTapHole: onTapHole,
-              ),
-              'holeMention': _HoleMentionBuilder(onTapHole: onTapHole),
-            },
-            imageBuilder: (uri, title, alt) =>
-                _ForumImage(uri: uri, alt: alt, maxWidth: width * .8),
-            onTapLink: (_, href, _) => _openLink(context, href),
-          );
-        },
-      ),
+            em: body.copyWith(fontStyle: FontStyle.italic),
+            strong: body.copyWith(fontWeight: FontWeight.bold),
+            del: body.copyWith(decoration: TextDecoration.lineThrough),
+            listBullet: body,
+            blockquote: body.copyWith(
+              fontSize: 14,
+              color: colors.onSurfaceVariant,
+            ),
+            blockquotePadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 8,
+            ),
+            blockquoteDecoration: BoxDecoration(
+              color: theme.brightness == Brightness.dark
+                  ? Colors.blue.shade900.withValues(alpha: .35)
+                  : Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(6),
+              border: Border(left: BorderSide(color: colors.primary, width: 3)),
+            ),
+            code: body.copyWith(fontFamily: 'monospace', fontSize: 14),
+            codeblockDecoration: BoxDecoration(
+              color: colors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            blockSpacing: 10,
+            tableColumnWidth: const FlexColumnWidth(),
+          ),
+          builders: {
+            'forum-math': _MathBuilder(width, block: false),
+            'forum-math-block': _MathBuilder(width, block: true),
+            'forum-audit': _AuditBuilder(),
+            'floorMention': _FloorMentionBuilder(
+              context: context,
+              onTapFloor: onTapFloor,
+              onTapHole: onTapHole,
+            ),
+            'holeMention': _HoleMentionBuilder(onTapHole: onTapHole),
+          },
+          imageBuilder: (uri, title, alt) =>
+              _ForumImage(uri: uri, alt: alt, maxWidth: width * .8),
+          onTapLink: (_, href, _) => _openLink(context, href),
+        );
+      },
     );
+    return selectable ? SelectionArea(child: rendered) : rendered;
   }
 
   Future<void> _openLink(BuildContext context, String? href) async {

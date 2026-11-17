@@ -479,8 +479,19 @@ impl ConnectorTransport for BoundTransport<'_> {
             );
         #[cfg(not(feature = "webvpn"))]
         let gateway_session_missing = false;
+        // Some campus queries are POSTs. Network treats every POST as a write, but a
+        // query changes nothing remotely: a redirect means the session went to sign-in
+        // (the host signs in and reads again), and anything else is a failed read that
+        // may simply be refreshed. Only `.read` capabilities are relaxed this way.
+        let query = !mutating && self.source_capability.ends_with(".read");
         let request_error = |error: CoreError| {
-            if error.code != "AuthenticationRequired" {
+            if query && error.code == "NeedsReconciliation" {
+                if error.message == dansheng_core::network::WRITE_REDIRECTED {
+                    ConnectorError::AuthRequired(challenge.clone())
+                } else {
+                    ConnectorError::Timeout
+                }
+            } else if error.code != "AuthenticationRequired" {
                 transport_error(error)
             } else if gateway_session_missing {
                 ConnectorError::GatewaySessionRequired
@@ -788,6 +799,9 @@ impl CoreService for CampusService {
             ("community.tea.pinned", "community.read"),
             ("community.tea.favorites", "community.read"),
             ("community.tea.favorite", "community.write"),
+            ("community.tea.floor.modify", "community.write"),
+            ("community.tea.floor.delete", "community.write"),
+            ("community.tea.report", "community.write"),
             ("community.danke.search", "community.read"),
             ("community.danke.group", "community.read"),
             ("community.danke.reviews", "community.read"),
@@ -1291,6 +1305,9 @@ impl CoreService for CampusService {
                 | "community.tea.pinned"
                 | "community.tea.favorites"
                 | "community.tea.favorite"
+                | "community.tea.floor.modify"
+                | "community.tea.floor.delete"
+                | "community.tea.report"
         ) {
             return crate::forum_actions::call(&context, principal, grant, method, &params).await;
         }
@@ -4194,6 +4211,82 @@ mod adapter_tests {
         assert_eq!(
             transport.execute(request).await.err().unwrap(),
             ConnectorError::PermissionDenied
+        );
+        server.await.unwrap();
+    }
+    #[tokio::test]
+    async fn a_query_sent_as_post_never_reports_an_uncertain_write() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for reply in [
+                "HTTP/1.1 302 Found\r\nLocation: /login\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 302 Found\r\nLocation: /login\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            ] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = [0u8; 4096];
+                let _ = socket.read(&mut bytes).await.unwrap();
+                socket.write_all(reply.as_bytes()).await.unwrap();
+            }
+        });
+        let temp = tempfile::tempdir().unwrap();
+        let store = dansheng_core::store::Store::open(temp.path()).unwrap();
+        let principal = Principal {
+            id: "reader".into(),
+            kind: dansheng_core::PrincipalKind::Client,
+        };
+        let mut current = Grant {
+            allow_private_network: true,
+            ..Default::default()
+        };
+        current.account_ids.insert("a".into());
+        current.capabilities.insert("fudan.life.read".into());
+        current.capabilities.insert("fudan.cloud.write".into());
+        store.set_grant(&principal.id, &current).unwrap();
+        let mut delegated = current.clone();
+        delegated.capabilities.insert("http.request".into());
+        delegated.capabilities.insert("http.write".into());
+        delegated.origins.insert(origin.clone());
+        let network = Network::default();
+        let platform = dansheng_core::UnavailablePlatform;
+        let transport = |source_capability| BoundTransport {
+            network: &network,
+            platform: &platform,
+            principal: &principal,
+            grant: &delegated,
+            account: "a",
+            store: &store,
+            source_capability,
+            credential_lease: Default::default(),
+        };
+        let request = ConnectorRequest {
+            method: crate::HttpMethod::Post,
+            url: url::Url::parse(&format!("{origin}/query")).unwrap(),
+            headers: vec![],
+            body: Some(b"draw=1".to_vec()),
+            auth: TransportAuth::Anonymous,
+        };
+        let read = transport("fudan.life.read");
+        // Sent to sign-in: the host signs in and reads again.
+        assert!(matches!(
+            read.execute(request.clone()).await.err().unwrap(),
+            ConnectorError::AuthRequired(_)
+        ));
+        // Any other unconfirmed answer is a failed read, safe to refresh.
+        assert_eq!(
+            read.execute(request.clone()).await.err().unwrap(),
+            ConnectorError::Timeout
+        );
+        // A real write keeps reporting the uncertain outcome.
+        assert_eq!(
+            transport("fudan.cloud.write")
+                .execute(request)
+                .await
+                .err()
+                .unwrap(),
+            ConnectorError::NeedsReconciliation
         );
         server.await.unwrap();
     }

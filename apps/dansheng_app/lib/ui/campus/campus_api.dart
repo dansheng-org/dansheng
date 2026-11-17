@@ -94,6 +94,30 @@ class CampusApi {
     accountScope?.check();
     return jsonDecode(result);
   }
+
+  /// A read made right after a sign-in or verification. School portals can take
+  /// a moment to accept a session they just issued, so one bounce is read again
+  /// quietly instead of being shown. Only for reads: a write is never repeated.
+  Future<dynamic> readAfterSignIn(
+    String method, [
+    Map<String, dynamic> params = const {},
+    Duration settle = const Duration(milliseconds: 1200),
+  ]) async {
+    try {
+      return await call(method, params);
+    } on PlatformException catch (e) {
+      if (!const {
+        'AuthenticationRequired',
+        'Timeout',
+        'NetworkError',
+        'NeedsReconciliation',
+      }.contains(e.code)) {
+        rethrow;
+      }
+    }
+    await Future<void>.delayed(settle);
+    return call(method, params);
+  }
 }
 
 String campusError(Object error) {

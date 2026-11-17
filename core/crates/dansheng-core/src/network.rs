@@ -462,6 +462,12 @@ pub(crate) fn secret_headers_from_value(
         .collect::<CoreResult<BTreeMap<_, _>>>()?;
     validate_secret_headers(values)
 }
+/// Message of the NeedsReconciliation error for a non-GET request answered by a
+/// redirect. A trusted adapter whose POST only queries can tell it from other
+/// uncertain outcomes: for a query it means the session was sent to sign-in.
+pub const WRITE_REDIRECTED: &str =
+    "a write redirected; the core will not automatically resubmit it";
+
 #[derive(Clone)]
 struct Transfer {
     cookie_csrf: Option<CookieCsrf>,
@@ -1528,10 +1534,7 @@ impl Network {
                 ));
             }
             if mutating_request && matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
-                return Err(CoreError::new(
-                    "NeedsReconciliation",
-                    "a write redirected; the core will not automatically resubmit it",
-                ));
+                return Err(CoreError::new("NeedsReconciliation", WRITE_REDIRECTED));
             }
             if input.follow_redirects && matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
                 if redirect == 8 {

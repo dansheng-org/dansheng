@@ -152,6 +152,29 @@ internal class CampusServices(
         if(method=="forum.reconcile")return rt.request("community.tea.reconcile",p).also{checked(account,epoch)}
         // Starring is undone by starring again, so it needs no confirmation (as in DanXi).
         if(method=="forum.favorite")return rt.request("community.tea.favorite",p).also{checked(account,epoch)}
+        // Changes to one floor the person picked; each is confirmed here, like a post.
+        if(method in setOf("forum.floor.modify","forum.floor.delete","forum.report")) {
+            val floor="楼层 ##"+p.getLong("floor_id")
+            when(method){
+                "forum.floor.modify" -> {
+                    val content=p.getString("content").trim()
+                    require(content.length in 1..8000)
+                    confirm("修改回复","$floor\n\n$content")
+                }
+                "forum.floor.delete" -> confirm("删除回复","$floor\n\n删除后无法恢复。")
+                else -> {
+                    val reason=p.getString("reason").trim()
+                    require(reason.length in 1..500)
+                    confirm("举报楼层","$floor\n\n理由：$reason")
+                }
+            }
+            checked(account,epoch)
+            return rt.request(when(method){
+                "forum.floor.modify" -> "community.tea.floor.modify"
+                "forum.floor.delete" -> "community.tea.floor.delete"
+                else -> "community.tea.report"
+            },p).also{checked(account,epoch)}
+        }
         if(method=="forum.publish" || method=="forum.reply") {
             val content=p.getString("content").trim()
             require(content.length in 1..8000)
@@ -193,6 +216,14 @@ internal class CampusServices(
             // through is gone. Signing in to the service again would not bring it back.
             if(e.code=="WebVpnLoginRequired" && service!="webvpn")rt.campusLogins.restoreWebVpn(account,epoch)
             else rt.campusLogins.connect(service,account,epoch=epoch)
+            checked(account,epoch)
+            // A school portal can take a moment to accept a session it just issued; the
+            // first read after sign-in may still bounce. Read once more before reporting.
+            try { return rt.request(method,p) }
+            catch(again:PortError) {
+                if(again.code !in setOf("AuthenticationRequired","Timeout","NetworkError"))throw again
+            }
+            kotlinx.coroutines.delay(1_200)
             checked(account,epoch)
             return rt.request(method,p)
         }

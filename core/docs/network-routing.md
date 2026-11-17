@@ -62,6 +62,8 @@ WebView 的页面上下文请求保持原平台端口；本模块不把页面 fe
 - 数据请求遇到网关跳往被代理的身份认证页时，`decode_location` 已返回 `AuthenticationRequired`，宿主据此重新登录（经网关）。
 - 树洞的登录不经过 WebVPN，网关会话缺失或过期不能报成树洞 `AuthenticationRequired`：宿主会据此丢弃已保存的树洞口令并重新索要。树洞令牌仍在而请求被网关拒绝时（`forum_actions` 的读取，以及连接器传输层对 `FORUM_ORIGINS` 的 Bearer 读取）返回 `WebVpnLoginRequired`，宿主只用已保存的 UIS 口令恢复 WebVPN 会话后重试该读取。
 - `community.tea.login` 是幂等的登录请求，不产生远端写入：直连没有得到应答（或树洞路由为 `gateway`）时改经 WebVPN 发送；发送前先用一次 GET 确认网关会话仍有效，缺失或过期返回 `WebVpnLoginRequired`。没有应答的登录报网络错误，不报 `NeedsReconciliation`。发帖、回复仍然不跨路由重发。
+- 部分校园查询用 POST 发送（电费历史与统计、图书馆和食堂人数等）。Network 把所有 POST 当写入，没有确认的应答报 `NeedsReconciliation`；连接器传输层对 `.read` 能力改为按读取处理：被重定向说明会话被送去登录，报 `AuthenticationRequired`（宿主登录后重读），其余报 `Timeout`，可直接刷新。真正的写入能力（`.write`）不变。宿主登录后的第一次重读若仍被弹回，会稍等后再读一次再报错。
+- 树洞楼层的修改（`community.tea.floor.modify`，`PATCH /api/floors/{id}/_webvpn`）与删除（`community.tea.floor.delete`）重复执行结果不变，没有应答时报网络错误；举报（`community.tea.report`）不可重复，保留 `NeedsReconciliation`。三者都只限本机所有者，并由 Android 宿主逐次确认。
 - 限制：cookie-CSRF 写操作（Canvas 网页会话发信）按原设计拒绝网关路由；一律走网关后需改用 Canvas 令牌。
 
 实测入口（只读，凭据仅在进程内读取）：`DANSHENG_TEST_CREDENTIALS=<file> cargo test -p dansheng-connectors --features services,webvpn --test webvpn_live -- --ignored --nocapture`。树洞在 WebVPN 开启、网关会话缺失和强制经网关三种情况下的登录与读取用 `--test forum_webvpn_live`。

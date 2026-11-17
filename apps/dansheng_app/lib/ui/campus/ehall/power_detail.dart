@@ -311,7 +311,7 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     return records;
   }
 
-  Future<void> _loadBalance() async {
+  Future<void> _loadBalance({bool afterSignIn = false}) async {
     if (!_hasAccount) {
       setState(() {
         _balanceInfo = null;
@@ -331,7 +331,9 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     });
 
     try {
-      final res = await _api.call('fudan.electricity');
+      final res = afterSignIn
+          ? await _api.readAfterSignIn('fudan.electricity')
+          : await _api.call('fudan.electricity');
       if (!mounted ||
           ticket != _balanceTicket ||
           currentAccount != widget.controller.activeAccountId) {
@@ -380,7 +382,7 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     try {
       await _api.call('campus.login', {'service': 'power'});
       if (mounted) {
-        await _loadBalance();
+        await _loadBalance(afterSignIn: true);
       }
     } catch (e) {
       if (mounted) {
@@ -392,7 +394,10 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     }
   }
 
-  Future<void> _loadHistory({bool refresh = false}) async {
+  Future<void> _loadHistory({
+    bool refresh = false,
+    bool afterSignIn = false,
+  }) async {
     if (!_hasAccount) {
       setState(() {
         _historyRecords.clear();
@@ -427,10 +432,10 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     });
 
     try {
-      final res = await _api.call('fudan.electricity.history', {
-        'offset': _historyOffset,
-        'size': _pageSize,
-      });
+      final res = await (afterSignIn ? _api.readAfterSignIn : _api.call)(
+        'fudan.electricity.history',
+        {'offset': _historyOffset, 'size': _pageSize},
+      );
 
       if (!mounted ||
           ticket != _historyTicket ||
@@ -477,7 +482,10 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     try {
       await _api.call('campus.verifyDining', {'service': 'power_history'});
       if (mounted) {
-        await Future.wait([_loadHistory(refresh: true), _loadUsage()]);
+        await Future.wait([
+          _loadHistory(refresh: true, afterSignIn: true),
+          _loadUsage(afterSignIn: true),
+        ]);
       }
     } catch (e) {
       if (mounted) {
@@ -919,7 +927,7 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     );
   }
 
-  Future<void> _loadUsage() async {
+  Future<void> _loadUsage({bool afterSignIn = false}) async {
     final ticket = ++_usageTicket;
     final account = widget.controller.activeAccountId;
     setState(() {
@@ -929,9 +937,10 @@ class _PowerDetailPageState extends State<PowerDetailPage> {
     });
     if (account == null) return;
     try {
-      final response = await _api.call('fudan.electricity.statistics', {
-        'period': _usagePeriod,
-      });
+      final response = await (afterSignIn ? _api.readAfterSignIn : _api.call)(
+        'fudan.electricity.statistics',
+        {'period': _usagePeriod},
+      );
       if (!mounted ||
           ticket != _usageTicket ||
           account != widget.controller.activeAccountId) {

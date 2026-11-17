@@ -408,6 +408,9 @@ mod tests {
             "community.tea.reply",
             "community.tea.reconcile",
             "community.tea.favorite",
+            "community.tea.floor.modify",
+            "community.tea.floor.delete",
+            "community.tea.report",
         ] {
             assert!(
                 !METHODS.contains(&method),

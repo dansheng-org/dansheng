@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:dansheng_app/bridge.g.dart';
 import 'package:dansheng_app/ui/campus/campus_api.dart';
+import 'package:dansheng_app/ui/campus/forum/forum_editor_page.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_filter_settings.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_page.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_search_page.dart';
@@ -240,6 +241,7 @@ class MockForumDanshengBridge implements DanshengBridge {
                   'hole_id': holeId,
                   'content': '第二楼回复：我也在看这门课！',
                   'anonyname': 'Alice',
+                  'is_me': true,
                   'time_created': '2026-11-01T11:00:00Z',
                   'deleted': false,
                   'like': 2,
@@ -309,6 +311,39 @@ class MockForumDanshengBridge implements DanshengBridge {
             );
           }
           return jsonEncode({'floor_id': 504, 'result': 'success'});
+
+        case 'forum.floor.modify':
+          return jsonEncode({
+            'floor_id': methodParams['floor_id'],
+            'floor': {
+              'floor_id': methodParams['floor_id'],
+              'hole_id': 101,
+              'content': methodParams['content'],
+              'anonyname': 'Alice',
+              'is_me': true,
+              'modified': 1,
+            },
+          });
+
+        case 'forum.floor.delete':
+          return jsonEncode({
+            'floor_id': methodParams['floor_id'],
+            'deleted': true,
+            'floor': {
+              'floor_id': methodParams['floor_id'],
+              'hole_id': 101,
+              'content': '',
+              'anonyname': 'Alice',
+              'is_me': true,
+              'deleted': true,
+            },
+          });
+
+        case 'forum.report':
+          return jsonEncode({
+            'floor_id': methodParams['floor_id'],
+            'reported': true,
+          });
 
         case 'forum.reconcile':
         case 'community.tea.reconcile':
@@ -709,7 +744,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // 1. Hole header
-      expect(find.text('#101 帖子详情'), findsOneWidget);
+      expect(find.text('#101'), findsOneWidget);
 
       // 2. Floor 1 is OP (洞主), with pseudonym 'Synthetic'
       expect(find.text('洞主'), findsOneWidget);
@@ -769,72 +804,54 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Publish: writes UI fields preview, requires confirm before forum.publish',
-    (tester) async {
-      await tester.pumpWidget(
-        _wrapTestWidget(ForumPage(controller: controller)),
-      );
-      await tester.pumpAndSettle();
-
-      // Tap "发帖" FAB
-      await tester.tap(find.text('发帖'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('发布新帖'), findsOneWidget);
-
-      // Enter tags and content
-      final textFields = find.byType(TextField);
-      await tester.enterText(textFields.at(0), '考试, 复习');
-      await tester.enterText(textFields.at(1), '大家期末一起加油！');
-      await tester.pumpAndSettle();
-
-      // Tap "预览并确认" to enter preview step
-      await tester.tap(find.text('预览并确认'));
-      await tester.pumpAndSettle();
-
-      // 1. Verify preview mode is active
-      expect(find.text('发帖确认与预览'), findsOneWidget);
-      expect(find.text('发布分区'), findsOneWidget);
-      expect(find.text('合成分区'), findsWidgets);
-      expect(find.text('#考试'), findsOneWidget);
-      expect(find.text('#复习'), findsOneWidget);
-      expect(find.textContaining('匿名保护'), findsOneWidget);
-      expect(find.text('大家期末一起加油！'), findsOneWidget);
-
-      // Ensure publish NOT yet called before confirm
-      expect(
-        mockBridge.invocationLog.any(
-          (entry) =>
-              entry['command'] == HostCommand.campus &&
-              entry['params']['method'] == 'forum.publish',
-        ),
-        isFalse,
-      );
-
-      // Now tap "确认发布"
-      await tester.tap(find.text('确认发布'));
-      await tester.pumpAndSettle();
-
-      // Verify forum.publish invoked with typed parameters
-      final pubCall = mockBridge.invocationLog.lastWhere(
+  List<Map> calls(String method) => mockBridge.invocationLog
+      .where(
         (entry) =>
             entry['command'] == HostCommand.campus &&
-            entry['params']['method'] == 'forum.publish',
-      );
-      expect(pubCall['params']['params']['division_id'], 1);
-      expect(pubCall['params']['params']['content'], '大家期末一起加油！');
-      expect(pubCall['params']['params']['tags'], ['考试', '复习']);
-    },
-  );
+            entry['params']['method'] == method,
+      )
+      .map((entry) => entry['params']['params'] as Map)
+      .toList();
+
+  testWidgets('Publish: full-page editor sends division, tags and text once', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrapTestWidget(ForumPage(controller: controller)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('发帖'));
+    await tester.pumpAndSettle();
+    expect(find.text('发布新帖'), findsOneWidget);
+    expect(find.text('社区公约'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('forum-editor-tag')), '考试');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.text('#考试'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('forum-editor-tag')), '复习');
+    await tester.enterText(
+      find.byKey(const Key('forum-editor-content')),
+      '大家期末一起加油！',
+    );
+    await tester.pumpAndSettle();
+    // Live preview below the text, as in DanXi.
+    expect(find.text('大家期末一起加油！'), findsWidgets);
+    expect(calls('forum.publish'), isEmpty);
+
+    await tester.tap(find.byKey(const Key('forum-editor-send')));
+    await tester.pumpAndSettle();
+
+    final publish = calls('forum.publish').single;
+    expect(publish['division_id'], 1);
+    expect(publish['content'], '大家期末一起加油！');
+    expect(publish['tags'], ['考试', '复习']);
+    expect(find.text('发布新帖'), findsNothing);
+    expect(find.text('发布成功'), findsOneWidget);
+  });
 
   testWidgets(
-    'Publish: uncertain outcome shows "核对结果", ambiguous remains pending, match authorizes published',
+    'Publish: an empty post is not sent and the draft survives closing',
     (tester) async {
-      mockBridge.simulateUncertainPublish = true;
-      mockBridge.reconcileOutcome =
-          'unresolved'; // initial reconciliation is ambiguous
-
       await tester.pumpWidget(
         _wrapTestWidget(ForumPage(controller: controller)),
       );
@@ -842,105 +859,206 @@ void main() {
 
       await tester.tap(find.text('发帖'));
       await tester.pumpAndSettle();
-
-      final textFields = find.byType(TextField);
-      await tester.enterText(textFields.at(1), '可能超时的帖子');
-      await tester.tap(find.text('预览并确认'));
+      await tester.tap(find.byKey(const Key('forum-editor-send')));
       await tester.pumpAndSettle();
+      expect(find.text('帖子内容不能为空'), findsOneWidget);
+      expect(calls('forum.publish'), isEmpty);
 
-      // Confirm publish -> throws NeedsReconciliation
-      await tester.tap(find.text('确认发布'));
-      await tester.pumpAndSettle();
-
-      // Verify uncertain outcome warning and "核对结果" button
-      expect(find.textContaining('提交结果待核对，请勿重复提交'), findsOneWidget);
-      expect(find.text('核对结果'), findsOneWidget);
-      expect(find.text('先刷新'), findsOneWidget);
-      expect(
-        find.text('确认发布'),
-        findsNothing,
-      ); // Immediate blind retry disabled!
-
-      // 1. User taps "核对结果" when reconciliation is ambiguous/unresolved
-      await tester.tap(find.text('核对结果'));
-      await tester.pumpAndSettle();
-
-      // Verify reconcile was invoked with read-only contract
-      final reconcileCall = mockBridge.invocationLog.lastWhere(
-        (entry) =>
-            entry['command'] == HostCommand.campus &&
-            entry['params']['method'] == 'forum.reconcile',
+      await tester.enterText(
+        find.byKey(const Key('forum-editor-content')),
+        '还没写完的草稿',
       );
-      expect(reconcileCall['params']['params']['action'], 'publish');
-      expect(reconcileCall['params']['params']['division_id'], 1);
-      expect(reconcileCall['params']['params']['content'], '可能超时的帖子');
-
-      // Dialog must NOT be closed, still pending, never automatically re-published!
-      expect(find.text('发帖确认与预览'), findsOneWidget);
-      expect(find.textContaining('状态仍为待核对'), findsOneWidget);
-
-      // Ensure no automatic second forum.publish call occurred!
-      final publishCalls = mockBridge.invocationLog
-          .where(
-            (entry) =>
-                entry['command'] == HostCommand.campus &&
-                entry['params']['method'] == 'forum.publish',
-          )
-          .toList();
-      expect(publishCalls.length, 1);
-
-      // 2. Now simulate reconciliation succeeding with a definitive match
-      mockBridge.reconcileOutcome = 'success';
-      await tester.tap(find.text('核对结果'));
+      Navigator.of(
+        tester.element(find.byKey(const Key('forum-editor-content'))),
+      ).pop();
       await tester.pumpAndSettle();
-
-      // Authorizes showing published and closes dialog
-      expect(find.text('发帖确认与预览'), findsNothing);
+      await tester.tap(find.text('发帖'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('forum-editor-content')))
+            .controller!
+            .text,
+        '还没写完的草稿',
+      );
+      ForumDrafts.clear('publish');
     },
   );
 
   testWidgets(
-    'Reply: uncertain outcome reconciled with definitive match authorizes published',
+    'Publish: no answer is checked quietly, never sent twice, then the list refreshes',
     (tester) async {
       mockBridge.simulateUncertainPublish = true;
-      mockBridge.reconcileOutcome = 'success';
+      mockBridge.reconcileOutcome = 'unresolved';
 
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('发帖'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('forum-editor-content')),
+        '可能超时的帖子',
+      );
+      final holesBefore = calls('community.tea.holes').length;
+      await tester.tap(find.byKey(const Key('forum-editor-send')));
+      await tester.pumpAndSettle();
+
+      // No "待核对" warning: the editor checked by itself and closed.
+      expect(find.textContaining('待核对'), findsNothing);
+      expect(find.text('发布新帖'), findsNothing);
+      expect(find.textContaining('已刷新列表'), findsOneWidget);
+      expect(calls('forum.publish'), hasLength(1));
+      final checks = calls('forum.reconcile');
+      expect(checks, hasLength(3));
+      expect(checks.first['action'], 'publish');
+      expect(checks.first['division_id'], 1);
+      expect(checks.first['content'], '可能超时的帖子');
+      expect(calls('community.tea.holes').length, greaterThan(holesBefore));
+
+      // The unsent text is still there for the person to decide.
+      await tester.tap(find.text('发帖'));
+      await tester.pumpAndSettle();
+      expect(find.text('可能超时的帖子'), findsWidgets);
+      ForumDrafts.clear('publish');
+    },
+  );
+
+  testWidgets('Reply: no answer confirmed by the check counts as sent', (
+    tester,
+  ) async {
+    mockBridge.simulateUncertainPublish = true;
+    mockBridge.reconcileOutcome = 'success';
+
+    await tester.pumpWidget(
+      _wrapTestWidget(HoleDetailPage(controller: controller, holeId: 101)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('回复'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('forum-editor-content')),
+      '赞同洞主的观点！',
+    );
+    await tester.tap(find.byKey(const Key('forum-editor-send')));
+    await tester.pumpAndSettle();
+
+    final check = calls('forum.reconcile').single;
+    expect(check['action'], 'reply');
+    expect(check['hole_id'], 101);
+    expect(check['content'], '赞同洞主的观点！');
+    expect(calls('forum.reply'), hasLength(1));
+    expect(find.byKey(const Key('forum-editor-content')), findsNothing);
+    expect(find.text('回复已发布'), findsOneWidget);
+  });
+
+  testWidgets(
+    'Reply to a floor starts with its ##id and shows the quoted text',
+    (tester) async {
       await tester.pumpWidget(
         _wrapTestWidget(HoleDetailPage(controller: controller, holeId: 101)),
       );
       await tester.pumpAndSettle();
 
-      // Tap "回复" FAB
-      await tester.tap(find.text('回复'));
+      await tester.longPress(find.text('第二楼回复：我也在看这门课！'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('回复此楼 (##502)'));
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), '赞同洞主的观点！');
-      await tester.tap(find.text('预览并确认'));
+      expect(find.text('回复 ##502'), findsOneWidget);
+      expect(find.textContaining('Alice：第二楼回复'), findsOneWidget);
+      // Only the quote is not a reply yet.
+      await tester.tap(find.byKey(const Key('forum-editor-send')));
       await tester.pumpAndSettle();
+      expect(find.text('回复内容不能为空'), findsOneWidget);
 
-      // Confirm reply -> throws NeedsReconciliation
-      await tester.tap(find.text('确认回复'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('核对结果'), findsOneWidget);
-
-      // Tap "核对结果"
-      await tester.tap(find.text('核对结果'));
-      await tester.pumpAndSettle();
-
-      final reconcileCall = mockBridge.invocationLog.lastWhere(
-        (entry) =>
-            entry['command'] == HostCommand.campus &&
-            entry['params']['method'] == 'forum.reconcile',
+      await tester.enterText(
+        find.byKey(const Key('forum-editor-content')),
+        '##502\n同感',
       );
-      expect(reconcileCall['params']['params']['action'], 'reply');
-      expect(reconcileCall['params']['params']['hole_id'], 101);
-      expect(reconcileCall['params']['params']['content'], '赞同洞主的观点！');
-
-      // Authorizes success and closes dialog
-      expect(find.text('回复确认与预览'), findsNothing);
+      await tester.tap(find.byKey(const Key('forum-editor-send')));
+      await tester.pumpAndSettle();
+      expect(calls('forum.reply').single['content'], '##502\n同感');
     },
   );
+
+  testWidgets('Own floors can be edited and deleted; others reported', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrapTestWidget(HoleDetailPage(controller: controller, holeId: 101)),
+    );
+    await tester.pumpAndSettle();
+
+    // Someone else's floor: no edit or delete, but a report.
+    await tester.longPress(find.text('首楼正文：复习微积分，欢迎讨论'));
+    await tester.pumpAndSettle();
+    expect(find.text('修改'), findsNothing);
+    expect(find.text('删除'), findsNothing);
+    await tester.tap(find.text('举报'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '广告');
+    await tester.tap(find.widgetWithText(FilledButton, '举报'));
+    await tester.pumpAndSettle();
+    expect(calls('forum.report').single, containsPair('floor_id', 501));
+    expect(calls('forum.report').single, containsPair('reason', '广告'));
+
+    // Own floor: edited in the editor, then the floor shows the new text.
+    await tester.longPress(find.text('第二楼回复：我也在看这门课！'));
+    await tester.pumpAndSettle();
+    expect(find.text('举报'), findsNothing);
+    await tester.tap(find.text('修改'));
+    await tester.pumpAndSettle();
+    expect(find.text('修改 ##502'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('forum-editor-content')),
+      '改过的回复',
+    );
+    await tester.tap(find.byKey(const Key('forum-editor-send')));
+    await tester.pumpAndSettle();
+    expect(calls('forum.floor.modify').single['content'], '改过的回复');
+    expect(find.text('改过的回复'), findsOneWidget);
+
+    await tester.longPress(find.text('改过的回复'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+    expect(calls('forum.floor.delete').single['floor_id'], 502);
+    expect(find.text('改过的回复'), findsNothing);
+  });
+
+  testWidgets('Top-right buttons go to the top and to the last floor', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrapTestWidget(HoleDetailPage(controller: controller, holeId: 101)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('回到顶部'), findsOneWidget);
+    expect(find.byTooltip('跳到底部'), findsOneWidget);
+    final list = find.byType(Scrollable).first;
+    ScrollPosition position() => tester.state<ScrollableState>(list).position;
+
+    await tester.tap(find.byTooltip('跳到底部'));
+    await tester.pumpAndSettle();
+    expect(position().pixels, position().maxScrollExtent);
+
+    await tester.tap(find.byTooltip('回到顶部'));
+    await tester.pumpAndSettle();
+    expect(position().pixels, 0);
+
+    // Only the original poster's floors.
+    await tester.tap(find.byTooltip('更多选项'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('只看洞主'));
+    await tester.pumpAndSettle();
+    expect(find.text('第二楼回复：我也在看这门课！'), findsNothing);
+    expect(find.text('首楼正文：复习微积分，欢迎讨论'), findsOneWidget);
+  });
 
   testWidgets(
     'Authentication: prompts campus.login when AuthenticationRequired occurs',
