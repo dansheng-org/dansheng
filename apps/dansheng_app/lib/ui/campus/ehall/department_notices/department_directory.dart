@@ -118,7 +118,7 @@ class DepartmentDirectory {
       shortName: '法学院',
       category: catHumanities,
       websiteUrl: 'https://law.fudan.edu.cn/',
-      noticeUrl: 'https://law.fudan.edu.cn/27188/list.htm',
+      noticeUrl: 'https://law.fudan.edu.cn/28093/list.htm',
     ),
     DepartmentInfo(
       id: 'sirpa',
@@ -126,7 +126,7 @@ class DepartmentDirectory {
       shortName: '国务学院',
       category: catHumanities,
       websiteUrl: 'https://sirpa.fudan.edu.cn/',
-      noticeUrl: 'https://sirpa.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://sirpa.fudan.edu.cn/35036/list.htm',
     ),
     DepartmentInfo(
       id: 'ssdpp',
@@ -159,7 +159,7 @@ class DepartmentDirectory {
       shortName: '管院',
       category: catHumanities,
       websiteUrl: 'https://www.fdsm.fudan.edu.cn/',
-      noticeUrl: 'https://www.fdsm.fudan.edu.cn/_s216/main.psp',
+      noticeUrl: 'https://www.fdsm.fudan.edu.cn/upec/download_ugedu/list.htm',
       noticeTitle: '通知与下载',
     ),
     DepartmentInfo(
@@ -176,7 +176,7 @@ class DepartmentDirectory {
       shortName: '马院',
       category: catHumanities,
       websiteUrl: 'https://som.fudan.edu.cn/',
-      noticeUrl: 'https://som.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://som.fudan.edu.cn/15048/list.htm',
     ),
     DepartmentInfo(
       id: 'ices',
@@ -202,7 +202,7 @@ class DepartmentDirectory {
       shortName: '物理系',
       category: catScienceEngineering,
       websiteUrl: 'https://phys.fudan.edu.cn/',
-      noticeUrl: 'https://phys.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://phys.fudan.edu.cn/7453/list.htm',
     ),
     DepartmentInfo(
       id: 'imp',
@@ -218,7 +218,7 @@ class DepartmentDirectory {
       shortName: '化学系',
       category: catScienceEngineering,
       websiteUrl: 'https://chemistry.fudan.edu.cn/',
-      noticeUrl: 'https://chemistry.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://chemistry.fudan.edu.cn/45208/list.htm',
     ),
     DepartmentInfo(
       id: 'polymer',
@@ -226,7 +226,7 @@ class DepartmentDirectory {
       shortName: '高分子系',
       category: catScienceEngineering,
       websiteUrl: 'http://polymer.fudan.edu.cn/',
-      noticeUrl: 'http://polymer.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'http://polymer.fudan.edu.cn/31394/list.htm',
     ),
     DepartmentInfo(
       id: 'env',
@@ -234,7 +234,7 @@ class DepartmentDirectory {
       shortName: '环境系',
       category: catScienceEngineering,
       websiteUrl: 'https://environment.fudan.edu.cn/',
-      noticeUrl: 'https://environment.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://environment.fudan.edu.cn/26493/list.htm',
     ),
     DepartmentInfo(
       id: 'aos',
@@ -242,7 +242,7 @@ class DepartmentDirectory {
       shortName: '大气海洋系',
       category: catScienceEngineering,
       websiteUrl: 'https://aos.fudan.edu.cn/',
-      noticeUrl: 'https://aos.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://aos.fudan.edu.cn/annoucement/list.htm',
     ),
     DepartmentInfo(
       id: 'mse',
@@ -250,7 +250,7 @@ class DepartmentDirectory {
       shortName: '材料系',
       category: catScienceEngineering,
       websiteUrl: 'https://mse.fudan.edu.cn/',
-      noticeUrl: 'https://mse.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://mse.fudan.edu.cn/22912/list.htm',
     ),
     DepartmentInfo(
       id: 'life',
@@ -258,7 +258,7 @@ class DepartmentDirectory {
       shortName: '生科院',
       category: catScienceEngineering,
       websiteUrl: 'https://life.fudan.edu.cn/',
-      noticeUrl: 'https://life.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://life.fudan.edu.cn/28139/list.htm',
     ),
     DepartmentInfo(
       id: 'sds',
@@ -266,7 +266,8 @@ class DepartmentDirectory {
       shortName: '大数据学院',
       category: catScienceEngineering,
       websiteUrl: 'https://sds.fudan.edu.cn/',
-      noticeUrl: 'https://sds.fudan.edu.cn/17412/list.htm',
+      noticeUrl: 'https://sds.fudan.edu.cn/zytz/list.htm',
+      noticeTitle: '重要通知',
     ),
     DepartmentInfo(
       id: 'aero',
@@ -282,7 +283,8 @@ class DepartmentDirectory {
       shortName: '微电子学院',
       category: catScienceEngineering,
       websiteUrl: 'https://sme.fudan.edu.cn/',
-      noticeUrl: 'https://sme.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://sme.fudan.edu.cn/29363/list.htm',
+      noticeTitle: '学院公告',
     ),
     DepartmentInfo(
       id: 'icmne',
@@ -314,7 +316,7 @@ class DepartmentDirectory {
       shortName: '未来能源创新学院',
       category: catScienceEngineering,
       websiteUrl: 'https://icome.fudan.edu.cn/',
-      noticeUrl: 'https://icome.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'http://icome.fudan.edu.cn/49262/list.htm',
     ),
     DepartmentInfo(
       id: 'fit',
@@ -322,8 +324,7 @@ class DepartmentDirectory {
       shortName: '未来信息学院',
       category: catScienceEngineering,
       websiteUrl: 'https://fit.fudan.edu.cn/',
-      noticeUrl: 'https://fit.fudan.edu.cn/Data/List/Fit-news',
-      noticeTitle: '新闻动态',
+      noticeUrl: 'https://fit.fudan.edu.cn/Data/List/event',
     ),
     DepartmentInfo(
       id: 'bme',
@@ -341,7 +342,7 @@ class DepartmentDirectory {
       shortName: '基础医学院',
       category: catMedicine,
       websiteUrl: 'https://basicmed.fudan.edu.cn/',
-      noticeUrl: 'https://basicmed.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://basicmed.fudan.edu.cn/30927/list.htm',
     ),
     DepartmentInfo(
       id: 'sph',
@@ -358,7 +359,7 @@ class DepartmentDirectory {
       shortName: '药学院',
       category: catMedicine,
       websiteUrl: 'https://spfdu.fudan.edu.cn/',
-      noticeUrl: 'https://spfdu.fudan.edu.cn/41426/list.htm',
+      noticeUrl: 'https://spfdu.fudan.edu.cn/28477/list.htm',
     ),
     DepartmentInfo(
       id: 'nursing',
@@ -374,7 +375,7 @@ class DepartmentDirectory {
       shortName: '中山医院',
       category: catMedicine,
       websiteUrl: 'https://www.zs-hospital.sh.cn/',
-      noticeUrl: 'https://www.zs-hospital.sh.cn/news/notice.html',
+      noticeUrl: 'https://shmc.fudan.edu.cn/news/tzgg/list.htm',
     ),
     DepartmentInfo(
       id: 'huashan',
@@ -390,7 +391,7 @@ class DepartmentDirectory {
       shortName: '口腔医院',
       category: catMedicine,
       websiteUrl: 'https://www.ssdc-fudan.com/',
-      noticeUrl: 'https://www.ssdc-fudan.com/info/notice',
+      noticeUrl: 'https://shmc.fudan.edu.cn/news/tzgg/list.htm',
     ),
     DepartmentInfo(
       id: 'sfms',
@@ -398,7 +399,7 @@ class DepartmentDirectory {
       shortName: '法医学学院',
       category: catMedicine,
       websiteUrl: 'https://sfms.fudan.edu.cn/',
-      noticeUrl: 'https://sfms.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://sfms.fudan.edu.cn/51779/list.htm',
     ),
 
     // --- 公共与继续教育 ---
@@ -408,7 +409,7 @@ class DepartmentDirectory {
       shortName: '体教部',
       category: catGeneral,
       websiteUrl: 'https://fdty.fudan.edu.cn/',
-      noticeUrl: 'https://fdty.fudan.edu.cn/tzgg/list.htm',
+      noticeUrl: 'https://fdty.fudan.edu.cn/29222/list.htm',
     ),
     DepartmentInfo(
       id: 'cce',
