@@ -27,6 +27,10 @@ Core 包含 `cargo fmt --all -- --check`、`cargo test --workspace --all-feature
 
 自托管 Windows/Linux runner 的分工、预装环境接口、缓存/签名隔离与 smoke 验收见 [自托管 CI](self-hosted-ci.md)。CI 手写 Dart 格式检查使用相对路径、每批最多 32 个文件，并排除 Pigeon 生成的 `lib/bridge.g.dart`。
 
+Native CI 的 Rust fmt、全 workspace 测试和严格 Clippy 仍按原命令执行。耗时较长的 worktree/依赖隔离夹具按变更范围调度：工作区工具、构建脚本或 CI 配置发生变化时执行；已知类型的普通业务源码、测试与文档变动不重复执行这些 Git 夹具。`pubspec.yaml` 只有版本行变化时也按产品变动处理，依赖与 SDK 配置变化仍执行夹具。未知文件、手动全量运行，以及无法可靠取得比较基线或变更清单的情况，均执行完整夹具。判定步骤自身失败也回退到完整执行。调度决定和原因会写入 job 日志。
+
+Windows native job 使用 Cargo 的 `strip = symbols` 配置移除 dev/test 产物的符号表，减少程序体积；测试断言和溢出检查沿用原设置。该配置仅通过 CI 环境变量生效，本地开发配置和发布构建配置各自独立。首次切换 profile 设置需要重新编译依赖，后续仍复用持久编译缓存。性能验证应分别记录编译、测试程序首次启动和测试体执行耗时；启动检查仍可能发生。
+
 本地共享检查使用 `git ls-files`、`git check-ignore -v`、链接目标和双向读取。没有第二个授权 worktree 时不能声称跨工作树已实测。Claude 配置语法与实际加载结果也应分开报告。
 
 ## Rust 集成测试调试入口
