@@ -37,10 +37,15 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          fetch-depth: 2
       - name: Initialize preinstalled Windows environment
         if: runner.os == 'Windows'
         working-directory: ${{ github.workspace }}
-        run: ./scripts/ci/Initialize-Runner.ps1 -Role Native
+        run: |
+          ./scripts/ci/Initialize-Runner.ps1 -Role Native
+          # GNU COFF symbol tables account for roughly a third of test EXE size.
+          'CARGO_PROFILE_DEV_STRIP=symbols' >> $env:GITHUB_ENV
+          'CARGO_PROFILE_TEST_STRIP=symbols' >> $env:GITHUB_ENV
       - name: Initialize preinstalled Linux environment
         if: runner.os == 'Linux'
         shell: bash
@@ -50,6 +55,24 @@ jobs:
           : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
           source "$DANSHENG_CI_ROOT/runner-env.sh"
           pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Native
+      - name: Test affected-check scheduling
+        if: ${{ !inputs.smoke }}
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/ci/tests/AffectedChecks.Tests.ps1
+      - name: Determine workspace fixture changes
+        id: affected
+        continue-on-error: true
+        if: ${{ !inputs.smoke }}
+        working-directory: ${{ github.workspace }}
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_EVENT_PATH: ${{ github.event_path }}
+          CI_CHECKOUT_SHA: ${{ github.sha }}
+          CI_CHECKOUT_REF: ${{ github.ref }}
+        run: >-
+          ./scripts/ci/Get-AffectedChecks.ps1 -RepositoryRoot .
+          -EventName $env:CI_EVENT_NAME -EventPath $env:CI_EVENT_PATH
+          -ExpectedSha $env:CI_CHECKOUT_SHA -ExpectedRef $env:CI_CHECKOUT_REF
       - run: cargo fmt --all -- --check
         if: ${{ !inputs.smoke }}
       - run: cargo test --workspace --all-features --all-targets --locked
@@ -57,11 +80,11 @@ jobs:
       - run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
         if: ${{ !inputs.smoke }}
       - name: Worktree workflow integration fixtures
-        if: ${{ !inputs.smoke }}
+        if: ${{ !inputs.smoke && (steps.affected.outcome != 'success' || steps.affected.outputs.workspace_fixtures != 'false') }}
         # Both suites run side by side in separate processes (see the script).
         run: ../scripts/ci/Invoke-WorkspaceFixtures.ps1 -CoreRoot . -OutputRoot $env:DANSHENG_TASK_RUNTIME
       - name: Dependency cache isolation fixtures
-        if: runner.os == 'Windows' && !inputs.smoke
+        if: runner.os == 'Windows' && !inputs.smoke && (steps.affected.outcome != 'success' || steps.affected.outputs.workspace_fixtures != 'false')
         run: ./tools/workspace/tests/Test-Environment.ps1 -OutputRoot (Join-Path $env:DANSHENG_TASK_RUNTIME 'environment-fixtures')
       - name: Remove this job's Rust build outputs
         if: always()
