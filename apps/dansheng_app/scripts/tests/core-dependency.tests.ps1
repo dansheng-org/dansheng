@@ -64,15 +64,14 @@ try{
     Assert-Equal (Get-DanshengAppRuntimeOutput -RuntimeRoot $outputRuntime -Path (Join-Path $outputRuntime 'signing/android-beta')) (Join-Path $outputRuntime 'signing/android-beta') 'signing output validates without Core runtime helpers'
     Assert-Rejected {Get-DanshengAppRuntimeOutput -RuntimeRoot $outputRuntime -Path $outputRuntime} 'signing directory rejects runtime root'
     Assert-Rejected {Get-DanshengAppRuntimeOutput -RuntimeRoot $outputRuntime -Path (Join-Path $fixture 'outside-signing')} 'signing directory rejects external output'
-    if($IsWindows){
-        [void][IO.Directory]::CreateDirectory($outputRuntime)
-        $link=Join-Path $outputRuntime 'linked-signing'
-        $outside=Join-Path $fixture 'outside-signing'
-        [void][IO.Directory]::CreateDirectory($outside)
-        [void](New-Item -ItemType Junction -Path $link -Target $outside)
-        Assert-Rejected {Get-DanshengAppRuntimeOutput -RuntimeRoot $outputRuntime -Path (Join-Path $link 'new-key')} 'signing directory rejects a linked descendant before writing'
-        Assert-Equal @(Get-ChildItem -LiteralPath $outside -Force).Count 0 'linked target remains untouched'
-    }
+    [void][IO.Directory]::CreateDirectory($outputRuntime)
+    $link=Join-Path $outputRuntime 'linked-signing'
+    $outside=Join-Path $fixture 'outside-signing'
+    [void][IO.Directory]::CreateDirectory($outside)
+    $linkKind=if($IsWindows){'Junction'}else{'SymbolicLink'}
+    [void](New-Item -ItemType $linkKind -Path $link -Target $outside)
+    Assert-Rejected {Get-DanshengAppRuntimeOutput -RuntimeRoot $outputRuntime -Path (Join-Path $link 'new-key')} 'signing directory rejects a linked descendant before writing'
+    Assert-Equal @(Get-ChildItem -LiteralPath $outside -Force).Count 0 'linked target remains untouched'
     $legacy=Test-DanshengAppCoreDependency -AppRoot $app -CoreRoot (Join-Path $fixture 'dansheng') -ArtifactDirectory (Join-Path $app 'sdk')
     Assert-Equal $legacy.state 'legacy_native_receipt' 'legacy mode explicitly unverified'
     Assert-Rejected {Test-DanshengAppCoreDependency -AppRoot $app -CoreRoot (Join-Path $fixture 'dansheng') -ArtifactDirectory (Join-Path $app 'sdk') -ForRelease} 'stable mode needs lock'

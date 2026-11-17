@@ -6,7 +6,7 @@
 
 | 现有检查 / job | 实际 runner labels | 覆盖 |
 | --- | --- | --- |
-| workspace-scripts | `[self-hosted, windows, x64, dansheng-win]` | App/Core 路径、锁、APK archive、prerelease、monorepo、Python audit 与 workspace entry 夹具 |
+| workspace-scripts | `[self-hosted, linux, x64, 1402ubuntu]` | Bash 入口；App/Core 路径、锁、APK archive、prerelease、monorepo、CI 缓存、Python audit 与 workspace entry 夹具 |
 | flutter | `[self-hosted, linux, x64, 1402ubuntu]` | 锁定 Pub、手写格式、analyze、test、Pigeon 生成差异 |
 | core / native (ubuntu-latest) | Linux 同上 | fmt、全 workspace/all-features/all-targets tests、strict Clippy、workspace/monorepo 夹具 |
 | core / native (windows-latest) | Windows 同上 | 同上，另含依赖缓存隔离夹具；使用 GNU Rust，无需 MSVC |
@@ -16,6 +16,8 @@
 | Pre-release build / publish | Linux 同上 | exact SHA SDK、原 GitHub Secrets 签名、ARM64 release、原有 APK/ELF/16 KiB/签名审计、SHA256SUMS、不可覆盖发布 |
 
 `native` 的矩阵显示名保留 `ubuntu-latest` / `windows-latest`，以保留原 required-check 名称；它们不是 `runs-on`。实际调度只读取矩阵中的四个 self-hosted labels。
+
+`workspace-scripts` 在 Linux 使用 Bash 启动，现有 `.ps1` 工具的回归测试由预装的 PowerShell 7 执行，Python audit 测试由 Bash 直接调用。全部脚本夹具与 Windows native job 并行调度；Windows runner 保留原生编译和 Rust 检查。
 
 PR job 在调度前要求 `head.repo.full_name == github.repository`；外部 fork 的所有执行 job 跳过，不 checkout 或执行 fork 代码。不使用 `pull_request_target`。正常 push 仅监听 main。所有 checkout 固定到事件的精确 SHA，PR 使用 GitHub merge SHA；预发布使用成功 main push 的 `workflow_run.head_sha`。checkout 不持久化 token。
 

@@ -22,36 +22,31 @@ concurrency:
 jobs:
   workspace-scripts:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, windows, x64, dansheng-win]
+    runs-on: [self-hosted, linux, x64, 1402ubuntu]
     defaults:
       run:
+        shell: bash
         working-directory: apps/dansheng_app
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Initialize preinstalled Windows environment
-        shell: pwsh
+      - name: Initialize preinstalled Linux environment
         working-directory: ${{ github.workspace }}
-        run: ./scripts/ci/Initialize-Runner.ps1 -Role Workspace
+        run: |
+          set -euo pipefail
+          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
+          source "$DANSHENG_CI_ROOT/runner-env.sh"
+          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Workspace
       - name: Core dependency path and payload fixtures
         if: ${{ !inputs.smoke }}
-        shell: pwsh
         run: |
-          ./scripts/tests/core-dependency.tests.ps1
-          ./scripts/tests/core-tools.tests.ps1
-          ./scripts/tests/apk-archive.tests.ps1
-          ./scripts/tests/prerelease.tests.ps1
-          ./scripts/tests/android-host.tests.ps1
-          ./scripts/tests/build-parallelism.tests.ps1
-          ./scripts/tests/monorepo-paths.tests.ps1
-          ../../scripts/ci/tests/Runner.Tests.ps1
-          ../../scripts/ci/tests/PublicCaches.Tests.ps1
-          ../../scripts/ci/tests/BuildOutputs.Tests.ps1
+          set -euo pipefail
+          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
+          source "$DANSHENG_CI_ROOT/runner-env.sh"
+          pwsh -NoLogo -NoProfile -File ../../scripts/ci/Test-WorkspaceScripts.ps1
           python ./scripts/tests/audit-paths.test.py
-          if ($LASTEXITCODE -ne 0) { throw 'APK audit path fixtures failed.' }
-          ../../scripts/tests/Enter.Tests.ps1 -FixtureRoot (Join-Path $env:DANSHENG_TASK_RUNTIME 'entry-fixtures')
   flutter:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, 1402ubuntu]
