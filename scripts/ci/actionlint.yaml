@@ -2,3 +2,4 @@ self-hosted-runner:
   labels:
     - dansheng-win
     - 1402ubuntu
+    - dansheng-scripts
