@@ -150,7 +150,8 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
           errStr.contains('InvalidCredentials') ||
           errStr.contains('401') ||
           errStr.contains('postgraduates_need_login') ||
-          errStr.contains('InteractiveLoginRequired');
+          errStr.contains('InteractiveLoginRequired') ||
+          errStr.contains('WebVpnLoginRequired');
 
       dynamic cachedData;
       try {

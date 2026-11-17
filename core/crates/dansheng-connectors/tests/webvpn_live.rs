@@ -29,9 +29,9 @@ fn credentials() -> (String, String) {
             .unwrap_or(raw)
             .to_owned();
         match key.trim().to_ascii_lowercase().as_str() {
-            "user" => user = Some(value),
-            "password" => password = Some(value),
-            "yunpanpassword" => CLOUD.with(|c| *c.borrow_mut() = Some(value)),
+            "user" | "username" | "account" | "student_id" | "id" => user = Some(value),
+            "password" | "pass" | "pwd" => password = Some(value),
+            "yunpanpassword" | "cloud_password" | "cloudpassword" => CLOUD.with(|c| *c.borrow_mut() = Some(value)),
             _ => {}
         }
     }
@@ -290,8 +290,8 @@ async fn switched_on_campus_services_sign_in_and_read_through_webvpn() {
             json!({"mode": std::env::var("DANSHENG_WEBVPN_MODE").unwrap_or_else(|_| "gateway".into())}),
         ),
         (
-            "fudan.life.login",
-            json!({"service":"webvpn","password":password}),
+            "fudan.webvpn.login",
+            json!({"password":password}),
         ),
         ("fudan.webvpn.status", json!({})),
         ("canvas.uis.login", json!({"password":password})),
@@ -300,6 +300,7 @@ async fn switched_on_campus_services_sign_in_and_read_through_webvpn() {
         ("fudan.ecard.balance", json!({})),
         ("fudan.academic.login", json!({"password":password})),
         ("fudan.semesters", json!({})),
+        ("fudan.rooms", json!({"building":"HGX","date":"2026-11-17"})),
     ];
     for (method, mut params) in steps {
         params["account_id"] = json!(user);

@@ -171,7 +171,7 @@ internal class CampusServices(
     /** Only a read can be retried after restoring its login. No UI is opened in the background. */
     private suspend fun read(method:String, p:JSONObject, account:String,epoch:Long):Any? {
         try{checked(account,epoch);return rt.request(method,p)}catch(e:PortError){
-            if(e.code!="AuthenticationRequired" && !(method.startsWith("canvas.") && e.code=="ConfigurationRequired") &&
+            if(e.code !in setOf("AuthenticationRequired", "WebVpnLoginRequired") && !(method.startsWith("canvas.") && e.code=="ConfigurationRequired") &&
                 !(method=="fudan.rooms" && e.code in setOf("PermissionDenied","SourceTransportUnavailable","Timeout")))throw e
             val service=when {
                 method.startsWith("canvas.") -> "canvas"
