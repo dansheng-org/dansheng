@@ -159,8 +159,8 @@ class DepartmentDirectory {
       shortName: '管院',
       category: catHumanities,
       websiteUrl: 'https://www.fdsm.fudan.edu.cn/',
-      noticeUrl: 'https://www.fdsm.fudan.edu.cn/upec/download_ugedu/list.htm',
-      noticeTitle: '通知与下载',
+      noticeUrl: 'https://www.fdsm.fudan.edu.cn/AboutUs/SchoolNews.html',
+      noticeTitle: '学院要闻与公告',
     ),
     DepartmentInfo(
       id: 'fisf',
@@ -210,7 +210,8 @@ class DepartmentDirectory {
       shortName: '现物所',
       category: catScienceEngineering,
       websiteUrl: 'https://imp.fudan.edu.cn/',
-      noticeUrl: 'https://imp.fudan.edu.cn/48897/list.htm',
+      noticeUrl: 'https://imp.fudan.edu.cn/48959/list.htm',
+      noticeTitle: '招生与培养公告',
     ),
     DepartmentInfo(
       id: 'chem',
@@ -332,7 +333,7 @@ class DepartmentDirectory {
       shortName: '生医工创新学院',
       category: catScienceEngineering,
       websiteUrl: 'https://bme-college.fudan.edu.cn/',
-      noticeUrl: 'https://bme-college.fudan.edu.cn/tzgg_55734/list.htm',
+      noticeUrl: 'https://bme-college.fudan.edu.cn/tzgg/list.htm',
     ),
 
     // --- 医学部 ---
@@ -383,7 +384,7 @@ class DepartmentDirectory {
       shortName: '华山医院',
       category: catMedicine,
       websiteUrl: 'https://www.huashan.org.cn/',
-      noticeUrl: 'https://www.huashan.org.cn/xwdt/hsgg.htm',
+      noticeUrl: 'https://shmc.fudan.edu.cn/news/tzgg/list.htm',
     ),
     DepartmentInfo(
       id: 'kqyy',

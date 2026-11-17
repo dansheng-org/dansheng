@@ -47,6 +47,21 @@ void main() {
       final pharm = DepartmentDirectory.byId('pharm');
       expect(pharm, isNotNull);
       expect(pharm!.noticeUrl, 'https://spfdu.fudan.edu.cn/28477/list.htm');
+
+      final bme = DepartmentDirectory.byId('bme');
+      expect(bme, isNotNull);
+      expect(bme!.noticeUrl, 'https://bme-college.fudan.edu.cn/tzgg/list.htm');
+
+      final imp = DepartmentDirectory.byId('imp');
+      expect(imp, isNotNull);
+      expect(imp!.noticeUrl, 'https://imp.fudan.edu.cn/48959/list.htm');
+
+      final fdsm = DepartmentDirectory.byId('fdsm');
+      expect(fdsm, isNotNull);
+      expect(
+        fdsm!.noticeUrl,
+        'https://www.fdsm.fudan.edu.cn/AboutUs/SchoolNews.html',
+      );
     });
 
     test('parseSubscribed handles null, empty, and custom selections', () {
@@ -127,6 +142,72 @@ void main() {
         'https://spfdu.fudan.edu.cn/24/dd/c12493a795869/page.htm',
       );
       expect(items[0].departmentId, 'pharm');
+    });
+
+    test(
+      'handles empty outer links and duplicate thumbnail links properly',
+      () {
+        const sampleHtml = '''
+        <table>
+          <tr>
+            <td>
+              <a href="" target="_blank"><a href='/25/dd/c38876a796125/page.htm' title='循证护理与证据整合研讨班招生通知'>循证护理与证据整合研讨班招生通知</a></a>
+            </td>
+            <td>2026-10-26</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="news_imgs"><a href="/33/6a/c28093a799594/page.htm"></a></div>
+              <div class="news_days">2026.11.14</div>
+              <div class="news_title"><a href="/33/6a/c28093a799594/page.htm">法学研讨会开幕通知</a></div>
+            </td>
+          </tr>
+        </table>
+      ''';
+
+        final dept = DepartmentDirectory.byId('nursing')!;
+        final items = DepartmentNoticeService.parseHtml(sampleHtml, dept);
+
+        expect(items.length, 2);
+        expect(items[0].title, '循证护理与证据整合研讨班招生通知');
+        expect(items[0].date, '2026-10-26');
+        expect(items[1].title, '法学研讨会开幕通知');
+        expect(items[1].date, '2026-11-14');
+      },
+    );
+
+    test('parses two-part day-first dates and inline SVG timestamps', () {
+      const sampleHtml = '''
+        <ul>
+          <li>
+            <div class="li-date"><p>19</p><span>2025-06</span></div>
+            <a href="/45/0a/c22912a738570/page.htm" title="硕博连读选拔公告">硕博连读选拔公告</a>
+          </li>
+          <li>
+            <a href="/8c/a3/c30286a756899/page.htm" title="数学学者论坛">数学学者论坛</a>
+            <div class="news_time">
+              <svg><path d="M0,0 L10,10"/></svg>
+              2026-11-17
+            </div>
+          </li>
+          <li>
+            <a href="/show-420-6740.html">工商管理硕士研究生招生复试工作实施细则</a>
+            <span class="news-time">2026-03-20</span>
+          </li>
+        </ul>
+      ''';
+
+      final dept = DepartmentDirectory.byId('mse')!;
+      final items = DepartmentNoticeService.parseHtml(sampleHtml, dept);
+
+      expect(items.length, 3);
+      expect(items[0].title, '硕博连读选拔公告');
+      expect(items[0].date, '2025-06-19');
+      expect(items[1].title, '数学学者论坛');
+      expect(items[1].date, '2026-11-17');
+      expect(items[2].title, '工商管理硕士研究生招生复试工作实施细则');
+      expect(items[2].date, '2026-03-20');
+      expect(items[2].url, 'https://mse.fudan.edu.cn/show-420-6740.html');
     });
 
     test('getTileData formats TileFacts note and rows', () async {
