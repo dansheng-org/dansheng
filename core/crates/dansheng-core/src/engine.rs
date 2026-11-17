@@ -271,11 +271,12 @@ impl Engine {
             if let Some(account) = &account {
                 self.ensure_session_loaded(account).await?;
             }
-            // A `.read` service changes nothing remotely, even when a query goes out
-            // as POST. A sign-in for another service can replace a session while it
-            // runs; that is no uncertain write, and reporting one made pages show
-            // "result needs reconciliation" right after logging in.
-            let query = capability.ends_with(".read");
+            // `.read` and `.login` services change nothing remotely, even when they
+            // send POST: a query, or a sign-in whose very purpose is a new session.
+            // A changed session after them is no uncertain write. Treating it as one
+            // made every forum sign-in on an account with other sessions report
+            // "result needs reconciliation", and pages after logging in did too.
+            let query = capability.ends_with(".read") || capability.ends_with(".login");
             let engine = self.clone();
             let bound_principal = principal.clone();
             let bound_account = account.clone();

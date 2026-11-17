@@ -377,6 +377,7 @@ impl crate::services::CoreService for WriteFixtureService {
             ("fixture.send", "fixture.write"),
             ("fixture.read", "fixture.read"),
             ("fixture.query", "fixture.read"),
+            ("fixture.signin", "fixture.login"),
         ]
     }
 
@@ -402,7 +403,7 @@ impl crate::services::CoreService for WriteFixtureService {
                     policy(&self.origin),
                 )
                 .await?
-        } else if method == "fixture.query" {
+        } else if method == "fixture.query" || method == "fixture.signin" {
             // A query the school only answers to POST; it changes nothing.
             context
                 .network
@@ -508,7 +509,12 @@ async fn engine_fixture(
         }))
         .unwrap();
     let grant = Grant {
-        capabilities: ["fixture.write".into(), "fixture.read".into()].into(),
+        capabilities: [
+            "fixture.write".into(),
+            "fixture.read".into(),
+            "fixture.login".into(),
+        ]
+        .into(),
         account_ids: ["a".into()].into(),
         origins: [origin.into()].into(),
         allow_private_network: true,
@@ -752,8 +758,13 @@ async fn engine_read_revocation_still_rejects_sensitive_results() {
 }
 
 #[tokio::test]
-async fn engine_query_sent_as_post_is_no_uncertain_write_when_a_session_changes() {
-    for (change, expected) in [("replace", None), ("capability", Some("PermissionDenied"))] {
+async fn engine_query_or_sign_in_sent_as_post_is_no_uncertain_write_when_a_session_changes() {
+    for (method, change, expected) in [
+        ("fixture.query", "replace", None),
+        ("fixture.query", "capability", Some("PermissionDenied")),
+        // A sign-in replaces the session by design (the forum sign-in did).
+        ("fixture.signin", "replace", None),
+    ] {
         let temp = tempfile::tempdir().unwrap();
         let pause = Arc::new(TestDispatchPause::default());
         let (origin, network, requests, server) =
@@ -764,7 +775,7 @@ async fn engine_query_sent_as_post_is_no_uncertain_write_when_a_session_changes(
             engine_call(
                 &task_engine,
                 writer(),
-                "fixture.query",
+                method,
                 serde_json::json!({"account_id":"a"}),
             )
             .await
@@ -778,7 +789,7 @@ async fn engine_query_sent_as_post_is_no_uncertain_write_when_a_session_changes(
         assert_eq!(
             response.error.map(|e| e.code),
             expected.map(str::to_string),
-            "{change}"
+            "{method}: {change}"
         );
         let seen = requests.lock().unwrap();
         assert_eq!(seen.len(), 1);
