@@ -31,7 +31,9 @@ fn credentials() -> (String, String) {
         match key.trim().to_ascii_lowercase().as_str() {
             "user" | "username" | "account" | "student_id" | "id" => user = Some(value),
             "password" | "pass" | "pwd" => password = Some(value),
-            "yunpanpassword" | "cloud_password" | "cloudpassword" => CLOUD.with(|c| *c.borrow_mut() = Some(value)),
+            "yunpanpassword" | "cloud_password" | "cloudpassword" => {
+                CLOUD.with(|c| *c.borrow_mut() = Some(value))
+            }
             _ => {}
         }
     }
@@ -289,10 +291,7 @@ async fn switched_on_campus_services_sign_in_and_read_through_webvpn() {
             "fudan.webvpn.configure",
             json!({"mode": std::env::var("DANSHENG_WEBVPN_MODE").unwrap_or_else(|_| "gateway".into())}),
         ),
-        (
-            "fudan.webvpn.login",
-            json!({"password":password}),
-        ),
+        ("fudan.webvpn.login", json!({"password":password})),
         ("fudan.webvpn.status", json!({})),
         ("canvas.uis.login", json!({"password":password})),
         ("canvas.courses.sync", json!({})),

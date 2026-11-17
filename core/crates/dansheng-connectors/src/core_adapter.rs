@@ -82,13 +82,17 @@ fn gateway_only(context: &ServiceContext<'_>, account: &str, origin: &str) -> bo
 /// Whether `origin` may fall back to WebVPN (not explicitly direct-only) for this account.
 #[cfg(feature = "webvpn")]
 fn gateway_fallback_allowed(context: &ServiceContext<'_>, account: &str, origin: &str) -> bool {
-    context.network.routes(account).map(|routes| {
-        routes.is_empty()
-            || routes.iter().any(|route| {
-                route.origin == origin
-                    && route.mode != dansheng_core::network_routes::RouteMode::Direct
-            })
-    }).unwrap_or(true)
+    context
+        .network
+        .routes(account)
+        .map(|routes| {
+            routes.is_empty()
+                || routes.iter().any(|route| {
+                    route.origin == origin
+                        && route.mode != dansheng_core::network_routes::RouteMode::Direct
+                })
+        })
+        .unwrap_or(true)
 }
 
 /// Signs in to one UIS service. With WebVPN switched on for the service the
@@ -140,7 +144,10 @@ async fn uis_sign_in(
         {
             use crate::login::{LoginError, LoginTarget, login, login_via_gateway};
             let gateway = crate::webvpn::GATEWAY_ORIGIN;
-            let cookies = context.network.session_cookies(account, gateway).unwrap_or_default();
+            let cookies = context
+                .network
+                .session_cookies(account, gateway)
+                .unwrap_or_default();
             let session = match login_via_gateway(account, password, target, &cookies).await {
                 Err(LoginError::GatewaySessionRequired) => {
                     let vpn = login(account, password, LoginTarget::WebVpn)
@@ -168,7 +175,11 @@ async fn uis_sign_in(
         .set_session(account, &session.origin, None, session.cookies)?;
     #[cfg(feature = "webvpn")]
     if target == crate::login::LoginTarget::WebVpn
-        || context.network.routes(account).map(|r| r.is_empty()).unwrap_or(true)
+        || context
+            .network
+            .routes(account)
+            .map(|r| r.is_empty())
+            .unwrap_or(true)
     {
         initialize_webvpn_routes(context, account)?;
     }
@@ -1025,13 +1036,18 @@ impl CoreService for CampusService {
                     if matches!(
                         err,
                         crate::login::LoginError::NetworkError | crate::login::LoginError::Timeout
-                    ) && gateway_fallback_allowed(&context, account, crate::fudan_cloud::ORIGIN) =>
+                    ) && gateway_fallback_allowed(
+                        &context,
+                        account,
+                        crate::fudan_cloud::ORIGIN,
+                    ) =>
                 {
                     let gateway = crate::webvpn::GATEWAY_ORIGIN;
                     let cookies = context.network.session_cookies(account, gateway)?;
-                    let session = crate::fudan_cloud::login_via_gateway(account, password, &cookies)
-                        .await
-                        .map_err(|e| CoreError::new(e.code(), e.message()))?;
+                    let session =
+                        crate::fudan_cloud::login_via_gateway(account, password, &cookies)
+                            .await
+                            .map_err(|e| CoreError::new(e.code(), e.message()))?;
                     context
                         .network
                         .set_session(account, gateway, None, session.cookies)?;
@@ -1058,7 +1074,13 @@ impl CoreService for CampusService {
                 ));
             }
             let password = required_string(&params, "password")?;
-            uis_sign_in(&context, account, password, crate::login::LoginTarget::WebVpn).await?;
+            uis_sign_in(
+                &context,
+                account,
+                password,
+                crate::login::LoginTarget::WebVpn,
+            )
+            .await?;
             let routes_count = context
                 .network
                 .routes(account)?
@@ -1314,7 +1336,8 @@ impl CoreService for CampusService {
                         let gateway = crate::webvpn::GATEWAY_ORIGIN;
                         let mut cookies = context.network.session_cookies(account, gateway)?;
                         let mut first =
-                            login_via_gateway(account, password, LoginTarget::Canvas, &cookies).await;
+                            login_via_gateway(account, password, LoginTarget::Canvas, &cookies)
+                                .await;
                         if matches!(first, Err(LoginError::GatewaySessionRequired)) {
                             cookies = login(account, password, LoginTarget::WebVpn)
                                 .await
@@ -1323,21 +1346,16 @@ impl CoreService for CampusService {
                             context
                                 .network
                                 .set_session(account, gateway, None, cookies.clone())?;
-                            first = login_via_gateway(
-                                account,
-                                password,
-                                LoginTarget::Canvas,
-                                &cookies,
-                            )
-                            .await;
+                            first =
+                                login_via_gateway(account, password, LoginTarget::Canvas, &cookies)
+                                    .await;
                         }
                         first.map_err(fail)?
                     }
                     Err(err) => return Err(CoreError::new(err.code(), err.message())),
                 };
                 #[cfg(not(feature = "webvpn"))]
-                let session =
-                    direct_result.map_err(|e| CoreError::new(e.code(), e.message()))?;
+                let session = direct_result.map_err(|e| CoreError::new(e.code(), e.message()))?;
                 if session.origin != origin && session.origin != crate::webvpn::GATEWAY_ORIGIN {
                     return Err(CoreError::new(
                         "UnsafeRedirect",
@@ -1379,7 +1397,12 @@ impl CoreService for CampusService {
                 .network
                 .set_session(account, &session.origin, None, session.cookies)?;
             #[cfg(feature = "webvpn")]
-            if context.network.routes(account).map(|r| r.is_empty()).unwrap_or(true) {
+            if context
+                .network
+                .routes(account)
+                .map(|r| r.is_empty())
+                .unwrap_or(true)
+            {
                 initialize_webvpn_routes(&context, account)?;
             }
             context.store.kv_set(
@@ -1471,7 +1494,9 @@ impl CoreService for CampusService {
                         .header(reqwest::header::COOKIE, header)
                         .send()
                         .await
-                        .map_err(|_| CoreError::new("NetworkError", "Canvas profile unavailable"))?;
+                        .map_err(|_| {
+                            CoreError::new("NetworkError", "Canvas profile unavailable")
+                        })?;
                     if vpn_resp.status().is_redirection() {
                         return Err(CoreError::new(
                             "WebVpnLoginRequired",

@@ -204,8 +204,8 @@ class _WebVpnSettingsCardState extends State<WebVpnSettingsCard> {
                   status.mode == 'mixed'
                       ? (status.enabled ? 'auto' : 'direct')
                       : (status.mode == 'gateway' || status.mode == 'auto'
-                          ? status.mode
-                          : 'direct')
+                            ? status.mode
+                            : 'direct'),
                 },
                 onSelectionChanged: _busy
                     ? null
