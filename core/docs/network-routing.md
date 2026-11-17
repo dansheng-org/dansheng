@@ -57,7 +57,8 @@ WebView 的页面上下文请求保持原平台端口；本模块不把页面 fe
 - 网关只携带 WebVPN Cookie，站点会话保存在 WebVPN 服务端。实测（2026-11-15）WebVPN 会话不会把 UIS 单点登录带进被代理站点：elearning、fdjwgl、ecard、zlapp、my 经网关都会跳到被代理的 id.fudan.edu.cn 登录页。因此开启后各服务的登录也必须经网关完成：
   - `login::login_via_gateway` 复用同一 UIS 登录流程，只替换传输层：逻辑 URL 编码为网关地址，响应 `Location` 和页面内被网关改写的链接（`webvpn::decode_text`）还原为逻辑 URL，原有的跳转目标、票据和口令重放检查保持不变；成功后导出更新后的 WebVPN Cookie。
   - `uis_sign_in` / `canvas.uis.login` 在目标源为 `gateway` 时走网关登录；WebVPN 会话缺失或过期时用同一 UIS 口令先登录 WebVPN 再重试一次（口令已提交后不再重试）。
-  - 云盘口令不是 UIS 口令：`fudan.cloud.login` 与 `canvas.token.bind` 在 WebVPN 会话缺失时返回 `WebVpnLoginRequired`，由 Android 宿主先登录 WebVPN 再重试。
+  - 云盘默认使用 UIS 口令，但可在云盘单独修改：Android 宿主依次尝试已保存的云盘口令、已保存的 UIS 口令（云盘拒绝过的 UIS 口令以摘要记录，不再重发），仅在云盘明确返回 `InvalidCredentials` 时才弹窗；`Timeout`/网络错误原样上报，不弹窗。`fudan.cloud.login` 与 `canvas.token.bind` 在 WebVPN 会话缺失时返回 `WebVpnLoginRequired`，由宿主先登录 WebVPN 再重试。
+  - 云盘会话独立于 WebVPN 会话：直连会话不随开关进入网关。云盘在无会话时以 200 和空 protobuf 应答 `/user`，Core 将其报告为 `AuthenticationRequired`（空目录列表同样先核对会话），宿主据此在 WebVPN 内重新登录云盘。
 - 数据请求遇到网关跳往被代理的身份认证页时，`decode_location` 已返回 `AuthenticationRequired`，宿主据此重新登录（经网关）。
 - 树洞的登录不经过 WebVPN，网关会话缺失或过期不能报成树洞 `AuthenticationRequired`：宿主会据此丢弃已保存的树洞口令并重新索要。树洞令牌仍在而请求被网关拒绝时（`forum_actions` 的读取，以及连接器传输层对 `FORUM_ORIGINS` 的 Bearer 读取）返回 `WebVpnLoginRequired`，宿主只用已保存的 UIS 口令恢复 WebVPN 会话后重试该读取。
 - `community.tea.login` 是幂等的登录请求，不产生远端写入：直连没有得到应答（或树洞路由为 `gateway`）时改经 WebVPN 发送；发送前先用一次 GET 确认网关会话仍有效，缺失或过期返回 `WebVpnLoginRequired`。没有应答的登录报网络错误，不报 `NeedsReconciliation`。发帖、回复仍然不跨路由重发。

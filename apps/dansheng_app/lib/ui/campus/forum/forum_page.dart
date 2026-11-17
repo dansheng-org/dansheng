@@ -99,18 +99,7 @@ class _ForumPageState extends State<ForumPage> {
 
     try {
       // 1. Load divisions
-      List<TeaDivision> divisions = [];
-      try {
-        divisions = await _service.fetchDivisions();
-      } catch (e) {
-        // Divisions might fail or require login
-        if (e.toString().contains('ForumConsentRequired') ||
-            e.toString().contains('AuthenticationRequired') ||
-            e.toString().contains('AccountRequired')) {
-          _authRequired = true;
-          rethrow;
-        }
-      }
+      final divisions = await _fetchDivisions();
 
       // 2. Load holes
       final holes = await _service.fetchHoles(
@@ -123,7 +112,7 @@ class _ForumPageState extends State<ForumPage> {
 
       if (mounted) {
         setState(() {
-          _divisions = divisions;
+          if (divisions.isNotEmpty) _divisions = divisions;
           _holes = holes;
           _hasMore = holes.length >= _pageSize;
           _isLoading = false;
@@ -146,6 +135,73 @@ class _ForumPageState extends State<ForumPage> {
               errText.contains('登录');
         });
       }
+    }
+  }
+
+  /// The division list. A sign-in demand is passed on; any other failure
+  /// falls back to the copy the host cached from the last successful read, so
+  /// the division buttons do not vanish with one bad request.
+  Future<List<TeaDivision>> _fetchDivisions() async {
+    try {
+      return await _service.fetchDivisions();
+    } catch (e) {
+      final code = e.toString();
+      if (code.contains('ForumConsentRequired') ||
+          code.contains('AuthenticationRequired') ||
+          code.contains('AccountRequired')) {
+        _authRequired = true;
+        rethrow;
+      }
+      try {
+        return await _service.fetchDivisions(cached: true);
+      } catch (_) {
+        return const [];
+      }
+    }
+  }
+
+  /// Refresh from the toolbar: the holes, and the divisions if they are missing.
+  Future<void> _reload() async {
+    if (_divisions.isEmpty) return _loadInitialData();
+    return _refreshHoles(showLoading: true);
+  }
+
+  void _toggleFavorites() {
+    setState(() => _showFavoritesOnly = !_showFavoritesOnly);
+    if (_showFavoritesOnly) {
+      _loadFavorites();
+    } else {
+      _refreshHoles(showLoading: true);
+    }
+  }
+
+  /// Favourites live on the forum account, as in DanXi, so they are the same
+  /// on every device. Offline, the copy stored on this device is shown.
+  Future<void> _loadFavorites() async {
+    final prefs = ForumPreferences.instance;
+    try {
+      final holes = await _service.fetchFavorites();
+      if (!mounted || !_showFavoritesOnly) return;
+      prefs.replaceFavorites(holes);
+      return;
+    } catch (e) {
+      if (!mounted || !_showFavoritesOnly) return;
+      final code = e.toString();
+      if (code.contains('ForumConsentRequired') ||
+          code.contains('AuthenticationRequired')) {
+        setState(() => _authRequired = true);
+        return;
+      }
+    }
+    // A hole whose content is not stored yet is read once so it can be listed.
+    for (final id in prefs.missingFavoriteIds) {
+      try {
+        final hole = await _service.fetchHole(id);
+        if (hole != null) prefs.cacheFavoriteHole(hole);
+      } catch (_) {
+        // Left for the next visit; the rest of the list still shows.
+      }
+      if (!mounted || !_showFavoritesOnly) return;
     }
   }
 
@@ -327,8 +383,23 @@ class _ForumPageState extends State<ForumPage> {
             );
           },
         ),
+        // DanXi keeps three actions here: sort order, favourites and the rest.
         actions: [
-          // Favorites toggle button
+          PopupMenuButton<ForumSortOrder>(
+            tooltip: '排序：${_sortOrder.label}',
+            icon: const Icon(Icons.sort_rounded),
+            initialValue: _sortOrder,
+            enabled: !_showFavoritesOnly,
+            onSelected: (order) {
+              if (order == _sortOrder) return;
+              setState(() => _sortOrder = order);
+              _refreshHoles(showLoading: true);
+            },
+            itemBuilder: (context) => [
+              for (final order in ForumSortOrder.values)
+                PopupMenuItem(value: order, child: Text(order.label)),
+            ],
+          ),
           IconButton(
             icon: Icon(
               _showFavoritesOnly
@@ -337,61 +408,39 @@ class _ForumPageState extends State<ForumPage> {
               color: _showFavoritesOnly ? Colors.amber : null,
             ),
             tooltip: _showFavoritesOnly ? '查看全站帖子' : '收藏的帖子',
-            onPressed: () {
-              setState(() => _showFavoritesOnly = !_showFavoritesOnly);
-              if (!_showFavoritesOnly) _refreshHoles(showLoading: true);
-            },
+            onPressed: _toggleFavorites,
           ),
-          // Filter settings button
-          IconButton(
-            icon: const Icon(Icons.tune_rounded),
-            tooltip: '过滤与偏好设置',
-            onPressed: () => ForumFilterDialog.show(context),
-          ),
-          // Sort order toggle
-          IconButton(
-            icon: Icon(
-              _sortOrder == ForumSortOrder.lastReplied
-                  ? Icons.schedule_rounded
-                  : Icons.new_releases_outlined,
-            ),
-            tooltip: _sortOrder.label,
-            onPressed: () {
-              setState(() {
-                _sortOrder = _sortOrder == ForumSortOrder.lastReplied
-                    ? ForumSortOrder.lastCreated
-                    : ForumSortOrder.lastReplied;
-              });
-              _refreshHoles(showLoading: true);
-            },
-          ),
-          // Search button
-          IconButton(
-            icon: const Icon(Icons.search_rounded),
-            tooltip: '搜索',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (ctx) =>
-                      ForumSearchPage(controller: widget.controller),
+          PopupMenuButton<VoidCallback>(
+            tooltip: '更多',
+            onSelected: (action) => action(),
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: _reload,
+                child: const ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.refresh_rounded),
+                  title: Text('刷新'),
                 ),
-              );
-            },
-          ),
-          // Refresh button
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: '刷新',
-            onPressed: () => _refreshHoles(showLoading: true),
-          ),
-          // Login account button
-          IconButton(
-            tooltip: '登录树洞账号',
-            icon: const Icon(Icons.account_circle_outlined),
-            // Already signed in: this is how another account is entered.
-            onPressed: _isLoggingIn
-                ? null
-                : () => _handleLogin(replace: !_authRequired),
+              ),
+              PopupMenuItem(
+                value: () => ForumFilterDialog.show(this.context),
+                child: const ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.tune_rounded),
+                  title: Text('过滤与偏好设置'),
+                ),
+              ),
+              PopupMenuItem(
+                enabled: !_isLoggingIn,
+                // Already signed in: this is how another account is entered.
+                value: () => _handleLogin(replace: !_authRequired),
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.account_circle_outlined),
+                  title: Text(_authRequired ? '登录树洞账号' : '切换树洞账号'),
+                ),
+              ),
+            ],
           ),
         ],
         bottom: _showFavoritesOnly
@@ -564,7 +613,7 @@ class _ForumPageState extends State<ForumPage> {
                 ),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
-                  onPressed: () => setState(() => _showFavoritesOnly = false),
+                  onPressed: _toggleFavorites,
                   icon: const Icon(Icons.arrow_back_rounded),
                   label: const Text('返回全站帖子'),
                 ),
@@ -595,7 +644,7 @@ class _ForumPageState extends State<ForumPage> {
                   ),
                   const Spacer(),
                   TextButton(
-                    onPressed: () => setState(() => _showFavoritesOnly = false),
+                    onPressed: _toggleFavorites,
                     child: const Text('退出收藏'),
                   ),
                 ],
@@ -621,16 +670,18 @@ class _ForumPageState extends State<ForumPage> {
         .toList();
 
     return RefreshIndicator(
-      onRefresh: () => _refreshHoles(showLoading: false),
+      onRefresh: () => _divisions.isEmpty
+          ? _loadInitialData()
+          : _refreshHoles(showLoading: false),
       child: ListView.builder(
         controller: _scrollController,
         padding: const EdgeInsets.only(top: 8, bottom: 80),
         itemCount:
             1 + pinned.length + nonPinnedHoles.length + (_hasMore ? 1 : 0),
         itemBuilder: (context, index) {
-          // Status bar row (sort order indicator + active tag filter + total count)
+          // Search field and active tag filter
           if (index == 0) {
-            return _buildStatusHeader(pinned.length + nonPinnedHoles.length);
+            return _buildListHeader(pinned.length + nonPinnedHoles.length);
           }
 
           var cursor = index - 1;
@@ -691,52 +742,69 @@ class _ForumPageState extends State<ForumPage> {
     );
   }
 
-  Widget _buildStatusHeader(int totalShowing) {
+  /// List header as in DanXi: a search field, then the active tag filter.
+  Widget _buildListHeader(int totalShowing) {
     final colorScheme = Theme.of(context).colorScheme;
     final prefs = ForumPreferences.instance;
-    final divisionTitle = _selectedDivisionId == null
-        ? '全站'
-        : (_getDivisionName(_selectedDivisionId!) ?? '分区');
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                '$divisionTitle · ${_sortOrder.label}',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurfaceVariant,
+          Material(
+            color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(24),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (ctx) =>
+                      ForumSearchPage(controller: widget.controller),
                 ),
               ),
-              const Spacer(),
-              if (totalShowing == 0 && !_isLoading)
-                Text(
-                  '暂无帖子',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 9,
                 ),
-            ],
-          ),
-          if (prefs.selectedTagFilter != null) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                InputChip(
-                  avatar: const Icon(Icons.filter_alt_rounded, size: 16),
-                  label: Text('按标签筛选: #${prefs.selectedTagFilter}'),
-                  onDeleted: () => prefs.setTagFilter(null),
-                  deleteIconColor: colorScheme.primary,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.search_rounded,
+                      size: 20,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '搜索树洞',
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ],
+          ),
+          if (prefs.selectedTagFilter != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: InputChip(
+                avatar: const Icon(Icons.filter_alt_rounded, size: 16),
+                label: Text('按标签筛选: #${prefs.selectedTagFilter}'),
+                onDeleted: () => prefs.setTagFilter(null),
+                deleteIconColor: colorScheme.primary,
+              ),
+            ),
+          if (totalShowing == 0 && !_isLoading)
+            Padding(
+              padding: const EdgeInsets.only(top: 24),
+              child: Center(
+                child: Text(
+                  '暂无帖子',
+                  style: TextStyle(color: colorScheme.onSurfaceVariant),
+                ),
+              ),
+            ),
         ],
       ),
     );

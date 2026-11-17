@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:dansheng_app/bridge.g.dart';
 import 'package:dansheng_app/ui/campus/campus_api.dart';
+import 'package:dansheng_app/ui/campus/forum/forum_filter_settings.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_page.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_search_page.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_service.dart';
@@ -25,6 +26,7 @@ class MockForumDanshengBridge implements DanshengBridge {
   bool consentRequired = false;
   String? loginError;
   Completer<void>? loginPending;
+  String? divisionsError;
   String? reconcileOutcome; // 'success' | 'unresolved' | 'empty'
 
   @override
@@ -56,6 +58,9 @@ class MockForumDanshengBridge implements DanshengBridge {
 
       switch (method) {
         case 'community.tea.divisions':
+          if (divisionsError != null) {
+            throw PlatformException(code: divisionsError!);
+          }
           return jsonEncode({
             'source': {
               'account_id': 'user_001',
@@ -333,6 +338,12 @@ class MockForumDanshengBridge implements DanshengBridge {
             });
           }
 
+        case 'forum.favorite':
+          return jsonEncode({
+            'hole_id': methodParams['hole_id'],
+            'favorite': methodParams['favorite'],
+          });
+
         case 'campus.login':
           await loginPending?.future;
           if (loginError != null) throw PlatformException(code: loginError!);
@@ -447,9 +458,23 @@ void main() {
       mockBridge.loginPending = Completer<void>();
       await tester.tap(find.text('登录论坛'));
       await tester.pump();
-      await tester.tap(find.byTooltip('登录树洞账号'));
-      await tester.pump();
       expect(find.text('正在登录…'), findsOneWidget);
+      // The account entry in the overflow menu waits for that login.
+      await tester.tap(find.byTooltip('更多'));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(
+        tester
+            .widget<PopupMenuItem<VoidCallback>>(
+              find.ancestor(
+                of: find.text('登录树洞账号'),
+                matching: find.byType(PopupMenuItem<VoidCallback>),
+              ),
+            )
+            .enabled,
+        isFalse,
+      );
+      await tester.tapAt(const Offset(4, 4));
+      await tester.pump(const Duration(milliseconds: 500));
       // Saved credentials go first; the host asks only when they are rejected.
       expect(_methodParams(mockBridge, 'campus.login'), [
         {'service': 'forum'},
@@ -459,8 +484,10 @@ void main() {
       expect(find.text('已连接树洞账号'), findsOneWidget);
       expect(_methodParams(mockBridge, 'community.tea.holes'), hasLength(1));
       expect(find.text('需要登录论坛服务'), findsNothing);
-      // Once signed in, the account button enters another account.
-      await tester.tap(find.byTooltip('登录树洞账号'));
+      // Once signed in, the account entry switches to another account.
+      await tester.tap(find.byTooltip('更多'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('切换树洞账号'));
       await tester.pumpAndSettle();
       expect(_methodParams(mockBridge, 'campus.login'), hasLength(2));
       expect(_methodParams(mockBridge, 'campus.login').last['replace'], isTrue);
@@ -656,13 +683,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('最新回复'), findsWidgets);
-
-      // Tap sort button in AppBar
-      await tester.tap(find.byTooltip('最新回复'));
+      // The sort menu in the AppBar names the current order.
+      await tester.tap(find.byTooltip('排序：最新回复'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('最新发布').last);
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('最新发布'), findsWidgets);
+      expect(find.byTooltip('排序：最新发布'), findsOneWidget);
 
       final sortCall = mockBridge.invocationLog.lastWhere(
         (entry) =>
@@ -940,4 +967,75 @@ void main() {
       expect(loginCall['params']['params']['service'], 'forum');
     },
   );
+
+  testWidgets(
+    'ForumPage: a failed division read falls back to the cached divisions',
+    (tester) async {
+      mockBridge.divisionsError = 'NetworkError';
+      mockBridge.responsePages['campus.cached'] = [
+        {
+          'records': [
+            {
+              'payload': {'division_id': 1, 'name': '缓存分区'},
+            },
+            {
+              'payload': {'division_id': 2, 'name': '另一个缓存分区'},
+            },
+          ],
+        },
+      ];
+      await tester.pumpWidget(
+        _wrapTestWidget(ForumPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(ChoiceChip, '全站'), findsOneWidget);
+      expect(find.widgetWithText(ChoiceChip, '缓存分区'), findsOneWidget);
+      expect(find.widgetWithText(ChoiceChip, '另一个缓存分区'), findsOneWidget);
+      expect(
+        _methodParams(mockBridge, 'campus.cached').single['method'],
+        'community.tea.divisions',
+      );
+    },
+  );
+
+  testWidgets('ForumPage: favourites come from the forum account', (
+    tester,
+  ) async {
+    mockBridge.responsePages['community.tea.favorites'] = [
+      {
+        'items': [
+          {
+            'hole_id': 301,
+            'division_id': 1,
+            'reply': 0,
+            'tags': [],
+            'floors': {
+              'first_floor': {
+                'floor_id': 3001,
+                'hole_id': 301,
+                'content': '账号里收藏的合成帖子',
+              },
+            },
+          },
+        ],
+      },
+    ];
+    await tester.pumpWidget(_wrapTestWidget(ForumPage(controller: controller)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('收藏的帖子'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('我的收藏'), findsOneWidget);
+    expect(find.text('#301'), findsOneWidget);
+    expect(find.textContaining('账号里收藏的合成帖子'), findsOneWidget);
+    expect(ForumPreferences.instance.isFavorite(301), isTrue);
+    // The division bar belongs to the full list only.
+    expect(find.widgetWithText(ChoiceChip, '全站'), findsNothing);
+
+    await tester.tap(find.byTooltip('查看全站帖子'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ChoiceChip, '全站'), findsOneWidget);
+  });
 }

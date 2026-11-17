@@ -792,6 +792,16 @@ pub fn parse_group_roots(body: &[u8]) -> Result<Vec<CloudRoot>, ConnectorError> 
 
 // --- Client -----------------------------------------------------------------------
 
+/// The drive asks its owner to sign in again.
+fn challenge(source: &SourceContext) -> AuthChallenge {
+    AuthChallenge {
+        connector: "fudan-cloud".into(),
+        origin: ORIGIN.into(),
+        account_id: source.account_id.clone(),
+        mode: AuthMode::HttpSession,
+    }
+}
+
 pub struct FudanCloudClient<T> {
     transport: T,
 }
@@ -810,12 +820,7 @@ impl<T: ConnectorTransport> FudanCloudClient<T> {
         source: &SourceContext,
     ) -> Result<(Vec<u8>, Option<String>), ConnectorError> {
         source.validate()?;
-        let challenge = AuthChallenge {
-            connector: "fudan-cloud".into(),
-            origin: ORIGIN.into(),
-            account_id: source.account_id.clone(),
-            mode: AuthMode::HttpSession,
-        };
+        let challenge = challenge(source);
         let mut headers = vec![
             ("Accept".into(), "application/x-protobuf".into()),
             ("csrftoken".into(), csrf_token()),
@@ -887,7 +892,24 @@ impl<T: ConnectorTransport> FudanCloudClient<T> {
 
     /// The signed-in user's personal root; also proves the session is live.
     pub async fn user_root(&self, source: &SourceContext) -> Result<CloudRoot, ConnectorError> {
-        parse_user_root(&self.get(Self::fixed("/user"), source).await?)
+        let body = self.get(Self::fixed("/user"), source).await?;
+        // Without a drive session the drive answers 200 with an empty body.
+        // Through WebVPN this is the usual state until the drive is signed
+        // into inside the gateway session, so it asks for sign-in.
+        if body.is_empty() {
+            return Err(ConnectorError::AuthRequired(challenge(source)));
+        }
+        parse_user_root(&body)
+    }
+
+    /// A folder's listing body. An empty folder and a missing session both
+    /// arrive as an empty body; only the session check tells them apart.
+    async fn folder(&self, path: &str, source: &SourceContext) -> Result<Vec<u8>, ConnectorError> {
+        let body = self.get(endpoint("files", path)?, source).await?;
+        if body.is_empty() {
+            self.user_root(source).await?;
+        }
+        Ok(body)
     }
 
     /// Creates `name` inside `parent`; returns the new folder's path.
@@ -942,7 +964,7 @@ impl<T: ConnectorTransport> FudanCloudClient<T> {
             return Err(ConnectorError::InvalidConfiguration("cloud root"));
         }
         let parent = parent_path(path)?;
-        let listing = self.get(endpoint("files", &parent)?, source).await?;
+        let listing = self.folder(&parent, source).await?;
         let entry = raw_entries(&listing)?
             .into_iter()
             .find(|e| same_path(&e.full_path, path))
@@ -993,6 +1015,10 @@ impl<T: ConnectorTransport> FudanCloudClient<T> {
         let (user, mut check_setting) = self
             .send(HttpMethod::Get, Self::fixed("/user"), None, source)
             .await?;
+        // The hash salt comes from here: never upload without a session.
+        if user.is_empty() {
+            return Err(ConnectorError::AuthRequired(challenge(source)));
+        }
         let salt = parse_salt(&user)?;
         let (listing, check) = self
             .send(HttpMethod::Get, endpoint("files", folder)?, None, source)
@@ -1108,14 +1134,11 @@ impl<T: ConnectorTransport> FudanCloudClient<T> {
     ) -> Result<CloudShare, ConnectorError> {
         let (gtype, gpid, repo_path) = split_path(path)?;
         let parent = parent_path(path)?;
-        let entry = parse_listing(
-            &parent,
-            &self.get(endpoint("files", &parent)?, source).await?,
-        )?
-        .items
-        .into_iter()
-        .find(|i| same_path(&i.path, path))
-        .ok_or(ConnectorError::Rejected("FileUnavailable"))?;
+        let entry = parse_listing(&parent, &self.folder(&parent, source).await?)?
+            .items
+            .into_iter()
+            .find(|i| same_path(&i.path, path))
+            .ok_or(ConnectorError::Rejected("FileUnavailable"))?;
         if !entry.can_share {
             return Err(ConnectorError::Rejected("PermissionDenied"));
         }
@@ -1177,8 +1200,7 @@ impl<T: ConnectorTransport> FudanCloudClient<T> {
         source: &SourceContext,
         path: &str,
     ) -> Result<CloudListing, ConnectorError> {
-        let body = self.get(endpoint("files", path)?, source).await?;
-        parse_listing(path, &body)
+        parse_listing(path, &self.folder(path, source).await?)
     }
 }
 
@@ -1533,8 +1555,9 @@ mod tests {
                 .unwrap_err(),
             ConnectorError::NeedsReconciliation
         );
+        let user = msg(&[(1, Int(3)), (2, Int(42))]);
         let client = replies(vec![
-            Ok((200, vec![])),
+            Ok((200, user.clone())),
             Ok((200, vec![])),
             Ok((200, vec![])),
         ]);
@@ -1599,7 +1622,7 @@ mod tests {
     #[tokio::test]
     async fn drive_upload_lost_confirmation_after_blob_is_not_a_safe_rejection() {
         let client = replies(vec![
-            Ok((200, vec![])),
+            Ok((200, msg(&[(1, Int(3)), (2, Int(42))]))),
             Ok((200, vec![])),
             Ok((200, vec![8, 21])),
             Ok((200, vec![8, 1])),
@@ -1627,6 +1650,56 @@ mod tests {
                 .load(std::sync::atomic::Ordering::SeqCst),
             5
         );
+    }
+
+    /// Without a drive session (always the case through WebVPN until the drive
+    /// is signed into there) the drive answers 200 with an empty body.
+    #[tokio::test]
+    async fn an_empty_session_reply_asks_for_sign_in_instead_of_failing() {
+        let user = msg(&[(1, Int(3)), (2, Int(42))]);
+        fn sign_in<T>(result: Result<T, ConnectorError>) -> bool {
+            matches!(result, Err(ConnectorError::AuthRequired(ref c)) if c.origin == ORIGIN)
+        }
+        assert!(sign_in(
+            replies(vec![Ok((200, vec![]))]).roots(&source()).await
+        ));
+        // An empty folder stays an empty folder while the session is live.
+        let client = replies(vec![Ok((200, vec![])), Ok((200, user.clone()))]);
+        let listing = client.list(&source(), "3/42/directory/").await.unwrap();
+        assert!(listing.items.is_empty());
+        let client = replies(vec![Ok((200, vec![])), Ok((200, vec![]))]);
+        assert!(sign_in(client.list(&source(), "3/42/directory/").await));
+        // Preparatory reads stop a write before anything is sent.
+        let client = replies(vec![Ok((200, vec![]))]);
+        assert!(sign_in(
+            client
+                .upload(
+                    &source(),
+                    "3/42/directory/",
+                    "a.txt",
+                    b"abc",
+                    "text/plain",
+                    1
+                )
+                .await
+        ));
+        assert_eq!(
+            client
+                .transport
+                .sent
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        let client = replies(vec![Ok((200, vec![])), Ok((200, vec![]))]);
+        assert!(sign_in(
+            client.delete(&source(), "3/42/directory/a.txt").await
+        ));
+        let client = replies(vec![Ok((200, vec![])), Ok((200, vec![]))]);
+        assert!(sign_in(
+            client
+                .share(&source(), "3/42/directory/a.txt", 7, true)
+                .await
+        ));
     }
 
     fn msg(parts: &[(u64, Part)]) -> Vec<u8> {

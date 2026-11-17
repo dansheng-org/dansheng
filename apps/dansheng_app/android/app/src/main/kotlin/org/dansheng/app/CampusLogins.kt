@@ -12,7 +12,8 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     private val recovered = mutableMapOf<Pair<String,String>,Long>()
     private val recentFailures = mutableMapOf<Pair<String,String>,Pair<Long,String>>()
     private val services=setOf("ecard","academic","power","bus","dining","forum","canvas","webvpn","cloud")
-    // The cloud drive keeps its own password, so it is saved apart from the UIS one.
+    // The cloud drive starts with the UIS password but its owner may change it there; a
+    // password typed for the drive is saved apart from the UIS one.
     private fun kind(service:String)=when { service in setOf("forum","canvas","cloud") -> service
         // Each WebDAV server keeps its own credentials.
         isWebdav(service) -> "webdav-"+service.removePrefix("webdav:"); else -> "uis" }
@@ -43,6 +44,11 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     internal fun venuePasswordSuspended(account:String)=rt.prefs.getBoolean(suspendKey(account),false)
     internal fun suspendVenuePassword(account:String){rt.prefs.edit().putBoolean(suspendKey(account),true).commit()}
     internal fun clearVenueSuspension(account:String){rt.prefs.edit().remove(suspendKey(account)).commit()}
+    // The drive refused this UIS password: it has its own, so the UIS one is not sent to it again
+    // (the drive locks after a few failures). Kept as a digest; a new UIS password is tried once.
+    private fun cloudRejectedKey(account:String)="cloud-uis-rejected/$account"
+    private fun digest(account:String,secret:String)=java.security.MessageDigest.getInstance("SHA-256")
+        .digest("$account\n$secret".toByteArray()).joinToString(""){"%02x".format(it)}
     internal fun venueAccountActive(account:String)=rt.account()==account
     internal fun canRestoreVenue(account:String)=rt.account()==account && savedLogins.get(account,"uis")!=null && !venuePasswordSuspended(account)
     internal fun savedUisForVenue(account:String):String? {
@@ -66,6 +72,7 @@ internal class CampusLogins(private val rt: RuntimeHost) {
             savedLogins.forgetAccount(previous)
             forumConsent.forget(previous)
             clearVenueSuspension(previous)
+            rt.prefs.edit().remove(cloudRejectedKey(previous)).commit()
         }
     }
     /** Called under authGuard together with server removal; never targets the new account. */
@@ -169,6 +176,26 @@ internal class CampusLogins(private val rt: RuntimeHost) {
                 throw e
             }
         }
+        fun cloudViaCampus():Any? = synchronized(rt.authGuard) {
+            checkAccount(account,epoch)
+            if(venuePasswordSuspended(account))return@synchronized null
+            val uis=savedLogins.get(account,"uis")?.let { JSONObject(it).getString("secret") } ?: return@synchronized null
+            if(uis==saved?.optString("secret") || rt.prefs.getString(cloudRejectedKey(account),null)==digest(account,uis))
+                return@synchronized null
+            try {
+                val result=authenticate("cloud",account,"",uis)
+                checkAccount(account,epoch); recovered[id]=SystemClock.elapsedRealtime();recentFailures.remove(id)
+                rt.prefs.edit().remove(cloudRejectedKey(account)).commit()
+                result
+            }catch(e:PortError){
+                recentFailures[id]=SystemClock.elapsedRealtime() to e.code
+                // Only a refusal says the drive has its own password; a timeout or network
+                // failure says nothing about it and is reported as is.
+                if(e.code=="InvalidCredentials")
+                    rt.prefs.edit().putString(cloudRejectedKey(account),digest(account,uis)).commit()
+                throw e
+            }
+        }
         // A suspended UIS password goes out again only when a person types it.
         if(!replace && saved!=null && !(kind(service)=="uis" && venuePasswordSuspended(account))) {
             try {return@withLock attempt(saved.optString("email"),saved.getString("secret"),false)}
@@ -180,12 +207,18 @@ internal class CampusLogins(private val rt: RuntimeHost) {
                         savedLogins.delete(account,group)
                     else throw e
                 }
-                if(service!="canvas" && prompt==null)throw e
+                if(service !in setOf("canvas","cloud") && prompt==null)throw e
             }
         }
         if(service=="canvas" && !replace) {
             try {canvasViaCampus()?.let{return@withLock it}}
             catch(e:PortError){if(prompt==null || e.code !in setOf("AuthenticationRequired","InteractiveLoginRequired","InvalidCredentials"))throw e}
+        }
+        // Saved drive password missing or refused: the UIS password next, then a prompt only
+        // when the drive refused it. Timeouts never open a prompt.
+        if(service=="cloud" && !replace) {
+            try {cloudViaCampus()?.let{return@withLock it}}
+            catch(e:PortError){if(prompt==null || e.code!="InvalidCredentials")throw e}
         }
         if(prompt==null)throw PortError("AuthenticationRequired")
         val (email,secret)=prompt(saved?.optString("email").orEmpty())

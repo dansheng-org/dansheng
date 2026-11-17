@@ -318,6 +318,14 @@ async fn switched_on_campus_services_sign_in_and_read_through_webvpn() {
             .await;
         match result {
             Ok(value) => {
+                // Gateway addresses must never reach callers: every URL in a
+                // result reads as the service itself wrote it.
+                let text = value.to_string();
+                let leaks = text.matches("webvpn.fudan.edu.cn").count()
+                    + text.matches("77726476706e69737468656265737421").count();
+                if leaks > 0 {
+                    println!("{method}: {leaks} gateway address(es) in the result");
+                }
                 let summary = if method == "fudan.webvpn.status" {
                     json!({"enabled":value["enabled"],"mode":value["mode"],"has_session":value["has_session"],"routes":value["routes_count"]})
                 } else {
@@ -483,5 +491,138 @@ async fn webvpn_sign_in_timing() {
             result.map(|_| "ok").unwrap_or_else(|e| e.code()),
             started.elapsed().as_secs_f32()
         );
+    }
+}
+
+/// The cloud drive in the orders the app reaches it: a drive session made
+/// before WebVPN was switched on, no drive session yet, the automatic mode,
+/// and a file download through the gateway. Reads only; prints codes and counts.
+#[tokio::test]
+#[ignore = "requires explicit authorization and DANSHENG_TEST_CREDENTIALS; signs in then reads only"]
+async fn cloud_drive_follows_the_webvpn_switch() {
+    use dansheng_connectors::core_adapter::CampusService;
+    use dansheng_core::{
+        Principal,
+        network::Network,
+        platform::UnavailablePlatform,
+        policy::Grant,
+        services::{CoreService, ServiceContext},
+        store::Store,
+    };
+    use serde_json::{Value, json};
+    let (user, password) = credentials();
+    let cloud = CLOUD
+        .with(|c| c.borrow().clone())
+        .expect("missing yunpanpassword");
+    let platform = UnavailablePlatform;
+    let owner = Principal::owner();
+    let grant = Grant {
+        private_network_origins: ["https://cloud.fudan.edu.cn".to_owned()]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    };
+    for scenario in ["direct-then-gateway", "gateway-fresh", "auto-fresh"] {
+        println!("== {scenario}");
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let network = Network::default();
+        let call = |method: &'static str, params: Value| {
+            let (store, network, platform, owner, grant, user) =
+                (&store, &network, &platform, &owner, &grant, user.clone());
+            async move {
+                let mut params = params;
+                params["account_id"] = json!(user);
+                let result = CampusService
+                    .call(
+                        ServiceContext {
+                            store,
+                            network,
+                            platform,
+                        },
+                        owner,
+                        grant,
+                        method,
+                        params,
+                    )
+                    .await;
+                match &result {
+                    Ok(v) => {
+                        let n = v
+                            .as_array()
+                            .map(Vec::len)
+                            .or_else(|| v.get("items").and_then(Value::as_array).map(Vec::len));
+                        println!("{method}: ok items={n:?}");
+                    }
+                    Err(e) => println!("{method}: error {} ({})", e.code, e.message),
+                }
+                result.ok()
+            }
+        };
+        if scenario == "direct-then-gateway" {
+            call("fudan.cloud.login", json!({"password": cloud})).await;
+            call("fudan.cloud.roots", json!({})).await;
+        }
+        let mode = if scenario == "auto-fresh" {
+            "auto"
+        } else {
+            "gateway"
+        };
+        call("fudan.webvpn.configure", json!({"mode": mode})).await;
+        // Before WebVPN is signed into, then before the drive is.
+        call("fudan.cloud.roots", json!({})).await;
+        for _ in 0..3 {
+            if call("fudan.webvpn.login", json!({"password": password}))
+                .await
+                .is_some()
+            {
+                break;
+            }
+        }
+        if call("fudan.cloud.roots", json!({})).await.is_none() {
+            call("fudan.cloud.login", json!({"password": cloud})).await;
+        }
+        let Some(roots) = call("fudan.cloud.roots", json!({})).await else {
+            continue;
+        };
+        let Some(path) = roots
+            .as_array()
+            .and_then(|r| r.first())
+            .and_then(|r| r["path"].as_str())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let Some(listing) = call("fudan.cloud.list", json!({"path": path})).await else {
+            continue;
+        };
+        let file = listing["items"].as_array().and_then(|items| {
+            items
+                .iter()
+                .find(|i| i["kind"] == "file" || i["is_dir"] == false || i["folder"] == false)
+                .cloned()
+        });
+        match file {
+            Some(file) => {
+                println!(
+                    "file keys: {:?}",
+                    file.as_object()
+                        .map(|o| o.keys().cloned().collect::<Vec<_>>())
+                );
+                call(
+                    "fudan.cloud.download",
+                    json!({"path": file["path"], "size": file["size"]}),
+                )
+                .await;
+            }
+            None => println!(
+                "no file at the root; item keys: {:?}",
+                listing["items"]
+                    .as_array()
+                    .and_then(|i| i.first())
+                    .and_then(Value::as_object)
+                    .map(|o| o.keys().cloned().collect::<Vec<_>>())
+            ),
+        }
     }
 }

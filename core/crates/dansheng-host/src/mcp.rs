@@ -407,6 +407,7 @@ mod tests {
             "community.tea.publish",
             "community.tea.reply",
             "community.tea.reconcile",
+            "community.tea.favorite",
         ] {
             assert!(
                 !METHODS.contains(&method),

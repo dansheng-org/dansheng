@@ -297,6 +297,29 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
     }
   }
 
+  /// Stars the hole on the forum account; the star changes at once and is
+  /// put back if the forum does not take the change.
+  Future<void> _toggleFavorite() async {
+    final prefs = ForumPreferences.instance;
+    final hole = _hole!;
+    prefs.toggleFavorite(hole);
+    final favorite = prefs.isFavorite(hole.holeId);
+    setState(() {});
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _service.setFavorite(hole.holeId, favorite);
+      messenger.showSnackBar(
+        SnackBar(content: Text(favorite ? '已收藏该帖子' : '已取消收藏')),
+      );
+    } catch (_) {
+      if (prefs.isFavorite(hole.holeId) == favorite) prefs.toggleFavorite(hole);
+      if (mounted) setState(() {});
+      messenger.showSnackBar(
+        SnackBar(content: Text(favorite ? '收藏失败，请稍后重试' : '取消收藏失败，请稍后重试')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -320,21 +343,7 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
             tooltip: ForumPreferences.instance.isFavorite(widget.holeId)
                 ? '取消收藏'
                 : '收藏此帖',
-            onPressed: () {
-              if (_hole != null) {
-                ForumPreferences.instance.toggleFavorite(_hole!);
-                setState(() {});
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      ForumPreferences.instance.isFavorite(widget.holeId)
-                          ? '已收藏该帖子'
-                          : '已取消收藏',
-                    ),
-                  ),
-                );
-              }
-            },
+            onPressed: _hole == null ? null : _toggleFavorite,
           ),
           PopupMenuButton<String>(
             tooltip: '更多选项',
