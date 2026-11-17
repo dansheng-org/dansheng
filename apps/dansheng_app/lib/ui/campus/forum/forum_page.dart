@@ -245,11 +245,11 @@ class _ForumPageState extends State<ForumPage> {
   }
 
   /// Trigger forum login flow via campus.login.
-  Future<void> _handleLogin() async {
+  Future<void> _handleLogin({bool replace = false}) async {
     if (_isLoggingIn) return;
     setState(() => _isLoggingIn = true);
     try {
-      await _service.login();
+      await _service.login(replace: replace);
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('已连接树洞账号')));
@@ -388,7 +388,10 @@ class _ForumPageState extends State<ForumPage> {
           IconButton(
             tooltip: '登录树洞账号',
             icon: const Icon(Icons.account_circle_outlined),
-            onPressed: _isLoggingIn ? null : _handleLogin,
+            // Already signed in: this is how another account is entered.
+            onPressed: _isLoggingIn
+                ? null
+                : () => _handleLogin(replace: !_authRequired),
           ),
         ],
         bottom: _showFavoritesOnly
@@ -491,7 +494,7 @@ class _ForumPageState extends State<ForumPage> {
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: _isLoggingIn ? null : _handleLogin,
+                onPressed: _isLoggingIn ? null : () => _handleLogin(),
                 icon: const Icon(Icons.login_rounded),
                 label: Text(_isLoggingIn ? '正在登录…' : '登录论坛'),
               ),

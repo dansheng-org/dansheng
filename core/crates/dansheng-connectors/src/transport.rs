@@ -133,6 +133,10 @@ pub enum ConnectorError {
     NeedsReconciliation,
     #[error("authentication required")]
     AuthRequired(AuthChallenge),
+    /// The source's own credential is present, but the request was routed
+    /// through a gateway whose session is missing or expired.
+    #[error("gateway sign-in required")]
+    GatewaySessionRequired,
     #[error("permission denied")]
     PermissionDenied,
     #[error("this course does not allow access to the resource")]

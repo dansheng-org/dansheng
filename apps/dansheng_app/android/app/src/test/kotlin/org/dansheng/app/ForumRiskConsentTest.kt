@@ -57,11 +57,16 @@ class ForumRiskConsentTest {
         expectCode("ForumConsentRequired") { restored.requireAccepted("account-a") }
     }
 
-    @Test fun explicitLoginAlwaysRequiresFreshConfirmation() = runBlocking {
-        versions["account-a"] = ForumRiskConsent.VERSION
+    @Test fun explicitLoginAsksOnlyUntilAcknowledged() = runBlocking {
         var confirmed = 0
         consent().authorize("account-a", { confirmed++ }) { it() }
+        consent().authorize("account-a", { confirmed++ }) { it() }
         assertEquals(1, confirmed)
+        // A changed notice version or a logout asks again.
+        versions["account-a"] = ForumRiskConsent.VERSION + 1
+        consent().authorize("account-a", { confirmed++ }) { it() }
+        assertEquals(2, confirmed)
+        consent().forget("account-a")
         expectCode("Cancelled") {
             consent().authorize("account-a", { throw PortError("Cancelled") }) { it() }
         }

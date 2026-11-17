@@ -51,7 +51,7 @@ cargo test -p dansheng-core --test integration --all-features --locked
 cargo clippy -p dansheng-core --test integration --all-features --locked -- -D warnings
 ```
 
-Clippy 的集成测试 target 使用 `--test integration`，不接受测试运行时 filter；上例检查整个 integration target。`forum_live.rs` 和 `webvpn_live.rs` 保持独立 target，live 测试仍为 `ignored`，不纳入普通 suites；执行须另有明确授权并满足对应 feature/环境要求。
+Clippy 的集成测试 target 使用 `--test integration`，不接受测试运行时 filter；上例检查整个 integration target。`forum_live.rs`、`webvpn_live.rs` 和 `forum_webvpn_live.rs` 保持独立 target，live 测试仍为 `ignored`，不纳入普通 suites；执行须另有明确授权并满足对应 feature/环境要求。
 
 历史验收记录中的旧命令、路径和哈希保留原样；复现时按上述关系选择当前入口，不将旧结果视作合并后的验证结果。
 

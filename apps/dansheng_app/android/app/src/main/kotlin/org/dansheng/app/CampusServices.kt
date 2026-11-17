@@ -187,7 +187,10 @@ internal class CampusServices(
                 else -> throw e
             }
             checked(account,epoch)
-            rt.campusLogins.connect(service,account,epoch=epoch)
+            // The service's own login is intact; only the WebVPN session it was routed
+            // through is gone. Signing in to the service again would not bring it back.
+            if(e.code=="WebVpnLoginRequired" && service!="webvpn")rt.campusLogins.restoreWebVpn(account,epoch)
+            else rt.campusLogins.connect(service,account,epoch=epoch)
             checked(account,epoch)
             return rt.request(method,p)
         }
