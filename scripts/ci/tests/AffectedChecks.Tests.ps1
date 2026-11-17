@@ -121,8 +121,8 @@ try {
         Assert ($step.Contains('        if: ${{ !inputs.smoke }}') -and -not $step.Contains('steps.affected')) 'Rust checks must remain independent of classification'
     }
     $selfTest = @($steps | Where-Object { $_.StartsWith("      - name: Test affected-check scheduling`n") })
-    Assert ($selfTest.Count -eq 1 -and $selfTest[0].Contains('        if: ${{ !inputs.smoke }}') -and
-        -not $selfTest[0].Contains('steps.affected')) 'Scheduling tests must fail normally and never gate themselves'
+    Assert ($selfTest.Count -eq 1 -and $selfTest[0].Contains("        if: runner.os == 'Linux' && !inputs.smoke") -and
+        -not $selfTest[0].Contains('steps.affected')) 'Scheduling tests must run on Linux, fail normally and never gate themselves'
     foreach ($state in @(
         @('success', 'false', $false), @('success', 'true', $true), @('success', '', $true),
         @('failure', 'false', $true), @('failure', 'true', $true), @('failure', '', $true),

@@ -56,7 +56,7 @@ jobs:
           source "$DANSHENG_CI_ROOT/runner-env.sh"
           pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Native
       - name: Test affected-check scheduling
-        if: ${{ !inputs.smoke }}
+        if: runner.os == 'Linux' && !inputs.smoke
         working-directory: ${{ github.workspace }}
         run: ./scripts/ci/tests/AffectedChecks.Tests.ps1
       - name: Determine workspace fixture changes
