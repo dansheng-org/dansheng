@@ -80,7 +80,7 @@ jobs:
       - run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
         if: ${{ !inputs.smoke }}
       - name: Worktree workflow integration fixtures
-        if: ${{ !inputs.smoke && (steps.affected.outcome != 'success' || steps.affected.outputs.workspace_fixtures != 'false') }}
+        if: runner.os == 'Linux' && !inputs.smoke && (steps.affected.outcome != 'success' || steps.affected.outputs.workspace_fixtures != 'false')
         # Both suites run side by side in separate processes (see the script).
         run: ../scripts/ci/Invoke-WorkspaceFixtures.ps1 -CoreRoot . -OutputRoot $env:DANSHENG_TASK_RUNTIME
       - name: Dependency cache isolation fixtures

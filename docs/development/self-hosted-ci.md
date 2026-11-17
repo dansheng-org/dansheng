@@ -9,7 +9,7 @@
 | workspace-scripts | `[self-hosted, linux, x64, 1402ubuntu]` | Bash 入口；App/Core 路径、锁、APK archive、prerelease、monorepo、CI 缓存、Python audit 与 workspace entry 夹具 |
 | flutter | `[self-hosted, linux, x64, 1402ubuntu]` | 锁定 Pub、手写格式、analyze、test、Pigeon 生成差异 |
 | core / native (ubuntu-latest) | Linux 同上 | fmt、全 workspace/all-features/all-targets tests、strict Clippy、workspace/monorepo 夹具 |
-| core / native (windows-latest) | Windows 同上 | 同上，另含依赖缓存隔离夹具；使用 GNU Rust，无需 MSVC |
+| core / native (windows-latest) | Windows 同上 | fmt、全 workspace/all-features/all-targets tests、strict Clippy、Windows Robocopy/NTFS 依赖缓存隔离夹具；使用 GNU Rust，无需 MSVC |
 | core / sdk | Linux 同上 | npm 锁、TypeScript check、Node runtime-path tests |
 | core / android | Linux 同上 | Core ARM64 / x86_64 两 ABI 的 locked release 编译 |
 | android-source-sdk | Linux 同上 | exact checkout 双 ABI Core、JNI/AAR、SDK lock/receipt 校验、App Kotlin/Pigeon debug 编译、Android host tests、APK payload audit |
@@ -17,7 +17,7 @@
 
 `native` 的矩阵显示名保留 `ubuntu-latest` / `windows-latest`，以保留原 required-check 名称；它们不是 `runs-on`。实际调度只读取矩阵中的四个 self-hosted labels。
 
-`workspace-scripts` 在 Linux 使用 Bash 启动，现有 `.ps1` 工具的回归测试由预装的 PowerShell 7 执行，Python audit 测试由 Bash 直接调用。全部脚本夹具与 Windows native job 并行调度；Windows runner 保留原生编译和 Rust 检查。
+`workspace-scripts` 在 Linux 使用 Bash 启动，现有 `.ps1` 工具的回归测试由预装的 PowerShell 7 执行，Python audit 测试由 Bash 直接调用。worktree/monorepo 集成夹具只在 Linux native job 执行，不再在 Windows 重复启动大量 Git 进程。Windows runner 保留原生编译、Rust 检查和必须使用 Windows Robocopy/NTFS 的依赖缓存隔离测试。
 
 PR job 在调度前要求 `head.repo.full_name == github.repository`；外部 fork 的所有执行 job 跳过，不 checkout 或执行 fork 代码。不使用 `pull_request_target`。正常 push 仅监听 main。所有 checkout 固定到事件的精确 SHA，PR 使用 GitHub merge SHA；预发布使用成功 main push 的 `workflow_run.head_sha`。checkout 不持久化 token。
 

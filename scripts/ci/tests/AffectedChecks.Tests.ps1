@@ -112,6 +112,8 @@ try {
     foreach ($name in @('Worktree workflow integration fixtures', 'Dependency cache isolation fixtures')) {
         $step = @($steps | Where-Object { $_.StartsWith("      - name: $name`n") })
         Assert ($step.Count -eq 1 -and $step[0].Contains("!inputs.smoke && ($fixtureGuard)")) "$name must fail open on failed classification, even with a false output"
+        $hostOs = if ($name -eq 'Worktree workflow integration fixtures') { 'Linux' } else { 'Windows' }
+        Assert ($step[0].Contains("runner.os == '$hostOs'")) "$name must stay on its intended host"
     }
     $rustSteps = @($steps | Where-Object { $_ -match '^      - run: cargo (fmt|test|clippy) ' })
     Assert ($rustSteps.Count -eq 3) 'Expected all three Rust checks'
