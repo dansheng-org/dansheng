@@ -148,5 +148,78 @@ async fn forum_sign_in_through_the_engine_with_and_without_webvpn() {
             break;
         }
     }
+    // DanXi's course reviews (旦课), read with the same forum sign-in.
+    let read = |method: &'static str, params: Value| {
+        let engine = engine.clone();
+        async move {
+            let response = engine
+                .handle(
+                    Principal::owner(),
+                    Request {
+                        id: method.into(),
+                        method: method.into(),
+                        params,
+                    },
+                )
+                .await;
+            let code = response.error.as_ref().map(|e| e.code.clone());
+            println!(
+                "{}",
+                json!({"stage":"danke","method":method,"ok":code.is_none(),"code":code,
+                    "message":response.error.as_ref().map(|e| e.message.clone())})
+            );
+            response.result
+        }
+    };
+    let random = read("community.danke.random", own()).await;
+    let group_id = random
+        .as_ref()
+        .and_then(|r| r["payload"]["group_id"].as_u64());
+    println!(
+        "{}",
+        json!({"stage":"danke","random_has_course":random.as_ref()
+            .is_some_and(|r| r["payload"]["course"].is_object()),"group_id_present":group_id.is_some()})
+    );
+    let search = read(
+        "community.danke.search",
+        json!({"account_id":account,"query":"数学","page":1,"page_size":10}),
+    )
+    .await;
+    println!(
+        "{}",
+        json!({"stage":"danke","search_records":search.as_ref()
+            .and_then(|r| r["records"].as_array()).map(Vec::len)})
+    );
+    let group = match group_id {
+        Some(id) => {
+            read(
+                "community.danke.group",
+                json!({"account_id":account,"group_id":id}),
+            )
+            .await
+        }
+        None => None,
+    };
+    let courses = group
+        .as_ref()
+        .and_then(|g| g["payload"]["course_list"].as_array())
+        .map(|list| {
+            (
+                list.len(),
+                list.iter()
+                    .filter_map(|c| c["review_list"].as_array())
+                    .map(Vec::len)
+                    .sum::<usize>(),
+            )
+        });
+    println!(
+        "{}",
+        json!({"stage":"danke","group_courses_and_reviews":courses})
+    );
+    for ok in [random.is_some(), search.is_some(), group.is_some()] {
+        if !ok {
+            failures += 1;
+        }
+    }
     assert_eq!(failures, 0, "see sanitized statuses above");
 }

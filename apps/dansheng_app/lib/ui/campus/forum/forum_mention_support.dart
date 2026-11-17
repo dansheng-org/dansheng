@@ -194,6 +194,8 @@ Future<void> showFloorDetailModal(
 }
 
 /// Mention quote preview widget rendered inline in forum markdown posts.
+/// A quoted hole or floor always takes a full line of its own, as in DanXi, so
+/// the text written after a quote starts on the next line.
 class ForumMentionQuoteWidget extends StatelessWidget {
   final int id;
   final bool isFloor;
@@ -207,7 +209,10 @@ class ForumMentionQuoteWidget extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SizedBox(width: double.infinity, child: _card(context));
+
+  Widget _card(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final cachedFloor = isFloor ? ForumFloorCache.instance.getFloor(id) : null;
@@ -361,22 +366,25 @@ class ForumMentionQuoteWidget extends StatelessWidget {
     // Fallback pill chip
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: ActionChip(
-        avatar: Icon(
-          isFloor ? Icons.format_quote_rounded : Icons.tag_rounded,
-          size: 14,
-          color: colors.primary,
-        ),
-        label: Text(
-          isFloor ? '##$id' : '#$id',
-          style: TextStyle(
-            fontSize: 12,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ActionChip(
+          avatar: Icon(
+            isFloor ? Icons.format_quote_rounded : Icons.tag_rounded,
+            size: 14,
             color: colors.primary,
-            fontWeight: FontWeight.bold,
           ),
+          label: Text(
+            isFloor ? '##$id' : '#$id',
+            style: TextStyle(
+              fontSize: 12,
+              color: colors.primary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+          onPressed: onTap,
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-        onPressed: onTap,
       ),
     );
   }

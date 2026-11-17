@@ -19,10 +19,17 @@ enum _Tab {
     reload: true,
   ),
   agent('Agent', Icons.auto_awesome_outlined, Icons.auto_awesome),
-  forum('论坛', Icons.forum_outlined, Icons.forum, reload: true),
+  // The forum keeps where you were reading; tapping its tab again refreshes it.
+  forum('论坛', Icons.forum_outlined, Icons.forum, refreshOnTap: true),
   plugins('插件', Icons.extension_outlined, Icons.extension);
 
-  const _Tab(this.label, this.icon, this.selectedIcon, {this.reload = false});
+  const _Tab(
+    this.label,
+    this.icon,
+    this.selectedIcon, {
+    this.reload = false,
+    this.refreshOnTap = false,
+  });
   final String label;
   final IconData icon;
   final IconData selectedIcon;
@@ -30,6 +37,9 @@ enum _Tab {
   /// Campus pages read again whenever they are opened, so they never show
   /// what was there before a sign-in. Agent and plugins keep their state.
   final bool reload;
+
+  /// Tapping the tab while it is open loads it afresh.
+  final bool refreshOnTap;
 }
 
 class HomeShell extends StatefulWidget {
@@ -74,7 +84,12 @@ class _HomeShellState extends State<HomeShell> {
   ];
 
   void select(_Tab tab) {
-    if (tab == current) return;
+    if (tab == current) {
+      if (tab.refreshOnTap) {
+        setState(() => visits[tab] = (visits[tab] ?? 0) + 1);
+      }
+      return;
+    }
     setState(() {
       // A page already built is rebuilt from scratch, so it loads afresh.
       if (tab.reload && opened.contains(tab)) {

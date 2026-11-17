@@ -597,12 +597,18 @@ async fn tea_login(
             )
         })?;
 
-    // Store the access token scoped in Network ONLY for the tea forum origin.
-    // DanXi sends access token exclusively to _BASE_URL (forum.fduhole.com);
-    // auth.fduhole.com does not accept access token. No cross-origin bearer scoping.
+    // Store the access token for the services DanXi sends it to: the forum
+    // (forum.fduhole.com) and its course reviews (danke.fduhole.com, DanXi's
+    // CurriculumBoardRepository). auth.fduhole.com never receives it.
     context
         .network
         .set_session(account, tea_origin, Some(access.to_string()), vec![])?;
+    context.network.set_session(
+        account,
+        crate::community::DANKE_ORIGIN,
+        Some(access.to_string()),
+        vec![],
+    )?;
 
     Ok(json!({
         "account_id": account,
@@ -2352,6 +2358,8 @@ mod tests {
         assert_eq!(res.get("refresh"), None);
         assert!(network.has_session("acc_unit"));
         assert!(network.has_session_for_origin("acc_unit", "http://127.0.0.1:9999"));
+        // DanXi sends the same token to its course reviews (旦课).
+        assert!(network.has_session_for_origin("acc_unit", crate::community::DANKE_ORIGIN));
         // Strictly dedicated origin: no cross-origin bearer set on auth_origin
         assert!(!network.has_session_for_origin("acc_unit", &auth_origin));
     }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../campus_api.dart';
 import '../../core/dansheng_state.dart';
+import 'danke/danke_page.dart';
 import 'forum_editor_page.dart';
 import 'forum_filter_settings.dart';
 import 'forum_mention_support.dart';
@@ -395,6 +396,16 @@ class _ForumPageState extends State<ForumPage> {
         ),
         // DanXi keeps three actions here: sort order, favourites and the rest.
         actions: [
+          // DanXi's course reviews (旦课), with the same forum account.
+          IconButton(
+            tooltip: '旦课 · 课程评价',
+            icon: const Icon(Icons.rate_review_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => DankePage(api: _service.api),
+              ),
+            ),
+          ),
           PopupMenuButton<ForumSortOrder>(
             tooltip: '排序：${_sortOrder.label}',
             icon: const Icon(Icons.sort_rounded),

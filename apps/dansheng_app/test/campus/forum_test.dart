@@ -543,28 +543,38 @@ void main() {
     expect(controller.forumEnabled, isTrue);
   });
 
-  testWidgets('Switching back to a campus tab loads it again', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.lightTheme,
-        home: HomeShell(controller: controller),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('论坛'));
-    await tester.pumpAndSettle();
-    final first = _methodParams(mockBridge, 'community.tea.divisions').length;
-    expect(first, greaterThan(0));
+  testWidgets(
+    'The forum keeps its place when left; tapping it again refreshes',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: HomeShell(controller: controller),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('论坛'));
+      await tester.pumpAndSettle();
+      int reads() =>
+          _methodParams(mockBridge, 'community.tea.divisions').length;
+      final first = reads();
+      expect(first, greaterThan(0));
+      final page = tester.state(find.byType(ForumPage));
 
-    await tester.tap(find.text('插件'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('论坛'));
-    await tester.pumpAndSettle();
-    expect(
-      _methodParams(mockBridge, 'community.tea.divisions').length,
-      greaterThan(first),
-    );
-  });
+      // Away and back: the same page, nothing read again.
+      await tester.tap(find.text('插件'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('论坛'));
+      await tester.pumpAndSettle();
+      expect(reads(), first);
+      expect(tester.state(find.byType(ForumPage)), same(page));
+
+      // Tapping the open forum tab again loads it afresh.
+      await tester.tap(find.text('论坛'));
+      await tester.pumpAndSettle();
+      expect(reads(), greaterThan(first));
+    },
+  );
 
   testWidgets(
     'Consent gate stops reads and login is single flight and replaceable',

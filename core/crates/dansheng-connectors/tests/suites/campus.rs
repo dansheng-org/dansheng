@@ -927,6 +927,27 @@ async fn tea_hole_windows_respect_upstream_ten_item_limit_and_preserve_cursor() 
 }
 
 #[tokio::test]
+async fn danke_random_review_carries_its_course_and_group() {
+    let fake = Offline::new(&[fixture!("danke_random.json")]);
+    let client = CommunityClient::new(fake.clone());
+    let record = client.danke_random(&source()).await.unwrap();
+    assert_eq!(record.external_id, "Danke-random:602");
+    assert_eq!(record.payload.review.title.as_deref(), Some("随机合成评课"));
+    assert_eq!(record.payload.group_id, Some(301));
+    let course = record.payload.course.as_ref().unwrap();
+    assert_eq!(course.teachers.as_deref(), Some("合成老师"));
+    assert_eq!(course.credit, Some(2.0));
+    let text = serde_json::to_string(&record.payload).unwrap();
+    assert!(!text.contains("UNKNOWN-FIELD"));
+    // Flattened back into one review object, as DanXi reads it.
+    assert!(text.contains(r#""timeCreated""#));
+    assert_eq!(
+        fake.requests.lock().unwrap()[0].url.path(),
+        "/api/reviews/random"
+    );
+}
+
+#[tokio::test]
 async fn danke_search_group_and_reviews_use_verified_v3_v1_routes_and_bounded_pages() {
     let fake = Offline::new(&[
         fixture!("danke_search.json"),

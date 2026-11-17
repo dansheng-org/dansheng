@@ -150,6 +150,7 @@ String campusError(Object error) {
   if (any(['NeedsReconciliation'])) return '提交结果待核对，请先刷新记录，不要重复提交。';
   if (any(['CourtOccupied', 'SlotUnavailable'])) return '这个时段已不可约，请刷新后另选。';
   if (any(['ViewerUnavailable', 'FileUnavailable'])) return '当前无法打开这个文件。';
+  if (any(['SaveFailed'])) return '无法保存到手机，请检查存储空间后重试。';
   if (any(['CapabilityUnavailable', 'AssetTooLarge', 'IntegrityMismatch'])) {
     return '当前环境无法完成此操作。';
   }
