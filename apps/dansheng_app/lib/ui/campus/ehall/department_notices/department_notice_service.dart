@@ -48,11 +48,11 @@ class DepartmentNoticeService {
 
     // Regex for standard table or list rows containing a link and a date
     final rowRegex = RegExp(
-      r'<(?:tr|li)[^>]*>([\s\S]*?)<\/(?:tr|li)>',
+      r'<(?:tr|li|div|p)[^>]*>([\s\S]*?)<\/(?:tr|li|div|p)>',
       caseSensitive: false,
     );
     final linkRegex = RegExp(
-      r'<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>',
+      r'''<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>''',
       caseSensitive: false,
     );
     final dateRegex = RegExp(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})');
@@ -79,7 +79,8 @@ class DepartmentNoticeService {
           .trim();
       // If title was in title attribute:
       if (rawTitle.isEmpty || rawTitle.length < 3) {
-        final titleAttr = RegExp(r'title="([^"]+)"').firstMatch(rowText);
+        final titleAttr = RegExp(r'''title=["']([^"']+)["']''')
+            .firstMatch(rowText);
         if (titleAttr != null) {
           rawTitle = titleAttr.group(1)?.trim() ?? rawTitle;
         }
@@ -88,7 +89,13 @@ class DepartmentNoticeService {
       if (rawTitle.isEmpty ||
           rawTitle.length < 3 ||
           rawTitle == '更多' ||
-          rawTitle.toLowerCase() == 'more') {
+          rawTitle.toLowerCase() == 'more' ||
+          rawTitle.contains('下一页') ||
+          rawTitle.contains('上一页') ||
+          rawTitle.contains('尾页') ||
+          rawTitle.contains('第一页') ||
+          rawTitle.startsWith('返回') ||
+          rawTitle == 'Home') {
         continue;
       }
 
@@ -124,6 +131,12 @@ class DepartmentNoticeService {
             !href.startsWith('#') &&
             !href.startsWith('javascript') &&
             !href.contains('list.htm') &&
+            !text.contains('下一页') &&
+            !text.contains('上一页') &&
+            !text.contains('尾页') &&
+            !text.contains('第一页') &&
+            !text.startsWith('返回') &&
+            text != 'Home' &&
             seenUrls.add(href)) {
           final fullUrl = resolveUrl(department.noticeUrl, href);
           items.add(
@@ -147,24 +160,30 @@ class DepartmentNoticeService {
   Future<List<DepartmentNoticeItem>> fetchDepartmentNotices(
     DepartmentInfo department,
   ) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 8)
+      ..badCertificateCallback = (cert, host, port) => true;
     try {
       final request = await client
           .getUrl(Uri.parse(department.noticeUrl))
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 8));
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) DanshengDepartmentNotices/1.0',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      );
+      request.headers.set(
+        HttpHeaders.acceptHeader,
+        'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       );
       final response = await request.close().timeout(
-        const Duration(seconds: 5),
+        const Duration(seconds: 8),
       );
       if (response.statusCode != 200) {
         return _cache[department.id] ?? const [];
       }
       final bytes = await response
           .fold<List<int>>(<int>[], (acc, data) => acc..addAll(data))
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 8));
       final html = utf8.decode(bytes, allowMalformed: true);
       final items = parseHtml(html, department);
       if (items.isNotEmpty) {

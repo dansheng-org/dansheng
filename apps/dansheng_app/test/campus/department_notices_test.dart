@@ -39,6 +39,14 @@ void main() {
       final basicmed = DepartmentDirectory.byId('basicmed');
       expect(basicmed, isNotNull);
       expect(basicmed!.category, DepartmentDirectory.catMedicine);
+      expect(
+        basicmed.noticeUrl,
+        'https://basicmed.fudan.edu.cn/30927/list.htm',
+      );
+
+      final pharm = DepartmentDirectory.byId('pharm');
+      expect(pharm, isNotNull);
+      expect(pharm!.noticeUrl, 'https://spfdu.fudan.edu.cn/28477/list.htm');
     });
 
     test('parseSubscribed handles null, empty, and custom selections', () {
@@ -94,6 +102,32 @@ void main() {
         expect(items[1].url, 'https://other.fudan.edu.cn/info/1.htm');
       },
     );
+
+    test('parses single-quote hrefs and div-based list layouts', () {
+      const sampleHtml = '''
+        <div class="news_list">
+          <div class="news_item">
+            <span class="news_title"><a href='/24/dd/c12493a795869/page.htm' title='复旦大学药学院学术讲座通知'>复旦大学药学院学术讲座通知</a></span>
+            <span class="news_date">2026-10-22</span>
+          </div>
+          <div class="news_item">
+            <a href='/page/2'>下一页</a>
+          </div>
+        </div>
+      ''';
+
+      final dept = DepartmentDirectory.byId('pharm')!;
+      final items = DepartmentNoticeService.parseHtml(sampleHtml, dept);
+
+      expect(items.length, 1);
+      expect(items[0].title, '复旦大学药学院学术讲座通知');
+      expect(items[0].date, '2026-10-22');
+      expect(
+        items[0].url,
+        'https://spfdu.fudan.edu.cn/24/dd/c12493a795869/page.htm',
+      );
+      expect(items[0].departmentId, 'pharm');
+    });
 
     test('getTileData formats TileFacts note and rows', () async {
       final service = DepartmentNoticeService.instance;
