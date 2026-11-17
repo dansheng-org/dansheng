@@ -805,6 +805,7 @@ impl CoreService for CampusService {
             ("community.danke.search", "community.read"),
             ("community.danke.group", "community.read"),
             ("community.danke.reviews", "community.read"),
+            ("community.danke.random", "community.read"),
         ];
         methods.extend(crate::expanded_services::METHODS);
         methods
@@ -1933,6 +1934,9 @@ impl CoreService for CampusService {
                         .await
                         .map_err(campus_error)?,
                 )?,
+                "community.danke.random" => {
+                    serde_json::to_value(client.danke_random(&source).await.map_err(campus_error)?)?
+                }
                 _ => return Err(CoreError::new("MethodNotFound", "unknown community method")),
             };
             publish_value(context.store, owner, &source, method, &value)?;

@@ -64,6 +64,7 @@ WebView 的页面上下文请求保持原平台端口；本模块不把页面 fe
 - `community.tea.login` 是幂等的登录请求，不产生远端写入：直连没有得到应答（或树洞路由为 `gateway`）时改经 WebVPN 发送；发送前先用一次 GET 确认网关会话仍有效，缺失或过期返回 `WebVpnLoginRequired`。没有应答的登录报网络错误，不报 `NeedsReconciliation`。发帖、回复仍然不跨路由重发。
 - 部分校园查询用 POST 发送（电费历史与统计、图书馆和食堂人数等）。Network 把所有 POST 当写入，没有确认的应答报 `NeedsReconciliation`；连接器传输层对 `.read` 能力改为按读取处理：被重定向说明会话被送去登录，报 `AuthenticationRequired`（宿主登录后重读），其余报 `Timeout`，可直接刷新。真正的写入能力（`.write`）不变。宿主登录后的第一次重读若仍被弹回，会稍等后再读一次再报错。
 - Engine 在服务调用发出 POST 后比对账号会话指纹，指纹变化即报 `NeedsReconciliation`（"service session changed after dispatch"）。指纹覆盖账号的全部来源，页面刚登录时另一个服务登录写入新会话就会触发，表现为"登录后提示待核对、刷新即好"。这项核对只用于写入；`.read` 与 `.login` 服务（查询，以及本就要换新会话的登录，例如树洞登录）改为只重查授权，授权变化报普通错误。经 Engine 的树洞登录实测入口：`--test forum_engine_live`（WebVPN 关、开、树洞经网关三种情况）。
+- 旦课（课程评价，danke.fduhole.com）与树洞共用同一个访问令牌，和 DanXi 一致：`community.tea.login` 同时为树洞和旦课两个来源保存令牌（不发给 auth.fduhole.com）。在此之前登录过树洞的账号读取旦课会先得到 `AuthenticationRequired`，宿主随即用已保存的树洞口令重新登录。旦课读取与树洞一样需要已确认的风险提示。`community.danke.random` 读取首页的随机评价（含课程与课程组）。
 - 树洞楼层的修改（`community.tea.floor.modify`，`PATCH /api/floors/{id}/_webvpn`）与删除（`community.tea.floor.delete`）重复执行结果不变，没有应答时报网络错误；举报（`community.tea.report`）不可重复，保留 `NeedsReconciliation`。三者都只限本机所有者，并由 Android 宿主逐次确认。
 - 限制：cookie-CSRF 写操作（Canvas 网页会话发信）按原设计拒绝网关路由；一律走网关后需改用 Canvas 令牌。
 

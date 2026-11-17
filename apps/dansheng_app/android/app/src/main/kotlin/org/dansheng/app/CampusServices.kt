@@ -19,6 +19,7 @@ internal class CampusServices(
     sheet:ModernSheet,
     private val verifyPortal:suspend (String,String)->Any?,
     private val pickDocument:suspend ()->android.net.Uri,
+    private val createDocument:suspend (String,String)->android.net.Uri,
 ) {
     private val venues=CampusVenueHost(activity,rt,sheet)
     private val reads=setOf(
@@ -29,7 +30,7 @@ internal class CampusServices(
         "canvas.quizzes.sync","canvas.quiz.read","canvas.discussions.sync","canvas.discussion.read","canvas.discussion.view",
         "canvas.assignment_groups.sync","canvas.submission.self","canvas.grades.self","fudan.catalog.syllabus",
         "fudan.cloud.roots","fudan.cloud.list","fudan.notice.attachments","webdav.servers","webdav.list",
-        "community.tea.divisions","community.tea.holes","community.tea.hole","community.tea.floors","community.tea.favorites","community.danke.search","community.danke.group","community.danke.reviews",
+        "community.tea.divisions","community.tea.holes","community.tea.hole","community.tea.floors","community.tea.favorites","community.danke.search","community.danke.group","community.danke.reviews","community.danke.random",
     )
     /** Drive writes: run exactly once after a UI action, never cached or retried. */
     private val writes=setOf(
@@ -67,7 +68,7 @@ internal class CampusServices(
         if(method=="campus.loginStatus")return rt.campusLogins.status(account)
         if(method=="campus.forgetForum")return rt.campusLogins.forgetForum(account)
         // A restored native session or saved password must not bypass the login notice.
-        if(method.startsWith("community.tea.") || method.startsWith("forum."))
+        if(method.startsWith("community.") || method.startsWith("forum."))
             rt.campusLogins.requireForumConsent(account)
         if(method=="forum.openLink") {
             val uri=android.net.Uri.parse(p.getString("url"))
@@ -140,7 +141,7 @@ internal class CampusServices(
         if(method.startsWith("venues."))return venues.call(method.removePrefix("venues."),p).also{checked(account,epoch)}
         if(method=="campus.cached") {
             val source=p.getString("method"); require(source in reads);p.remove("method")
-            if(source.startsWith("community.tea."))rt.campusLogins.requireForumConsent(account)
+            if(source.startsWith("community."))rt.campusLogins.requireForumConsent(account)
             return rt.request("storage.get",JSONObject().put("key",cacheKey(source,p))).also{checked(account,epoch)}
         }
         if(method in reads){
@@ -193,6 +194,8 @@ internal class CampusServices(
             return result
         }
         if(method=="campus.openFile")return openFile(account,epoch,p.optString("asset_id",p.optString("file_id")))
+        if(method=="campus.saveFile")return saveFile(account,epoch,p.optString("asset_id",p.optString("file_id")))
+        if(method=="campus.saveImage")return saveImage(p,account,epoch)
         throw PortError("MethodUnavailable")
     }
     /** Only a read can be retried after restoring its login. No UI is opened in the background. */
@@ -204,7 +207,7 @@ internal class CampusServices(
                 method.startsWith("canvas.") -> "canvas"
                 method.startsWith("fudan.cloud.") -> "cloud"
                 method.startsWith("webdav.") && p.optString("id").matches(Regex("[0-9a-f]{12}")) -> "webdav:"+p.getString("id")
-                method.startsWith("community.tea.") -> "forum"
+                method.startsWith("community.") -> "forum"
                 method.startsWith("fudan.ecard.") -> "ecard"
                 method=="fudan.electricity" -> "power"
                 method=="fudan.dining.occupancy" || method=="fudan.electricity.history" || method=="fudan.electricity.statistics" -> "dining"
@@ -267,11 +270,12 @@ internal class CampusServices(
         if(account!=rt.account() || epoch!=rt.accountEpoch)throw PortError("NeedsReconciliation")
         return result
     }
-    private suspend fun openFile(account:String,epoch:Long,id:String):JSONObject {
+    /** Copies a downloaded asset of this account into the app cache; returns the file and its type. */
+    private fun cachedAsset(account:String,epoch:Long,id:String):Pair<File,String> {
         if(id.isBlank())throw PortError("FileUnavailable")
         val reference=rt.request("storage.get",JSONObject().put("key",cacheKey("asset",JSONObject().put("account_id",account).put("id",id)))) as? JSONObject ?: throw PortError("FileUnavailable")
         val root=File(activity.cacheDir,"course-reader/"+digest(account)+"/"+digest(id)).apply { mkdirs() }
-        val name=reference.getString("name").replace(Regex("[\\p{Cntrl}/\\\\:]"),"_").take(96).trim('.',' ').ifBlank { "课程文件" }
+        val name=safeName(reference.getString("name"),"课程文件")
         val file=File(root,name); var offset=0L
         val temp=java.nio.file.Files.createTempFile(root.toPath(),".read-",".part").toFile()
         try {temp.outputStream().use { out->
@@ -287,10 +291,17 @@ internal class CampusServices(
         }; java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
         } finally { temp.delete() }
         checked(account,epoch)
+        return file to reference.getString("mime").substringBefore(';').lowercase(java.util.Locale.ROOT)
+    }
+    private fun safeName(raw:String,fallback:String)=
+        raw.replace(Regex("[\\p{Cntrl}/\\\\:*?\"<>|]"),"_").take(96).trim('.',' ').ifBlank { fallback }
+    private suspend fun openFile(account:String,epoch:Long,id:String):JSONObject {
+        val (file,type)=cachedAsset(account,epoch,id)
+        val name=file.name
         val uri=FileProvider.getUriForFile(activity,activity.packageName+".coursefiles",file)
         withContext(Dispatchers.Main) {
             checked(account,epoch)
-            val mime=reference.getString("mime").substringBefore(';').lowercase(java.util.Locale.ROOT)
+            val mime=type
             val extension=file.extension.lowercase(java.util.Locale.ROOT)
             if(mime=="application/pdf" || mime.startsWith("text/") || mime.startsWith("image/") ||
                 extension in setOf("pdf","txt","md","csv","png","jpg","jpeg","webp")){
@@ -304,5 +315,65 @@ internal class CampusServices(
             }
         }
         return JSONObject().put("opened",true)
+    }
+
+    /** Saves a downloaded drive or course file to the phone (Download/旦生; images go to the gallery). */
+    private suspend fun saveFile(account:String,epoch:Long,id:String):JSONObject {
+        val (file,type)=cachedAsset(account,epoch,id)
+        return saveToDevice(file.name,type.ifBlank{"application/octet-stream"},account,epoch){ out -> file.inputStream().use { it.copyTo(out) } }
+    }
+
+    /** Saves an image the app already shows (a forum picture) to the phone's gallery. */
+    private suspend fun saveImage(p:JSONObject,account:String,epoch:Long):JSONObject {
+        val mime=p.getString("mime").lowercase(java.util.Locale.ROOT)
+        if(mime !in setOf("image/png","image/jpeg","image/gif","image/webp"))throw PortError("InvalidInput")
+        val bytes=Base64.decode(p.getString("data_base64"),Base64.DEFAULT)
+        if(bytes.isEmpty() || bytes.size>MAX_SAVED_IMAGE)throw PortError("AssetTooLarge")
+        val extension=mime.substringAfter('/').replace("jpeg","jpg")
+        val name=safeName(p.optString("name"),"图片").let { if(it.contains('.')) it else "$it.$extension" }
+        return saveToDevice(name,mime,account,epoch){ out -> out.write(bytes) }
+    }
+
+    /** Android 10+ writes into shared storage without any permission: images into
+     *  Pictures/旦生 (shown in the gallery), other files into Download/旦生. Android 9
+     *  has no such collection, so the person picks where to save. */
+    private suspend fun saveToDevice(name:String,mime:String,account:String,epoch:Long,write:(java.io.OutputStream)->Unit):JSONObject {
+        checked(account,epoch)
+        val resolver=activity.contentResolver
+        val image=mime.startsWith("image/")
+        if(android.os.Build.VERSION.SDK_INT<29){
+            val target=createDocument(name,mime)
+            withContext(Dispatchers.IO){
+                (resolver.openOutputStream(target) ?: throw PortError("SaveFailed")).use(write)
+            }
+            return JSONObject().put("saved",true).put("location","所选位置")
+        }
+        val folder=(if(image)android.os.Environment.DIRECTORY_PICTURES else android.os.Environment.DIRECTORY_DOWNLOADS)+"/旦生"
+        val values=android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,name)
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE,mime)
+            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,folder)
+            put(android.provider.MediaStore.MediaColumns.IS_PENDING,1)
+        }
+        val collection=if(image)
+            android.provider.MediaStore.Images.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            else android.provider.MediaStore.Downloads.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        withContext(Dispatchers.IO){
+            val uri=resolver.insert(collection,values) ?: throw PortError("SaveFailed")
+            try {
+                (resolver.openOutputStream(uri) ?: throw PortError("SaveFailed")).use(write)
+                resolver.update(uri,android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING,0)
+                },null,null)
+            } catch(e:Exception) {
+                resolver.delete(uri,null,null)
+                throw if(e is PortError) e else PortError("SaveFailed")
+            }
+        }
+        return JSONObject().put("saved",true).put("location",if(image)"相册（Pictures/旦生）" else "下载（Download/旦生）")
+    }
+
+    private companion object {
+        const val MAX_SAVED_IMAGE=30*1024*1024
     }
 }

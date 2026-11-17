@@ -17,9 +17,10 @@ import java.io.File
 
 class MainActivity : FlutterActivity(), DanshengApi {
     private val rt get() = (application as DanshengApplication).runtime
-    private val campus by lazy { CampusServices(this,rt,::serviceLogin,::confirm,sheet,::verifyPortal,::pick) }
+    private val campus by lazy { CampusServices(this,rt,::serviceLogin,::confirm,sheet,::verifyPortal,::pick,::createDocument) }
     private var portalResult:CompletableDeferred<Intent>?=null
     private var picker: CompletableDeferred<Uri>? = null
+    private var saver: CompletableDeferred<Uri>? = null
     private val sheet by lazy { ModernSheet(this) }
     private var notificationReply: CompletableDeferred<Boolean>? = null
     private val taskLink = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -307,6 +308,16 @@ class MainActivity : FlutterActivity(), DanshengApi {
             pending.await()
         } finally { picker=null }
     }
+    /** Android 9 only: asks where to save a file, since it has no permission-free shared folder. */
+    private suspend fun createDocument(name:String,mime:String):Uri = withContext(Dispatchers.Main) {
+        if (saver!=null) throw PortError("PickerBusy")
+        val pending=CompletableDeferred<Uri>(); saver=pending
+        try {
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).setType(mime)
+                .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,name),734)
+            pending.await()
+        } finally { saver=null }
+    }
     @Deprecated("Compatibility with FlutterActivity")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
@@ -323,6 +334,10 @@ class MainActivity : FlutterActivity(), DanshengApi {
         if(requestCode==731) {
             val uri=data?.data
             if(resultCode==Activity.RESULT_OK && uri!=null) picker?.complete(uri) else picker?.completeExceptionally(PortError("Cancelled"))
+        }
+        if(requestCode==734) {
+            val uri=data?.data
+            if(resultCode==Activity.RESULT_OK && uri!=null) saver?.complete(uri) else saver?.completeExceptionally(PortError("Cancelled"))
         }
     }
     private suspend fun requestNotice() = withContext(Dispatchers.Main) {

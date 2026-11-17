@@ -287,6 +287,25 @@ class _CloudDrivePageState extends State<CloudDrivePage> {
     }
   }
 
+  /// Downloads the file and keeps a copy on the phone (Download/旦生; pictures
+  /// go to the gallery).
+  Future<void> _saveToPhone(CloudItem file) async {
+    if (!_busy.add(file.path)) return;
+    setState(() {});
+    try {
+      final assetId = await _drive.download(file);
+      final saved = await _api.call('campus.saveFile', {'asset_id': assetId});
+      final where = saved is Map ? saved['location'] : null;
+      _snack(where == null ? '已保存到手机' : '已保存到$where');
+    } catch (error) {
+      if (error is PlatformException && error.code == 'Cancelled') return;
+      if (isAuthError(error) && mounted) setState(() => _authRequired = true);
+      _snack(campusError(error), error: true);
+    } finally {
+      if (mounted) setState(() => _busy.remove(file.path));
+    }
+  }
+
   Future<void> _rename(CloudItem item) async {
     final name = (await _askName('重命名', initial: item.name))?.trim();
     if (name == null || name.isEmpty || name == item.name) return;
@@ -390,6 +409,7 @@ class _CloudDrivePageState extends State<CloudDrivePage> {
   void _menu(CloudItem item) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       showDragHandle: true,
       builder: (ctx) {
         void run(VoidCallback action) {
@@ -400,54 +420,63 @@ class _CloudDrivePageState extends State<CloudDrivePage> {
         return CampusAccountBoundary(
           api: _api,
           child: SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ListTile(
-                  title: Text(
-                    item.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                if (!item.isFolder && item.downloadable) ...[
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   ListTile(
-                    leading: const Icon(Icons.open_in_new_rounded),
-                    title: const Text('打开'),
-                    onTap: () => run(() => _openFile(item)),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.drive_file_move_outlined),
-                    title: const Text('保存到其他云盘或文件夹'),
-                    onTap: () => run(() => _saveElsewhere(item)),
-                  ),
-                ],
-                if (item.canRename)
-                  ListTile(
-                    leading: const Icon(Icons.drive_file_rename_outline),
-                    title: const Text('重命名'),
-                    onTap: () => run(() => _rename(item)),
-                  ),
-                if (_drive.canShare && item.canShare)
-                  ListTile(
-                    leading: const Icon(Icons.link_rounded),
-                    title: const Text('创建分享链接'),
-                    onTap: () => run(() => _share(item)),
-                  ),
-                if (item.canDelete)
-                  ListTile(
-                    leading: Icon(
-                      Icons.delete_outline_rounded,
-                      color: Theme.of(ctx).colorScheme.error,
-                    ),
                     title: Text(
-                      '删除',
-                      style: TextStyle(color: Theme.of(ctx).colorScheme.error),
+                      item.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
-                    onTap: () => run(() => _delete(item)),
                   ),
-              ],
+                  if (!item.isFolder && item.downloadable) ...[
+                    ListTile(
+                      leading: const Icon(Icons.open_in_new_rounded),
+                      title: const Text('打开'),
+                      onTap: () => run(() => _openFile(item)),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.download_rounded),
+                      title: const Text('保存到手机'),
+                      onTap: () => run(() => _saveToPhone(item)),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.drive_file_move_outlined),
+                      title: const Text('保存到其他云盘或文件夹'),
+                      onTap: () => run(() => _saveElsewhere(item)),
+                    ),
+                  ],
+                  if (item.canRename)
+                    ListTile(
+                      leading: const Icon(Icons.drive_file_rename_outline),
+                      title: const Text('重命名'),
+                      onTap: () => run(() => _rename(item)),
+                    ),
+                  if (_drive.canShare && item.canShare)
+                    ListTile(
+                      leading: const Icon(Icons.link_rounded),
+                      title: const Text('创建分享链接'),
+                      onTap: () => run(() => _share(item)),
+                    ),
+                  if (item.canDelete)
+                    ListTile(
+                      leading: Icon(
+                        Icons.delete_outline_rounded,
+                        color: Theme.of(ctx).colorScheme.error,
+                      ),
+                      title: Text(
+                        '删除',
+                        style: TextStyle(
+                          color: Theme.of(ctx).colorScheme.error,
+                        ),
+                      ),
+                      onTap: () => run(() => _delete(item)),
+                    ),
+                ],
+              ),
             ),
           ),
         );

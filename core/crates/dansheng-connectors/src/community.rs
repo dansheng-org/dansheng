@@ -131,6 +131,14 @@ pub struct DankeCourseGroup {
     pub course_count: Option<u64>,
     pub review_count: Option<u64>,
 }
+/// DanXi's home-page random review: a review with the course it is about.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DankeRandomReview {
+    #[serde(flatten)]
+    pub review: DankeReview,
+    pub group_id: Option<u64>,
+    pub course: Option<DankeCourse>,
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DankeSearchPage {
     pub page: u32,
@@ -163,6 +171,9 @@ pub fn parse_tea_floors(body: &[u8]) -> Result<Vec<TeaFloor>, CampusError> {
 }
 pub fn parse_danke_reviews(body: &[u8]) -> Result<Vec<DankeReview>, CampusError> {
     list(body, "Danke reviews")
+}
+pub fn parse_danke_random(body: &[u8]) -> Result<DankeRandomReview, CampusError> {
+    decode(json(body, "Danke random review")?, "Danke random review")
 }
 pub fn parse_danke_group(body: &[u8]) -> Result<DankeCourseGroup, CampusError> {
     decode(json(body, "Danke group")?, "Danke group")
@@ -530,6 +541,22 @@ impl<T: ConnectorTransport> CommunityClient<T> {
             return Err(changed("Danke group", "id"));
         }
         Ok(source.record(format!("Danke-group:{group_id}"), None, row))
+    }
+    /// One random review, as DanXi's course-review home shows (`GET /api/reviews/random`).
+    pub async fn danke_random(
+        &self,
+        source: &SourceContext,
+    ) -> Result<SourceRecord<DankeRandomReview>, CampusError> {
+        let body = self
+            .get(source, &self.danke, "/api/reviews/random", &[])
+            .await?;
+        let row = parse_danke_random(&body)?;
+        positive_id(row.review.id)?;
+        Ok(source.record(
+            format!("Danke-random:{}", row.review.id),
+            timestamp(row.review.time_updated.as_deref()),
+            row,
+        ))
     }
     pub async fn danke_reviews(
         &self,

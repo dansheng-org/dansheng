@@ -68,6 +68,7 @@ class _Bridge implements DanshengBridge {
       },
       'fudan.cloud.download' => {'asset_id': 'asset-1', 'name': '讲义.pdf'},
       'campus.openFile' => {'opened': true},
+      'campus.saveFile' => {'saved': true, 'location': '下载（Download/旦生）'},
       _ => throw PlatformException(code: 'MethodUnavailable'),
     });
   }
@@ -131,6 +132,17 @@ void main() {
     await tester.tap(find.text('受限.pdf'));
     await tester.pumpAndSettle();
     expect(bridge.calls.length, before);
+  });
+
+  testWidgets('saves a file to the phone from its menu', (tester) async {
+    final bridge = await _pump(tester);
+    await tester.longPress(find.text('讲义.pdf'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存到手机'));
+    await tester.pumpAndSettle();
+    expect(bridge.calls.last.$1, 'campus.saveFile');
+    expect(bridge.calls.last.$2, {'asset_id': 'asset-1'});
+    expect(find.text('已保存到下载（Download/旦生）'), findsOneWidget);
   });
 
   testWidgets('asks for the separate drive password, then loads', (

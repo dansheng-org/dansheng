@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Markdown/TeX presentation follows DanXi-Dev/DanXi's GPL-3.0-or-later forum renderer.
 // Copyright (C) 2021 DanXi-Dev; adaptation (C) 2026 Dansheng contributors.
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -276,8 +280,18 @@ class _ForumImage extends StatelessWidget {
           child: InkWell(
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
-                builder: (_) => Scaffold(
-                  appBar: AppBar(title: const Text('查看图片')),
+                builder: (viewer) => Scaffold(
+                  appBar: AppBar(
+                    title: const Text('查看图片'),
+                    actions: [
+                      IconButton(
+                        tooltip: '保存到手机',
+                        icon: const Icon(Icons.download_rounded),
+                        onPressed: () =>
+                            saveForumImage(viewer, _fullSizeImage(uri)),
+                      ),
+                    ],
+                  ),
                   body: Center(
                     child: InteractiveViewer(
                       minScale: .5,
@@ -291,6 +305,7 @@ class _ForumImage extends StatelessWidget {
                 ),
               ),
             ),
+            onLongPress: () => _imageMenu(context),
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: 320),
               child: Image.network(
@@ -325,6 +340,20 @@ class _ForumImage extends StatelessWidget {
       ),
     );
   }
+
+  void _imageMenu(BuildContext context) => showModalBottomSheet<void>(
+    context: context,
+    builder: (sheet) => SafeArea(
+      child: ListTile(
+        leading: const Icon(Icons.download_rounded),
+        title: const Text('保存图片到手机'),
+        onTap: () {
+          Navigator.of(sheet).pop();
+          saveForumImage(context, _fullSizeImage(uri));
+        },
+      ),
+    ),
+  );
 
   Uri _fullSizeImage(Uri source) => source.host == 'image.fduhole.com'
       ? source.replace(path: source.path.replaceAll('.md.', '.'))
@@ -382,4 +411,72 @@ class _HoleMentionBuilder extends MarkdownElementBuilder {
       onTap: onTapHole != null ? () => onTapHole!(holeId) : null,
     );
   }
+}
+
+/// Largest picture kept on the phone; the host enforces the same bound.
+const _maxSavedImage = 30 * 1024 * 1024;
+
+/// Fetches a forum picture again (full size) and saves it to the phone's gallery.
+/// Only public https pictures are fetched; the host checks the type and size.
+Future<void> saveForumImage(BuildContext context, Uri uri) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  void say(String text) =>
+      messenger?.showSnackBar(SnackBar(content: Text(text)));
+  if (uri.scheme != 'https' || uri.host.isEmpty || uri.userInfo.isNotEmpty) {
+    say('这张图片无法保存');
+    return;
+  }
+  say('正在保存图片…');
+  try {
+    final bytes = await _download(uri);
+    final mime = imageMimeOf(bytes);
+    if (mime == null) {
+      say('这张图片无法保存');
+      return;
+    }
+    final name = uri.pathSegments.isEmpty ? '' : uri.pathSegments.last;
+    final saved = await CampusApi(DanshengClient()).call('campus.saveImage', {
+      'name': name,
+      'mime': mime,
+      'data_base64': base64Encode(bytes),
+    });
+    final where = saved is Map ? saved['location'] : null;
+    say(where == null ? '已保存到相册' : '已保存到$where');
+  } on PlatformException catch (e) {
+    if (e.code != 'Cancelled') say(campusError(e));
+  } catch (_) {
+    say('图片下载失败，请稍后重试');
+  }
+}
+
+Future<Uint8List> _download(Uri uri) async {
+  final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+  try {
+    final request = await client.getUrl(uri);
+    final response = await request.close().timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) throw const HttpException('status');
+    final out = BytesBuilder(copy: false);
+    await for (final chunk in response.timeout(const Duration(seconds: 30))) {
+      out.add(chunk);
+      if (out.length > _maxSavedImage) throw const HttpException('too large');
+    }
+    return out.takeBytes();
+  } finally {
+    client.close(force: true);
+  }
+}
+
+/// The picture type from its first bytes; null when it is not a picture.
+@visibleForTesting
+String? imageMimeOf(List<int> b) {
+  bool starts(List<int> sig, [int at = 0]) =>
+      b.length >= at + sig.length &&
+      List.generate(sig.length, (i) => i).every((i) => b[at + i] == sig[i]);
+  if (starts([0x89, 0x50, 0x4E, 0x47])) return 'image/png';
+  if (starts([0xFF, 0xD8, 0xFF])) return 'image/jpeg';
+  if (starts([0x47, 0x49, 0x46, 0x38])) return 'image/gif';
+  if (starts([0x52, 0x49, 0x46, 0x46]) && starts([0x57, 0x45, 0x42, 0x50], 8)) {
+    return 'image/webp';
+  }
+  return null;
 }

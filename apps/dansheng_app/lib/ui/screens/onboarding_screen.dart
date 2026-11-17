@@ -128,7 +128,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     _step == 0
                         ? '先登录复旦大学统一身份认证（UIS）。密码在系统安全窗口中输入，'
                               '学校确认后加密保存在本机，之后各项服务自动保持登录。'
-                        : '使用旦挲（DanXi）/ 树洞的注册邮箱和密码登录。'
+                        : '使用旦夕（DanXi）账号，即复旦树洞的注册邮箱和密码登录。'
                               '跳过则不显示论坛入口，之后可在“账号与卡包”中登录。',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
