@@ -87,7 +87,7 @@ closed. A later-page failure returns an error, never a partial successful list.
 
 Normal integrated build: `cargo test -p dansheng-connectors`.
 
-M3 targeted checks: `cargo test -p dansheng-connectors --test campus --locked` and
+M3 targeted checks: `cargo test -p dansheng-connectors --test integration --locked campus::` and
 `cargo clippy -p dansheng-connectors --all-targets --locked -- -D warnings` after
 `. ./scripts/dev.ps1`. M3 fixtures live in `fixtures/campus/`. The older isolated
 validation script below copies `src/tests` only; use the workspace command for M3
@@ -99,7 +99,19 @@ It prints the location and runs the crate tests without changing root manifests,
 Cargo.lock or another worker's sources. `-Clippy` runs clippy with warnings denied.
 Provide the project-local toolchain environment in the shell when required.
 
-All fixtures are synthetic; tests use a recording fake transport, never the network.
+Ordinary integration tests live by business module in `tests/suites/*.rs` and are
+registered in `tests/integration.rs`. Add new ordinary suites there and register
+their modules in that entry point, preserving any required feature gates. Select
+one module with `--test integration <module>::`, or omit the filter to run the
+whole group. For multiple modules, run separate commands or the whole group;
+Cargo accepts only one runtime filter. Focused integration Clippy uses
+`cargo clippy -p dansheng-connectors --test integration --locked -- -D warnings`
+without a runtime filter.
+
+`forum_live.rs` and `webvpn_live.rs` remain separate targets with ignored live
+tests, requiring explicit authorization and their feature/environment setup.
+The ordinary suites use synthetic fixtures and fake/local transports; they do
+not establish real-service compatibility.
 JavaScript example tests: `node --test plugins/examples/tests/examples.test.mjs`
 from the repository root (Node is development tooling only). These tests verify
 the host-call contract and offline behavior. `plugins/examples/tests/run-quickjs.ps1`

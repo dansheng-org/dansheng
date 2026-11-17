@@ -15,7 +15,7 @@ use std::{
 use url::Url;
 macro_rules! fixture {
     ($name:literal) => {
-        include_bytes!(concat!("../fixtures/academic_catalog/", $name))
+        include_bytes!(concat!("../../fixtures/academic_catalog/", $name))
     };
 }
 fn source() -> SourceContext {

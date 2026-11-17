@@ -511,7 +511,7 @@ if [[ $mode == clippy ]]; then
 fi
 if [[ $mode == m5-targets ]]; then
     step fmt cargo +1.99.1 fmt --all -- --check
-    step test-plugin-storage cargo +1.99.1 test -p dansheng-core --test plugin_storage --all-features --locked --offline
+    step test-plugin-storage cargo +1.99.1 test -p dansheng-core --test integration --all-features --locked --offline plugin_storage::
     step test-native-scheduler cargo +1.99.1 test -p dansheng-host --test native_scheduler --all-features --locked --offline
     step clippy cargo +1.99.1 clippy --workspace --all-features --all-targets --locked --offline -- -D warnings
     step source-unchanged sha256sum -c "$artifact/source-manifest.sha256"

@@ -250,6 +250,24 @@ handle a concurrent local deletion or a missing file and must not reinterpret th
 source as a caller-selected path. No actual platform file-picker export is
 implemented or verified in this module; the parent owns that platform route.
 
+## Current validation commands
+
+The asset suite now lives at `crates/dansheng-core/tests/suites/assets.rs`,
+registered in `tests/integration.rs`. From `core/`, use:
+
+```powershell
+cargo test -p dansheng-core --test integration --offline assets::
+cargo test -p dansheng-core --features pdf --test integration --offline assets::
+cargo test -p dansheng-core --no-default-features --test integration --offline assets::
+cargo test -p dansheng-core --all-features --test integration --locked --offline assets::
+cargo clippy -p dansheng-core --all-features --test integration --locked --offline
+```
+
+The test filter selects `assets::`; Clippy checks the entire integration target
+without a runtime filter. These are current entry points, not new execution
+results. The evidence below retains its original commands and paths, including
+the old `--test assets` target and freeze-time formatting command.
+
 ## Validation evidence
 
 `crates/dansheng-core/tests/assets.rs` uses local TCP fixtures, synthetic sessions

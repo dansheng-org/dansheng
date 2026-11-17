@@ -19,12 +19,12 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use url::Url;
 
-const VOLUME: &[u8] = include_bytes!("../fixtures/library/single-volume.json");
-const BIB: &[u8] = include_bytes!("../fixtures/library/bibliography.json");
-const HOLDINGS: &[u8] = include_bytes!("../fixtures/library/holdings.json");
-const READER: &[u8] = include_bytes!("../fixtures/library/reader.json");
-const CURRENT: &[u8] = include_bytes!("../fixtures/library/current-loans.json");
-const HISTORY: &[u8] = include_bytes!("../fixtures/library/history-loans.json");
+const VOLUME: &[u8] = include_bytes!("../../fixtures/library/single-volume.json");
+const BIB: &[u8] = include_bytes!("../../fixtures/library/bibliography.json");
+const HOLDINGS: &[u8] = include_bytes!("../../fixtures/library/holdings.json");
+const READER: &[u8] = include_bytes!("../../fixtures/library/reader.json");
+const CURRENT: &[u8] = include_bytes!("../../fixtures/library/current-loans.json");
+const HISTORY: &[u8] = include_bytes!("../../fixtures/library/history-loans.json");
 
 fn source() -> SourceContext {
     SourceContext {

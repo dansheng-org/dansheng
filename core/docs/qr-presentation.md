@@ -50,11 +50,22 @@ HTML 接受上限为 256 KiB（通用网络接收层仍有原有 8 MiB 上限）
 
 `core_adapter.rs::qr_presentation_tests` 在真实 Engine（含审计和临时 SQLite）内运行同一个生产交接函数、官方客户端 GET 与真实 HTML 解析；仅替换外部 `ConnectorTransport` 和平台 presenter。fixture 断言固定 URL、GET、HostSession、一次请求/一次交接，并检查返回/事件/任务/来源行及关闭后的合成 profile 文件没有合成原码。覆盖非 owner、缺 provider、条款/歧义/空/超长页、带 payload 的恶意回执/错误、传输失败无业务重试、取消释放、Auto 配置不阻止交接。它不是校园网络、底层 Auto 回退或操作系统显示实测；网络层既有测试负责回退规则。
 
-`tests/qr_presentation.rs` 另经真实 `CampusService` 注册与 Engine 分派验证 owner/provider 边界、独立 capability 和 native job 拒绝。`tests/campus.rs` 验证原 status 序列化/Debug 不泄露合成原码。所有数据为新建临时 fixture，不读取真实 QR、凭据或用户 profile。
+`tests/suites/qr_presentation.rs` 另经真实 `CampusService` 注册与 Engine 分派验证 owner/provider 边界、独立 capability 和 native job 拒绝。`tests/suites/campus.rs` 验证原 status 序列化/Debug 不泄露合成原码。两者由 `tests/integration.rs` 注册。所有数据为新建临时 fixture，不读取真实 QR、凭据或用户 profile。
 
-迁移后复现时，从 `D:/Worktrees/<任务>/core` 进入已登记任务，初始化自己的依赖缓存，
-使用任务的 `CARGO_TARGET_DIR`（位于 `D:/Code/dansheng-workspace/local/runtime`）执行下面
-相同的测试和 Clippy 命令。不要执行旧 C 路径赋值。以下保留的是 2026-11-06 验收时的
+当前复现时，从仓库根目录运行 `. ./scripts/Enter-Dansheng.ps1` 后进入 `core/`，
+使用该任务的缓存与 `CARGO_TARGET_DIR`，执行：
+
+```powershell
+cargo test -p dansheng-connectors --features services --locked --offline --lib qr_
+cargo test -p dansheng-connectors --features services --locked --offline --test integration campus::
+cargo test -p dansheng-connectors --features services --locked --offline --test integration qr_presentation::
+cargo clippy -p dansheng-connectors --features services --test integration --locked --offline -- -D warnings
+cargo fmt --all -- --check
+```
+
+两个旧 target 现对应 `integration` 内的两个模块，因此分别执行各自的 filter；
+也可省略 filter 运行整个 integration 组。Clippy 检查整个 integration target，不能带运行时 filter。
+以上仅更新入口，不表示重新验收。不要执行旧 C 路径赋值。以下保留的是 2026-11-06 验收时的
 原始 Windows 命令与编译路径，不操作或重标该历史产物：
 
 ```powershell

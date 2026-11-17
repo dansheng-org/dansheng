@@ -12,12 +12,12 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use url::Url;
 
-const UG: &[u8] = include_bytes!("fixtures/undergraduate.json");
-const PG: &[u8] = include_bytes!("fixtures/postgraduate.json");
-const COURSES1: &[u8] = include_bytes!("fixtures/courses-page1.json");
-const COURSES2: &[u8] = include_bytes!("fixtures/courses-page2.json");
-const ASSIGNMENTS: &[u8] = include_bytes!("fixtures/assignments.json");
-const MATERIALS: &[u8] = include_bytes!("fixtures/materials.json");
+const UG: &[u8] = include_bytes!("../fixtures/undergraduate.json");
+const PG: &[u8] = include_bytes!("../fixtures/postgraduate.json");
+const COURSES1: &[u8] = include_bytes!("../fixtures/courses-page1.json");
+const COURSES2: &[u8] = include_bytes!("../fixtures/courses-page2.json");
+const ASSIGNMENTS: &[u8] = include_bytes!("../fixtures/assignments.json");
+const MATERIALS: &[u8] = include_bytes!("../fixtures/materials.json");
 const CANVAS: &str = "https://canvas.example.invalid";
 const FIRST: &str = "https://canvas.example.invalid/api/v1/courses?include[]=term&per_page=100";
 
@@ -104,7 +104,8 @@ fn postgraduate_bitmap_is_one_based_and_nullable_fields_are_not_invented() {
 
 #[test]
 fn semester_parser_decodes_apostrophes_and_converts_sunday_to_monday() {
-    let catalog = parse_undergraduate_semesters(include_str!("fixtures/semesters.html")).unwrap();
+    let catalog =
+        parse_undergraduate_semesters(include_str!("../fixtures/semesters.html")).unwrap();
     assert_eq!(catalog.default_semester_id, "901");
     assert_eq!(catalog.semesters[0].starts_on, semester().starts_on);
     assert!(catalog.semesters[1].name.contains("O'Brien"));
@@ -412,7 +413,7 @@ async fn undergraduate_service_discovers_semester_and_pg_selects_explicit_endpoi
     let fake = FakeTransport::new(vec![
         response(
             "https://fdjwgl.fudan.edu.cn/student/for-std/course-table",
-            include_bytes!("fixtures/semesters.html"),
+            include_bytes!("../fixtures/semesters.html"),
         ),
         response(
             "https://fdjwgl.fudan.edu.cn/student/for-std/course-table/semester/901/print-data",
