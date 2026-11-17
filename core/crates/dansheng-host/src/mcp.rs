@@ -393,6 +393,7 @@ mod tests {
             "fudan.ecard.login",
             "fudan.ecard.session",
             "fudan.academic.login",
+            "fudan.webvpn.login",
             "fudan.life.login",
             "fudan.portal.bind",
             "fudan.qr.present",

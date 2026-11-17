@@ -1036,7 +1036,7 @@ impl Network {
         &self,
         principal: &Principal,
         grant: &Grant,
-        mut input: HttpRequest,
+        input: HttpRequest,
         mut transfer: Transfer,
     ) -> CoreResult<WireResponse> {
         grant.check(principal, "http.request")?;
@@ -1088,49 +1088,64 @@ impl Network {
         // A gateway can accept the connection and then never answer. A read
         // that got no response at all is sent once more on a fresh connection,
         // inside the same overall deadline. Writes and streamed downloads never.
-        let gateway_read = mode == RouteMode::Gateway
+        let gateway_read = (mode == RouteMode::Gateway || transfer.gateway)
             && matches!(input.method.as_str(), "GET" | "HEAD")
             && transfer.sink.is_none()
             && !transfer.resume;
         let mut first = input.clone();
         if gateway_read {
-            first.timeout_ms = Some((total_ms / 2).clamp(3000, 8000).min(total_ms));
+            first.timeout_ms = Some((total_ms / 2).clamp(2500, 5000).min(total_ms));
+        } else if safe_fallback {
+            first.timeout_ms = Some((total_ms / 3).clamp(2500, 4000).min(total_ms));
         }
-        let result = self
+        let mut result = self
             .execute_once(principal, grant, first, transfer.clone(), &routes)
             .await;
-        if gateway_read
+        if safe_fallback
             && result.as_ref().is_err_and(|e| {
                 matches!(
                     e.code.as_str(),
-                    "Timeout" | "NetworkUnreachable" | "NetworkError"
+                    "NetworkUnreachable" | "Timeout" | "NetworkError" | "PermissionDenied"
                 )
             })
         {
             let remaining = total_ms
                 .saturating_sub(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
-            if remaining >= 1000 {
-                input.timeout_ms = Some(remaining);
-                return self
-                    .execute_once(principal, grant, input, transfer, &routes)
+            if remaining >= 500 {
+                transfer.gateway = true;
+                let mut retry_input = input.clone();
+                retry_input.timeout_ms = Some(remaining);
+                result = self
+                    .execute_once(principal, grant, retry_input, transfer.clone(), &routes)
                     .await;
             }
         }
-        if safe_fallback
-            && result
-                .as_ref()
-                .is_err_and(|e| e.code == "NetworkUnreachable")
-        {
-            let remaining = total_ms
-                .saturating_sub(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
-            if remaining < 100 {
-                return result;
+        if gateway_read || (safe_fallback && transfer.gateway) {
+            let mut retries = 0;
+            while retries < 2
+                && result.as_ref().is_err_and(|e| {
+                    matches!(
+                        e.code.as_str(),
+                        "Timeout" | "NetworkUnreachable" | "NetworkError"
+                    )
+                })
+            {
+                let remaining = total_ms
+                    .saturating_sub(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
+                if remaining < 1000 {
+                    break;
+                }
+                retries += 1;
+                let mut retry_input = input.clone();
+                if retries == 1 && remaining > 5000 {
+                    retry_input.timeout_ms = Some((remaining / 2).clamp(2500, 5000).min(remaining));
+                } else {
+                    retry_input.timeout_ms = Some(remaining);
+                }
+                result = self
+                    .execute_once(principal, grant, retry_input, transfer.clone(), &routes)
+                    .await;
             }
-            transfer.gateway = true;
-            input.timeout_ms = Some(remaining);
-            return self
-                .execute_once(principal, grant, input, transfer, &routes)
-                .await;
         }
         result
     }

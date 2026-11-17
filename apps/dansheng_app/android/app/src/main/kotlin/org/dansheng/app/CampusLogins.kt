@@ -82,7 +82,8 @@ internal class CampusLogins(private val rt: RuntimeHost) {
             // Postgraduate numbers (third digit 1 or 2) use the separate yjsxk course system.
             "academic" -> rt.request("fudan.academic.login",p.put("password",secret)
                 .put("service",if(account.length>=3 && account[2] in "12") "postgraduate" else "undergraduate"))
-            "power","bus","dining","webvpn" -> rt.request("fudan.life.login",p.put("service",service).put("password",secret))
+            "power","bus","dining" -> rt.request("fudan.life.login",p.put("service",service).put("password",secret))
+            "webvpn" -> rt.request("fudan.webvpn.login",p.put("password",secret))
             "canvas" -> rt.request("canvas.token.bind",p.put("token",secret.trim()).put("persist",false))
             "forum" -> rt.request("community.tea.login",p.put("email",email).put("password",secret))
             "cloud" -> rt.request("fudan.cloud.login",p.put("password",secret))
@@ -129,7 +130,11 @@ internal class CampusLogins(private val rt: RuntimeHost) {
             checkAccount(account,epoch)
             val now=SystemClock.elapsedRealtime()
             if(!replace && prompt==null) {
-                recentFailures[id]?.let { if(now-it.first<30_000)throw PortError(it.second) }
+                recentFailures[id]?.let {
+                    val transient = it.second in setOf("Timeout", "NetworkError", "NetworkUnreachable", "SourceTransportUnavailable")
+                    val cooldown = if(transient) 1_500L else 30_000L
+                    if(now-it.first<cooldown)throw PortError(it.second)
+                }
                 if(recovered[id]?.let { now-it<8_000 }==true)return@withLock JSONObject().put("connected",true)
             }
             savedLogins.get(account,group)?.let(::JSONObject)

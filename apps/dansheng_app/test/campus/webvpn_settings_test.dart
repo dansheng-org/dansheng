@@ -125,4 +125,66 @@ void main() {
     expect(find.text('登录 WebVPN'), findsNothing);
     app.dispose();
   });
+
+  testWidgets(
+    'mode selector allows switching directly to smart fallback auto mode',
+    (tester) async {
+      final host = _Host();
+      final app = _App(host);
+      await _pump(tester, app);
+      expect(host.mode, 'direct');
+
+      // Tap '智能回退'
+      await tester.tap(find.text('智能回退'));
+      await tester.pumpAndSettle();
+      expect(host.mode, 'auto');
+      expect(host.session, isTrue);
+      expect(find.textContaining('直连优先'), findsOneWidget);
+      expect(find.textContaining('WebVPN 已登录'), findsOneWidget);
+
+      // Tap '全部代理'
+      await tester.tap(find.text('全部代理'));
+      await tester.pumpAndSettle();
+      expect(host.mode, 'gateway');
+      expect(_switch(tester).value, isTrue);
+      expect(find.textContaining('全部复旦服务经 WebVPN'), findsOneWidget);
+
+      // Tap '关闭'
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+      expect(host.mode, 'direct');
+      expect(_switch(tester).value, isFalse);
+      expect(find.textContaining('已关闭'), findsOneWidget);
+
+      app.dispose();
+    },
+  );
+
+  testWidgets(
+    'renders cleanly on narrow screen with large accessibility font',
+    (tester) async {
+      tester.view.physicalSize = const Size(320 * 2.0, 640 * 2.0);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      final host = _Host()
+        ..mode = 'auto'
+        ..routes = 13
+        ..session = true;
+      final app = _App(host);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
+            child: Scaffold(body: WebVpnSettingsCard(controller: app)),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      app.dispose();
+    },
+  );
 }
