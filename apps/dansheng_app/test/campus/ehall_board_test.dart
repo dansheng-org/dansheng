@@ -281,7 +281,9 @@ void main() {
     controller = DanshengController(client: DanshengClient(bridge: bridge));
     await controller.initialize();
     await open(tester);
-    expect(bridge.methods, ['ehall.layout.get']);
+    expect(bridge.methods.where((m) => m != 'campus.loginStatus'), [
+      'ehall.layout.get',
+    ]);
     expect(find.text('未设置账号'), findsWidgets);
     expect(tester.takeException(), isNull);
   });

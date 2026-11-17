@@ -497,6 +497,7 @@ void main() {
     ) async {
       final campusCalls = <Map<String, dynamic>>[];
       bridge.campusHandler = (method, params) async {
+        if (method == 'campus.loginStatus') return null;
         campusCalls.add({'method': method, 'params': params});
         if (method == 'fudan.rooms') return testSourceBatch;
         return null;

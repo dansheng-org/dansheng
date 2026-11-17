@@ -14,6 +14,8 @@ import 'package:dansheng_app/ui/core/dansheng_client.dart';
 import 'package:dansheng_app/ui/core/dansheng_state.dart';
 import 'package:dansheng_app/ui/theme/app_theme.dart';
 import 'package:dansheng_app/ui/screens/account_balance_screen.dart';
+import 'package:dansheng_app/ui/screens/home_shell.dart';
+import 'package:dansheng_app/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +31,9 @@ class MockForumDanshengBridge implements DanshengBridge {
   Completer<void>? loginPending;
   String? divisionsError;
   String? reconcileOutcome; // 'success' | 'unresolved' | 'empty'
+  // Saved sign-in flags the host reports; null makes the host fail the call.
+  bool? uisSaved = true;
+  bool forumSaved = true;
 
   @override
   Future<String> invoke(HostCommand command, String payload) async {
@@ -339,6 +344,16 @@ class MockForumDanshengBridge implements DanshengBridge {
             },
           });
 
+        case 'campus.loginStatus':
+          if (uisSaved == null) {
+            throw PlatformException(code: 'MethodUnavailable');
+          }
+          return jsonEncode({'uis': uisSaved, 'forum': forumSaved});
+
+        case 'campus.forgetForum':
+          forumSaved = false;
+          return jsonEncode({'forum': false});
+
         case 'forum.report':
           return jsonEncode({
             'floor_id': methodParams['floor_id'],
@@ -384,6 +399,8 @@ class MockForumDanshengBridge implements DanshengBridge {
           if (loginError != null) throw PlatformException(code: loginError!);
           consentRequired = false;
           simulateAuthRequired = false;
+          if (methodParams['service'] == 'forum') forumSaved = true;
+          if (methodParams['service'] == 'ecard') uisSaved = true;
           return jsonEncode({'status': 'ok'});
 
         default:
@@ -461,17 +478,92 @@ void main() {
   late DanshengClient client;
   late DanshengController controller;
 
-  testWidgets('Account page keeps UIS and Canvas but no forum login', (
-    tester,
-  ) async {
+  testWidgets('Account page signs in to and out of the forum', (tester) async {
     await tester.pumpWidget(
       _wrapTestWidget(AccountBalanceScreen(controller: controller)),
     );
     await tester.pumpAndSettle();
     expect(find.text('统一认证'), findsOneWidget);
     expect(find.text('Canvas'), findsOneWidget);
-    expect(find.text('树洞账号'), findsNothing);
-    expect(find.byTooltip('登录树洞账号'), findsNothing);
+    expect(find.text('切换树洞账号'), findsOneWidget);
+
+    await tester.tap(find.text('退出树洞'));
+    await tester.pumpAndSettle();
+    expect(controller.forumEnabled, isFalse);
+    expect(find.text('退出树洞'), findsNothing);
+    expect(find.text('登录树洞'), findsOneWidget);
+
+    await tester.tap(find.text('登录树洞'));
+    await tester.pumpAndSettle();
+    expect(_methodParams(mockBridge, 'campus.login').last['service'], 'forum');
+    expect(controller.forumEnabled, isTrue);
+  });
+
+  testWidgets('First run: UIS first, then the forum or skip to hide it', (
+    tester,
+  ) async {
+    for (final forum in [true, false]) {
+      mockBridge.uisSaved = false;
+      mockBridge.forumSaved = false;
+      mockBridge.invocationLog.clear();
+      await controller.refreshLoginStatus();
+      expect(controller.needsSetup, isTrue);
+
+      await tester.pumpWidget(DanshengApp(controller: controller));
+      await tester.pumpAndSettle();
+      expect(find.text('欢迎使用旦生'), findsOneWidget);
+      expect(find.byType(NavigationBar), findsNothing);
+
+      await tester.tap(find.byKey(const Key('onboarding-uis')));
+      await tester.pumpAndSettle();
+      // The password is asked for by the host, never in Dart.
+      expect(
+        _methodParams(mockBridge, 'campus.login').single,
+        containsPair('service', 'ecard'),
+      );
+      expect(find.text('登录复旦树洞（可选）'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(Key(forum ? 'onboarding-forum' : 'onboarding-skip-forum')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.text('论坛'), forum ? findsOneWidget : findsNothing);
+      expect(controller.needsSetup, isFalse);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
+  testWidgets('A host that cannot report sign-ins keeps the full layout', (
+    tester,
+  ) async {
+    mockBridge.uisSaved = null;
+    await controller.refreshLoginStatus();
+    expect(controller.needsSetup, isFalse);
+    expect(controller.forumEnabled, isTrue);
+  });
+
+  testWidgets('Switching back to a campus tab loads it again', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: HomeShell(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('论坛'));
+    await tester.pumpAndSettle();
+    final first = _methodParams(mockBridge, 'community.tea.divisions').length;
+    expect(first, greaterThan(0));
+
+    await tester.tap(find.text('插件'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('论坛'));
+    await tester.pumpAndSettle();
+    expect(
+      _methodParams(mockBridge, 'community.tea.divisions').length,
+      greaterThan(first),
+    );
   });
 
   testWidgets(

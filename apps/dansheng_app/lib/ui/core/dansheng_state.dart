@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
 import '../campus/campus_api.dart' show campusError;
+import '../../bridge.g.dart';
 import 'dansheng_client.dart';
 
 /// A readable reason for the user, never a raw exception dump.
@@ -55,6 +57,57 @@ class DanshengController extends ChangeNotifier {
   Stream<String> get componentChanges => _components.stream;
   final _navigation = StreamController<int>.broadcast();
   Stream<int> get navigation => _navigation.stream;
+
+  // Saved sign-ins of the active account, as flags from the host (never secrets).
+  // Null when the host could not say; the app then keeps its full layout.
+  bool? _uisSaved;
+  bool? _forumSaved;
+  bool _setupDeferred = false;
+
+  /// First run, or an account without a saved UIS password: show the setup
+  /// guide (as DanXi does) so pages never start signed out.
+  bool get needsSetup =>
+      _isInitialized &&
+      !_setupDeferred &&
+      ((_activeAccountId ?? '').isEmpty || _uisSaved == false);
+
+  /// The forum tab only for accounts that signed in to it.
+  bool get forumEnabled => _forumSaved ?? true;
+
+  /// Leave setup for now; it returns on the next launch.
+  void deferSetup() {
+    _setupDeferred = true;
+    notifyListeners();
+  }
+
+  /// Re-reads which sign-ins are saved for the active account.
+  Future<void> refreshLoginStatus() async {
+    final account = _activeAccountId;
+    if (account == null || account.isEmpty) {
+      _uisSaved = false;
+      _forumSaved = false;
+    } else {
+      try {
+        final raw = await client.bridge.invoke(
+          HostCommand.campus,
+          jsonEncode({
+            'method': 'campus.loginStatus',
+            'params': {'account_id': account},
+          }),
+        );
+        final status = jsonDecode(raw);
+        if (account != _activeAccountId) return;
+        bool? flag(String key) =>
+            status is Map && status[key] is bool ? status[key] as bool : null;
+        _uisSaved = flag('uis');
+        _forumSaved = flag('forum');
+      } catch (_) {
+        _uisSaved = null;
+        _forumSaved = null;
+      }
+    }
+    notifyListeners();
+  }
 
   ThemeMode _themeMode = ThemeMode.system;
   ThemeMode get themeMode => _themeMode;
@@ -126,6 +179,7 @@ class DanshengController extends ChangeNotifier {
       _activeAccountId = results[2] as String?;
       _jobs = results[3] as List<Map<String, dynamic>>;
       _permissions = results[4] as Map<String, dynamic>;
+      await refreshLoginStatus();
 
       // Loading the plugin catalog must never log in to an unrelated campus service.
     } catch (e) {

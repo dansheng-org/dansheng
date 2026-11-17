@@ -26,6 +26,8 @@ internal class ForumRiskConsent(
         withAccount { writeVersion(account, VERSION) }
     }
 
+    fun isAccepted(account: String) = readVersion(account) == VERSION
+
     fun forget(account: String) = writeVersion(account, null)
 
     companion object {
