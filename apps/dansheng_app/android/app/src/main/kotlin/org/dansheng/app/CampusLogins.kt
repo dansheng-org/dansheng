@@ -60,6 +60,23 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     private fun checkAccount(account:String, epoch:Long) {
         if(rt.account()!=account || epoch!=rt.accountEpoch) throw PortError("AccountChanged")
     }
+    /** Which sign-ins this device keeps for the account; flags only, never a secret. The
+     *  app shows its first-run setup without a UIS password and the forum only with one. */
+    fun status(account:String):JSONObject = synchronized(rt.authGuard) {
+        if(rt.account()!=account)throw PortError("AccountChanged")
+        JSONObject()
+            .put("uis",savedLogins.get(account,"uis")!=null)
+            .put("forum",savedLogins.get(account,"forum")!=null && forumConsent.isAccepted(account))
+    }
+    /** Forgets this device's forum sign-in and notice acceptance; the forum tab is hidden
+     *  until the person signs in to it again. */
+    fun forgetForum(account:String) = synchronized(rt.authGuard) {
+        if(rt.account()!=account)throw PortError("AccountChanged")
+        savedLogins.delete(account,"forum")
+        forumConsent.forget(account)
+        recovered.remove(account to "forum"); recentFailures.remove(account to "forum")
+        JSONObject().put("forum",false)
+    }
     internal fun requireForumConsent(account:String) = synchronized(rt.authGuard) {
         if(rt.account()!=account)throw PortError("AccountChanged")
         forumConsent.requireAccepted(account)

@@ -65,6 +65,13 @@ impl WriteDispatch {
         self.dispatched.load(Ordering::Acquire)
     }
 
+    /// A query sent nothing that changes the remote, even when it used POST.
+    /// An authority change still stops it, as a plain error to retry.
+    pub(crate) fn finish_read<T>(&self, result: CoreResult<T>) -> CoreResult<T> {
+        (self.check)()?;
+        result
+    }
+
     pub(crate) fn finish<T>(&self, result: CoreResult<T>) -> CoreResult<T> {
         if let Err(error) = (self.check)() {
             // Do not mask uncertainty reported by another trusted transport.

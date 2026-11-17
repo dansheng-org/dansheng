@@ -376,6 +376,7 @@ impl crate::services::CoreService for WriteFixtureService {
         vec![
             ("fixture.send", "fixture.write"),
             ("fixture.read", "fixture.read"),
+            ("fixture.query", "fixture.read"),
         ]
     }
 
@@ -399,6 +400,17 @@ impl crate::services::CoreService for WriteFixtureService {
                     &io_grant,
                     request(&self.origin),
                     policy(&self.origin),
+                )
+                .await?
+        } else if method == "fixture.query" {
+            // A query the school only answers to POST; it changes nothing.
+            context
+                .network
+                .request_with_credentials(
+                    principal,
+                    &io_grant,
+                    request(&self.origin),
+                    CredentialKind::Cookie,
                 )
                 .await?
         } else {
@@ -737,4 +749,40 @@ async fn engine_read_revocation_still_rejects_sensitive_results() {
     assert_eq!(seen.len(), 1);
     assert!(seen[0].starts_with("GET "));
     server.abort();
+}
+
+#[tokio::test]
+async fn engine_query_sent_as_post_is_no_uncertain_write_when_a_session_changes() {
+    for (change, expected) in [("replace", None), ("capability", Some("PermissionDenied"))] {
+        let temp = tempfile::tempdir().unwrap();
+        let pause = Arc::new(TestDispatchPause::default());
+        let (origin, network, requests, server) =
+            fixture_with_reply_pause(OK_REPLY, Some(pause.clone())).await;
+        let engine = engine_fixture(temp.path(), network, &origin, None).await;
+        let task_engine = engine.clone();
+        let query = tokio::spawn(async move {
+            engine_call(
+                &task_engine,
+                writer(),
+                "fixture.query",
+                serde_json::json!({"account_id":"a"}),
+            )
+            .await
+        });
+        // Another service signs in while the query is out, as a page does
+        // when it reads several things right after logging in.
+        notification(&pause.reached).await;
+        change_authority(&engine, &origin, change).await;
+        pause.resume.notify_one();
+        let response = query.await.unwrap();
+        assert_eq!(
+            response.error.map(|e| e.code),
+            expected.map(str::to_string),
+            "{change}"
+        );
+        let seen = requests.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].starts_with("POST "));
+        server.abort();
+    }
 }

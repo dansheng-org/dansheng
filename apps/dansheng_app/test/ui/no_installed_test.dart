@@ -33,7 +33,8 @@ void main() {
       expect(find.text('eHall'), findsWidgets);
       expect(find.text('eLearning'), findsOneWidget);
       expect(find.text('Agent'), findsOneWidget);
-      expect(find.text('论坛'), findsOneWidget);
+      // No forum sign-in on a fresh client, so no forum tab.
+      expect(find.text('论坛'), findsNothing);
       expect(find.text('插件'), findsOneWidget);
 
       // Verify lazy pages: PluginsScreen is not loaded initially

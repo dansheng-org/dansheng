@@ -64,6 +64,8 @@ internal class CampusServices(
         }
         if(supplied.has("account_id") && supplied.optString("account_id")!=account)throw PortError("AccountMismatch")
         val p=JSONObject(supplied.toString()).put("account_id",account)
+        if(method=="campus.loginStatus")return rt.campusLogins.status(account)
+        if(method=="campus.forgetForum")return rt.campusLogins.forgetForum(account)
         // A restored native session or saved password must not bypass the login notice.
         if(method.startsWith("community.tea.") || method.startsWith("forum."))
             rt.campusLogins.requireForumConsent(account)

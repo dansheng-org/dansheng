@@ -215,10 +215,14 @@ void main() {
     await tester.pumpAndSettle();
     // Opening the board never reaches a campus service: it reads the saved
     // arrangement and what earlier reads stored on the device.
-    expect(bridge.campusCalls.map((c) => c['method']).toSet(), {
-      'ehall.layout.get',
-      'campus.cached',
-    });
+    // (The app's own check of which sign-ins are saved is not a service read.)
+    expect(
+      bridge.campusCalls
+          .map((c) => c['method'])
+          .where((m) => m != 'campus.loginStatus')
+          .toSet(),
+      {'ehall.layout.get', 'campus.cached'},
+    );
     for (final title in [
       '校园卡',
       '教室空位',

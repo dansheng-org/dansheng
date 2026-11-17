@@ -17,7 +17,8 @@ void main() {
       await core.initialize();
       await tester.pumpWidget(DanshengApp(controller: core));
       await tester.pumpAndSettle();
-      final context = tester.element(find.text('eHall').first);
+      // No account yet: the first screen is the sign-in guide.
+      final context = tester.element(find.text('欢迎使用旦生'));
       expect(MaterialLocalizations.of(context).cancelButtonLabel, '取消');
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));

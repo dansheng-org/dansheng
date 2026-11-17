@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'ui/core/dansheng_client.dart';
 import 'ui/core/dansheng_state.dart';
 import 'ui/screens/home_shell.dart';
+import 'ui/screens/onboarding_screen.dart';
 import 'ui/theme/app_theme.dart';
 
 void main() async {
@@ -30,6 +31,9 @@ class _DanshengAppState extends State<DanshengApp> {
   DanshengController get controller => widget.controller;
   Timer? timer;
   bool polling = false;
+
+  /// Stays on through both setup steps, even once the UIS password is saved.
+  bool onboarding = false;
   late final AppLifecycleListener lifecycle;
   void start() {
     timer?.cancel();
@@ -66,6 +70,7 @@ class _DanshengAppState extends State<DanshengApp> {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
+        if (controller.needsSetup) onboarding = true;
         return MaterialApp(
           title: '旦生',
           locale: const Locale('zh', 'CN'),
@@ -88,7 +93,12 @@ class _DanshengAppState extends State<DanshengApp> {
               child: child!,
             );
           },
-          home: HomeShell(controller: controller),
+          home: onboarding
+              ? OnboardingScreen(
+                  controller: controller,
+                  onFinished: () => setState(() => onboarding = false),
+                )
+              : HomeShell(controller: controller),
         );
       },
     );

@@ -10,6 +10,28 @@ import '../campus/agent/agent_page.dart';
 import 'plugins_screen.dart';
 import 'tasks_screen.dart';
 
+enum _Tab {
+  ehall('eHall', Icons.dashboard_outlined, Icons.dashboard, reload: true),
+  learning(
+    'eLearning',
+    Icons.calendar_month_outlined,
+    Icons.calendar_month,
+    reload: true,
+  ),
+  agent('Agent', Icons.auto_awesome_outlined, Icons.auto_awesome),
+  forum('论坛', Icons.forum_outlined, Icons.forum, reload: true),
+  plugins('插件', Icons.extension_outlined, Icons.extension);
+
+  const _Tab(this.label, this.icon, this.selectedIcon, {this.reload = false});
+  final String label;
+  final IconData icon;
+  final IconData selectedIcon;
+
+  /// Campus pages read again whenever they are opened, so they never show
+  /// what was there before a sign-in. Agent and plugins keep their state.
+  final bool reload;
+}
+
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.controller});
   final DanshengController controller;
@@ -18,17 +40,19 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  int index = 0;
-  final opened = <int>{0};
+  _Tab current = _Tab.ehall;
+  final opened = <_Tab>{_Tab.ehall};
+  final visits = <_Tab, int>{};
   late final StreamSubscription<int> links;
+
   @override
   void initState() {
     super.initState();
     links = widget.controller.navigation.listen((_) {
       if (!mounted) return;
       setState(() {
-        opened.add(4);
-        index = 4;
+        opened.add(_Tab.plugins);
+        current = _Tab.plugins;
       });
       Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -44,66 +68,69 @@ class _HomeShellState extends State<HomeShell> {
     super.dispose();
   }
 
-  Widget page(int i) => switch (i) {
-    0 => EHallPage(controller: widget.controller),
-    1 => LearningPage(controller: widget.controller),
-    2 => AgentPage(controller: widget.controller),
-    3 => ForumPage(controller: widget.controller),
-    _ => PluginsScreen(controller: widget.controller),
+  List<_Tab> get tabs => [
+    for (final tab in _Tab.values)
+      if (tab != _Tab.forum || widget.controller.forumEnabled) tab,
+  ];
+
+  void select(_Tab tab) {
+    if (tab == current) return;
+    setState(() {
+      // A page already built is rebuilt from scratch, so it loads afresh.
+      if (tab.reload && opened.contains(tab)) {
+        visits[tab] = (visits[tab] ?? 0) + 1;
+      }
+      opened.add(tab);
+      current = tab;
+    });
+  }
+
+  Widget page(_Tab tab) => switch (tab) {
+    _Tab.ehall => EHallPage(controller: widget.controller),
+    _Tab.learning => LearningPage(controller: widget.controller),
+    _Tab.agent => AgentPage(controller: widget.controller),
+    _Tab.forum => ForumPage(controller: widget.controller),
+    _Tab.plugins => PluginsScreen(controller: widget.controller),
   };
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.controller,
-    builder: (_, _) => Scaffold(
-      body: IndexedStack(
-        index: index,
-        children: List.generate(
-          5,
-          (i) => opened.contains(i)
-              ? TickerMode(
-                  enabled: index == i,
-                  child: KeyedSubtree(
-                    key: ValueKey('${widget.controller.activeAccountId}:$i'),
-                    child: page(i),
-                  ),
-                )
-              : const SizedBox.shrink(),
+    builder: (_, _) {
+      final shown = tabs;
+      if (!shown.contains(current)) current = _Tab.ehall;
+      final account = widget.controller.activeAccountId;
+      return Scaffold(
+        body: IndexedStack(
+          index: shown.indexOf(current),
+          children: [
+            for (final tab in shown)
+              opened.contains(tab)
+                  ? TickerMode(
+                      enabled: tab == current,
+                      child: KeyedSubtree(
+                        key: ValueKey(
+                          '$account:${tab.name}:${visits[tab] ?? 0}',
+                        ),
+                        child: page(tab),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+          ],
         ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: index,
-        onDestinationSelected: (i) => setState(() {
-          opened.add(i);
-          index = i;
-        }),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard),
-            label: 'eHall',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.calendar_month_outlined),
-            selectedIcon: Icon(Icons.calendar_month),
-            label: 'eLearning',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.auto_awesome_outlined),
-            selectedIcon: Icon(Icons.auto_awesome),
-            label: 'Agent',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.forum_outlined),
-            selectedIcon: Icon(Icons.forum),
-            label: '论坛',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.extension_outlined),
-            selectedIcon: Icon(Icons.extension),
-            label: '插件',
-          ),
-        ],
-      ),
-    ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: shown.indexOf(current),
+          onDestinationSelected: (i) => select(shown[i]),
+          destinations: [
+            for (final tab in shown)
+              NavigationDestination(
+                icon: Icon(tab.icon),
+                selectedIcon: Icon(tab.selectedIcon),
+                label: tab.label,
+              ),
+          ],
+        ),
+      );
+    },
   );
 }

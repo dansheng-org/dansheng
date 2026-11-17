@@ -271,6 +271,11 @@ impl Engine {
             if let Some(account) = &account {
                 self.ensure_session_loaded(account).await?;
             }
+            // A `.read` service changes nothing remotely, even when a query goes out
+            // as POST. A sign-in for another service can replace a session while it
+            // runs; that is no uncertain write, and reporting one made pages show
+            // "result needs reconciliation" right after logging in.
+            let query = capability.ends_with(".read");
             let engine = self.clone();
             let bound_principal = principal.clone();
             let bound_account = account.clone();
@@ -312,6 +317,9 @@ impl Engine {
                 .await;
             if let Some(account) = &account {
                 self.refresh_saved_session(account).await;
+            }
+            if query {
+                return dispatch.finish_read(result);
             }
             // The service may have awaited a final page or a native protocol
             // response while authorization changed. Check after the last await

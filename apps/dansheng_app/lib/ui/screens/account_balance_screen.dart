@@ -73,9 +73,29 @@ class _AccountBalanceScreenState extends State<AccountBalanceScreen> {
     try {
       await CampusApi(widget.controller.client)
           .call('campus.login', {'service': service, 'replace': true});
+      await widget.controller.refreshLoginStatus();
+      if (mounted) setState(() {});
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('已登录')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(campusError(e))));
+      }
+    }
+  }
+
+  /// Signing out of the forum hides its tab until the next forum sign-in.
+  Future<void> _forgetForum() async {
+    try {
+      await CampusApi(widget.controller.client).call('campus.forgetForum');
+      await widget.controller.refreshLoginStatus();
+      if (mounted) setState(() {});
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('已退出树洞，论坛入口已隐藏')));
       }
     } catch (e) {
       if (mounted) {
@@ -195,6 +215,19 @@ class _AccountBalanceScreenState extends State<AccountBalanceScreen> {
                             TextButton(
                               onPressed: () => _connectService(service),
                               child: Text(title),
+                            ),
+                          TextButton(
+                            onPressed: () => _connectService('forum'),
+                            child: Text(
+                              widget.controller.forumEnabled
+                                  ? '切换树洞账号'
+                                  : '登录树洞',
+                            ),
+                          ),
+                          if (widget.controller.forumEnabled)
+                            TextButton(
+                              onPressed: _forgetForum,
+                              child: const Text('退出树洞'),
                             ),
                         ],
                       ),
