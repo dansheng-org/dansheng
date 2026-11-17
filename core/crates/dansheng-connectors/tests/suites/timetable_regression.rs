@@ -9,7 +9,8 @@ use serde_json::{Value, json};
 
 #[test]
 fn timetable_wire_contract_matches_flutter_fixture() {
-    let catalog = parse_undergraduate_semesters(include_str!("fixtures/semesters.html")).unwrap();
+    let catalog =
+        parse_undergraduate_semesters(include_str!("../fixtures/semesters.html")).unwrap();
     let semester = catalog
         .semesters
         .iter()
@@ -22,19 +23,19 @@ fn timetable_wire_contract_matches_flutter_fixture() {
         observed_at: Utc.with_ymd_and_hms(2026, 11, 5, 10, 0, 0).unwrap(),
     };
     let undergraduate = parse_undergraduate_timetable(
-        include_bytes!("fixtures/undergraduate.json"),
+        include_bytes!("../fixtures/undergraduate.json"),
         source.clone(),
         semester.clone(),
     )
     .unwrap();
     let postgraduate = parse_postgraduate_timetable(
-        include_bytes!("fixtures/postgraduate.json"),
+        include_bytes!("../fixtures/postgraduate.json"),
         source,
         semester,
     )
     .unwrap();
     let expected: Value =
-        serde_json::from_str(include_str!("fixtures/timetable-contract.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/timetable-contract.json")).unwrap();
     // core_adapter returns serde_json::to_value(table), including SourceRecord
     // wrappers. Android campus.cached stores that entire value unchanged.
     assert_eq!(

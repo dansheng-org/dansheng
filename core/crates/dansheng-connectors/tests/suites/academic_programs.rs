@@ -16,10 +16,10 @@ use std::{
 use url::Url;
 
 const ID: &str = "9007199254740993123456789";
-const LIST: &[u8] = include_bytes!("../fixtures/academic_programs/list-first.json");
-const SECOND: &[u8] = include_bytes!("../fixtures/academic_programs/list-second.json");
-const DETAIL: &[u8] = include_bytes!("../fixtures/academic_programs/detail.json");
-const EMPTY: &[u8] = include_bytes!("../fixtures/academic_programs/empty-list.json");
+const LIST: &[u8] = include_bytes!("../../fixtures/academic_programs/list-first.json");
+const SECOND: &[u8] = include_bytes!("../../fixtures/academic_programs/list-second.json");
+const DETAIL: &[u8] = include_bytes!("../../fixtures/academic_programs/detail.json");
+const EMPTY: &[u8] = include_bytes!("../../fixtures/academic_programs/empty-list.json");
 fn source() -> SourceContext {
     SourceContext {
         account_id: "synthetic-owner".into(),

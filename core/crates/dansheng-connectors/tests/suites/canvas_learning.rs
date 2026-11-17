@@ -13,13 +13,13 @@ use std::sync::{Arc, Mutex};
 use url::Url;
 
 const CANVAS: &str = "https://canvas.example.invalid";
-const QUIZZES: &str = include_str!("../fixtures/canvas_learning/quizzes.json");
-const TOPICS: &str = include_str!("../fixtures/canvas_learning/topics.json");
-const TOPIC: &str = include_str!("../fixtures/canvas_learning/topic.json");
-const VIEW: &str = include_str!("../fixtures/canvas_learning/view.json");
-const SUBMISSION: &str = include_str!("../fixtures/canvas_learning/submission.json");
-const ENROLLMENTS: &str = include_str!("../fixtures/canvas_learning/enrollments.json");
-const GROUPS: &str = include_str!("../fixtures/canvas_learning/groups.json");
+const QUIZZES: &str = include_str!("../../fixtures/canvas_learning/quizzes.json");
+const TOPICS: &str = include_str!("../../fixtures/canvas_learning/topics.json");
+const TOPIC: &str = include_str!("../../fixtures/canvas_learning/topic.json");
+const VIEW: &str = include_str!("../../fixtures/canvas_learning/view.json");
+const SUBMISSION: &str = include_str!("../../fixtures/canvas_learning/submission.json");
+const ENROLLMENTS: &str = include_str!("../../fixtures/canvas_learning/enrollments.json");
+const GROUPS: &str = include_str!("../../fixtures/canvas_learning/groups.json");
 const USER: &str = "9007199254740993";
 
 fn source() -> SourceContext {

@@ -8,7 +8,7 @@ or dropping a reserved invocation retains a recoverable uncertainty state; it is
 not silently replayed. An already-active duplicate keeps its original job id and
 does not execute twice; a future scheduled duplicate is not pulled forward.
 Conflicting definitions sharing a custom dedup key are refused. Tests in
-`crates/dansheng-core/tests/immediate_plugin_jobs.rs` cover these boundaries.
+`crates/dansheng-core/tests/suites/immediate_plugin_jobs.rs` cover these boundaries.
 
 Native jobs use the same SQLite jobs table, active dedup index, lease CAS,
 deadline windows, periodic completion, wake-up port and public jobs methods as
@@ -148,7 +148,8 @@ integration should add a host-side service-job union/schema. Plugin
 `ctx.jobs.schedule` deliberately remains restricted to that plugin's own actions
 and must not gain native-service scheduling through a blanket SDK widening.
 
-Local synthetic tests are in `crates/dansheng-core/tests/native_jobs.rs`. They use
+Local synthetic tests are in `crates/dansheng-core/tests/suites/native_jobs.rs`,
+registered in `tests/integration.rs`. They use
 temporary profiles and in-process services only, with no network or real vault.
 They cover restart/crashed leases, the trusted read directory, arbitrary-RPC/write
 rejection, original caller and grant revocation, source/account/result isolation,
@@ -158,9 +159,9 @@ plugin compatibility. Existing closed-loop plugin tests use only local fixtures.
 
 ```powershell
 . ./scripts/dev.ps1
-cargo test -p dansheng-core --test native_jobs --locked
-cargo test -p dansheng-core --test closed_loop --locked
-cargo clippy -p dansheng-core --lib --test native_jobs --test closed_loop --no-deps --locked -- -D warnings
+cargo test -p dansheng-core --test integration --locked native_jobs::
+cargo test -p dansheng-core --test integration --locked closed_loop::
+cargo clippy -p dansheng-core --lib --test integration --no-deps --locked -- -D warnings
 ```
 
 Generated check logs: `target/native-jobs-check.log`,

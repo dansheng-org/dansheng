@@ -20,8 +20,8 @@ use std::{
 const ORIGIN: &str = "https://canvas-bridge.invalid";
 const ACCOUNT: &str = "synthetic-account-a";
 const USER: &str = "9007199254740993";
-const QUIZZES: &str = include_str!("../fixtures/canvas_learning/quizzes.json");
-const ENROLLMENTS: &str = include_str!("../fixtures/canvas_learning/enrollments.json");
+const QUIZZES: &str = include_str!("../../fixtures/canvas_learning/quizzes.json");
+const ENROLLMENTS: &str = include_str!("../../fixtures/canvas_learning/enrollments.json");
 
 struct PageReply {
     body: String,

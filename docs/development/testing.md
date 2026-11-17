@@ -29,6 +29,32 @@ Core 包含 `cargo fmt --all -- --check`、`cargo test --workspace --all-feature
 
 本地共享检查使用 `git ls-files`、`git check-ignore -v`、链接目标和双向读取。没有第二个授权 worktree 时不能声称跨工作树已实测。Claude 配置语法与实际加载结果也应分开报告。
 
+## Rust 集成测试调试入口
+
+以下命令在 `core/` 目录执行；从仓库根目录先运行 `. ./scripts/Enter-Dansheng.ps1`，再进入 `core/`。
+
+`dansheng-connectors` 的 20 个普通集成测试模块和 `dansheng-core` 的 10 个普通集成测试模块分别归入各 crate 的 `tests/suites/*.rs`，由各自的 `tests/integration.rs` 注册。新增普通测试按业务模块放入 `tests/suites/`，并在 `integration.rs` 中注册，沿用模块内所需的 feature 门控。旧 `--test <模块名>` 现在对应 `--test integration <模块名>::`：
+
+```powershell
+cargo test -p dansheng-connectors --test integration --locked campus::
+cargo test -p dansheng-core --test integration --locked plugin_storage::
+cargo test -p dansheng-core --test integration --locked assets::
+cargo test -p dansheng-core --test integration --locked backup::
+```
+
+一次 `cargo test` 只接受一个运行时 filter。多个旧 target 合并后，需要分别执行，或省略 filter 运行整个 integration 组，例如：
+
+```powershell
+cargo test -p dansheng-connectors --features services --test integration --locked campus::
+cargo test -p dansheng-connectors --features services --test integration --locked qr_presentation::
+cargo test -p dansheng-core --test integration --all-features --locked
+cargo clippy -p dansheng-core --test integration --all-features --locked -- -D warnings
+```
+
+Clippy 的集成测试 target 使用 `--test integration`，不接受测试运行时 filter；上例检查整个 integration target。`forum_live.rs` 和 `webvpn_live.rs` 保持独立 target，live 测试仍为 `ignored`，不纳入普通 suites；执行须另有明确授权并满足对应 feature/环境要求。
+
+历史验收记录中的旧命令、路径和哈希保留原样；复现时按上述关系选择当前入口，不将旧结果视作合并后的验证结果。
+
 ## 分层验收
 
 分别报告源码/静态检查、native 编译、模拟器、真实服务读取、物理设备与远程 CI。ARM64 编译不等于实机执行，离线页面/夹具不证明学校 WAF、认证与预约可用。

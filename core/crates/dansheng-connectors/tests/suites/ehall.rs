@@ -18,10 +18,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use url::Url;
 
-const CATALOG: &[u8] = include_bytes!("../fixtures/ehall/catalog.json");
-const TODO1: &[u8] = include_bytes!("../fixtures/ehall/todo-page1.json");
-const TODO2: &[u8] = include_bytes!("../fixtures/ehall/todo-page2.json");
-const APPLICATIONS: &[u8] = include_bytes!("../fixtures/ehall/applications.json");
+const CATALOG: &[u8] = include_bytes!("../../fixtures/ehall/catalog.json");
+const TODO1: &[u8] = include_bytes!("../../fixtures/ehall/todo-page1.json");
+const TODO2: &[u8] = include_bytes!("../../fixtures/ehall/todo-page2.json");
+const APPLICATIONS: &[u8] = include_bytes!("../../fixtures/ehall/applications.json");
 
 fn source() -> SourceContext {
     SourceContext {
