@@ -6,7 +6,7 @@
 
 | 现有检查 / job | 实际 runner labels | 覆盖 |
 | --- | --- | --- |
-| workspace-scripts | `[self-hosted, linux, x64, 1402ubuntu]` | Bash 入口；App/Core 路径、锁、APK archive、prerelease、monorepo、CI 缓存、Python audit 与 workspace entry 夹具 |
+| workspace-scripts | `[self-hosted, linux, x64, dansheng-scripts]` | Bash 入口；App/Core 路径、锁、APK archive、prerelease、monorepo、CI 缓存、Python audit 与 workspace entry 夹具 |
 | flutter | `[self-hosted, linux, x64, 1402ubuntu]` | 锁定 Pub、手写格式、analyze、test、Pigeon 生成差异 |
 | core / native (ubuntu-latest) | Linux 同上 | fmt、全 workspace/all-features/all-targets tests、strict Clippy、workspace/monorepo 夹具 |
 | core / native (windows-latest) | Windows 同上 | fmt、全 workspace/all-features/all-targets tests、strict Clippy、Windows Robocopy/NTFS 依赖缓存隔离夹具；使用 GNU Rust，无需 MSVC |
@@ -18,6 +18,8 @@
 `native` 的矩阵显示名保留 `ubuntu-latest` / `windows-latest`，以保留原 required-check 名称；它们不是 `runs-on`。实际调度只读取矩阵中的四个 self-hosted labels。
 
 `workspace-scripts` 在 Linux 使用 Bash 启动，现有 `.ps1` 工具的回归测试由预装的 PowerShell 7 执行，Python audit 测试由 Bash 直接调用。worktree/monorepo 集成夹具只在 Linux native job 执行，不再在 Windows 重复启动大量 Git 进程。Windows runner 保留原生编译、Rust 检查和必须使用 Windows Robocopy/NTFS 的依赖缓存隔离测试。
+
+Linux 当前部署 3 个通用 runner（`1402ubuntu`）和 4 个脚本专用 runner（`dansheng-scripts`）。脚本专用 runner 不带 `1402ubuntu` 标签，Rust/Android/Flutter 构建不能占用脚本池；`workspace-scripts` 有独立的 4 个并发席位。两类 runner 共用预装工具，各自维护注册身份和 checkout，脚本 runtime 继续按 run/job/attempt 隔离。新增专用 runner 不改变现有通用 runner 的编译缓存布局。
 
 PR job 在调度前要求 `head.repo.full_name == github.repository`；外部 fork 的所有执行 job 跳过，不 checkout 或执行 fork 代码。不使用 `pull_request_target`。正常 push 仅监听 main。所有 checkout 固定到事件的精确 SHA，PR 使用 GitHub merge SHA；预发布使用成功 main push 的 `workflow_run.head_sha`。checkout 不持久化 token。
 
@@ -71,7 +73,7 @@ build 最后的 `always()` 步骤只删除该 run/job/attempt 的固定 `signing
 
 ```powershell
 ./scripts/ci/tests/Runner.Tests.ps1
-# 安装好 actionlint 后（声明两个自定义 self-hosted labels）：
+# 安装好 actionlint 后（声明自定义 self-hosted labels）：
 actionlint -config-file scripts/ci/actionlint.yaml .github/workflows/app-ci.yml .github/workflows/core-ci.yml .github/workflows/app-prerelease.yml
 ```
 
