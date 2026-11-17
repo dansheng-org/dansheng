@@ -61,7 +61,7 @@ void main() {
       await capture('forum-list');
       await tester.tap(find.textContaining('最近在整理选课和学习资料').first);
       await tester.pumpAndSettle();
-      expect(find.text('#123456 帖子详情'), findsOneWidget);
+      expect(find.text('#123456'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await capture('forum-detail');
       await tester.drag(find.byType(ListView).last, const Offset(0, -540));

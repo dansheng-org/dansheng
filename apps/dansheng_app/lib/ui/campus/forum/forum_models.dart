@@ -35,6 +35,9 @@ class TeaFloor {
   final int? replyTo;
   final String? specialTag;
 
+  /// Written by the signed-in forum account; only such floors can be edited or deleted.
+  final bool isMe;
+
   const TeaFloor({
     required this.floorId,
     required this.holeId,
@@ -50,6 +53,7 @@ class TeaFloor {
     this.ranking,
     this.replyTo,
     this.specialTag,
+    this.isMe = false,
   });
 
   factory TeaFloor.fromJson(Map<String, dynamic> json) {
@@ -78,6 +82,7 @@ class TeaFloor {
       ranking: _parseOptionalInt(json['ranking']),
       replyTo: _parseOptionalInt(json['reply_to']),
       specialTag: json['special_tag']?.toString(),
+      isMe: json['is_me'] == true,
     );
   }
 
@@ -96,6 +101,7 @@ class TeaFloor {
     'ranking': ranking,
     'reply_to': replyTo,
     'special_tag': specialTag,
+    'is_me': isMe,
   };
 }
 

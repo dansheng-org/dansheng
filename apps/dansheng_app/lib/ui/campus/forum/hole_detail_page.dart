@@ -4,11 +4,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../campus_api.dart';
 import '../../core/dansheng_state.dart';
 import 'forum_chips.dart';
-import 'forum_editor_dialog.dart';
+import 'forum_editor_page.dart';
 import 'forum_filter_settings.dart';
 import 'forum_floor_tile.dart';
 import 'forum_mention_support.dart';
@@ -51,6 +52,10 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
 
   int? _highlightFloorId;
   Timer? _highlightTimer;
+
+  /// When set, only this anonymous name's floors are shown.
+  String? _onlyPerson;
+  bool _jumping = false;
 
   bool _isLoading = true;
   bool _isLoadingMore = false;
@@ -276,24 +281,159 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
     }
   }
 
+  void _openLink(Uri uri) =>
+      _service.api.call('forum.openLink', {'url': uri.toString()});
+
+  /// Replies to the hole, or to one floor with its `##id` (DanXi
+  /// `OTEditor.createNewReply`). Afterwards the thread is reloaded and shown
+  /// from the end, where the new reply is.
   Future<void> _openReplyDialog({TeaFloor? quoteFloor}) async {
-    final result = await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => ForumReplyDialog(
+    final result = await openForumEditor(
+      context,
+      ForumEditorPage(
+        mode: ForumEditorMode.reply,
         holeId: widget.holeId,
-        initialContent: quoteFloor != null ? '##${quoteFloor.floorId}\n' : null,
-        onReply: _service.reply,
-        onReconcile: _service.reconcile,
+        quoteFloor: quoteFloor,
+        onSubmit: (text) =>
+            _service.reply(holeId: widget.holeId, content: text.content),
+        onReconcile: (text) => _service.reconcile(
+          action: 'reply',
+          holeId: widget.holeId,
+          content: text.content,
+        ),
+        onOpenLink: _openLink,
       ),
     );
+    if (result == null || !mounted) return;
+    await _loadInitialData();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.uncertain ? '树洞暂未确认这条回复，已刷新，请查看是否已经发出' : '回复已发布'),
+      ),
+    );
+    await _scrollToBottom();
+  }
 
-    if (result == 'reload_required' || result != null) {
+  /// Edits one of the account's own floors (DanXi `OTEditor.modifyReply`).
+  Future<void> _editFloor(TeaFloor floor) async {
+    final result = await openForumEditor(
+      context,
+      ForumEditorPage(
+        mode: ForumEditorMode.modify,
+        holeId: widget.holeId,
+        editFloor: floor,
+        onSubmit: (text) =>
+            _service.modifyFloor(floorId: floor.floorId, content: text.content),
+        onOpenLink: _openLink,
+      ),
+    );
+    if (result == null || !mounted) return;
+    final updated = result.floor;
+    if (updated != null) {
+      _replaceFloor(updated);
+    } else {
       await _loadInitialData();
-      if (result != 'reload_required' && mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('回复已发布')));
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('回复已修改')));
+    }
+  }
+
+  Future<void> _deleteFloor(TeaFloor floor) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final updated = await _service.deleteFloor(floor.floorId);
+      if (!mounted) return;
+      if (updated != null) {
+        _replaceFloor(updated);
+      } else {
+        await _loadInitialData();
       }
+      messenger.showSnackBar(const SnackBar(content: Text('回复已删除')));
+    } catch (e) {
+      if (e.toString().contains('Cancelled')) return;
+      messenger.showSnackBar(SnackBar(content: Text('删除失败：${campusError(e)}')));
+    }
+  }
+
+  Future<void> _reportFloor(TeaFloor floor) async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) => _ReportReasonDialog(floorId: floor.floorId),
+    );
+    if (reason == null || reason.isEmpty || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _service.report(floorId: floor.floorId, reason: reason);
+      messenger.showSnackBar(const SnackBar(content: Text('已举报，感谢反馈')));
+    } catch (e) {
+      if (e.toString().contains('Cancelled')) return;
+      messenger.showSnackBar(SnackBar(content: Text('举报失败：${campusError(e)}')));
+    }
+  }
+
+  void _replaceFloor(TeaFloor updated) {
+    final index = _floors.indexWhere((f) => f.floorId == updated.floorId);
+    setState(() {
+      if (index >= 0) _floors[index] = updated;
+    });
+    ForumFloorCache.instance.putFloors([updated]);
+  }
+
+  /// The original poster's anonymous name, from the first floor.
+  String? get _opName {
+    final first =
+        _hole?.floors?.firstFloor ??
+        (_floors.isNotEmpty ? _floors.first : null);
+    final name = first?.anonyname?.trim();
+    return name == null || name.isEmpty ? null : name;
+  }
+
+  List<TeaFloor> get _shownFloors => _onlyPerson == null
+      ? _floors
+      : _floors.where((f) => f.anonyname?.trim() == _onlyPerson).toList();
+
+  /// Shows only one person's floors, or everyone's again (DanXi "只看此人").
+  void _toggleOnlyPerson(String? name) {
+    setState(() => _onlyPerson = _onlyPerson == null ? name : null);
+  }
+
+  Future<void> _scrollToTop() async {
+    if (!_scrollController.hasClients) return;
+    await _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// Loads every remaining floor, then moves to the last one (DanXi
+  /// "跳到底部" prefetches all floors before scrolling to the end).
+  Future<void> _scrollToBottom() async {
+    if (_jumping) return;
+    setState(() => _jumping = true);
+    try {
+      for (var page = 0; page < 200 && _hasMore && mounted; page++) {
+        final before = _floors.length;
+        await _loadMoreFloors();
+        if (_floors.length == before) break;
+      }
+      // A lazily built list grows its extent as it is laid out; follow it.
+      for (var pass = 0; pass < 8 && mounted; pass++) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!_scrollController.hasClients) return;
+        final position = _scrollController.position;
+        if ((position.maxScrollExtent - position.pixels).abs() < 1) break;
+        await _scrollController.animateTo(
+          position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _jumping = false);
     }
   }
 
@@ -324,12 +464,23 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('#${widget.holeId} 帖子详情'),
+        title: Text('#${widget.holeId}'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: '刷新',
-            onPressed: _loadInitialData,
+            icon: const Icon(Icons.vertical_align_top_rounded),
+            tooltip: '回到顶部',
+            onPressed: _scrollToTop,
+          ),
+          IconButton(
+            icon: _jumping
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.vertical_align_bottom_rounded),
+            tooltip: '跳到底部',
+            onPressed: _jumping ? null : _scrollToBottom,
           ),
           IconButton(
             icon: Icon(
@@ -348,7 +499,17 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
           PopupMenuButton<String>(
             tooltip: '更多选项',
             onSelected: (val) {
-              if (val == 'settings') {
+              if (val == 'refresh') {
+                _loadInitialData();
+              } else if (val == 'reply') {
+                _openReplyDialog();
+              } else if (val == 'op') {
+                _toggleOnlyPerson(_opName);
+              } else if (val == 'copy') {
+                Clipboard.setData(ClipboardData(text: '#${widget.holeId}'));
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(const SnackBar(content: Text('已复制帖子号')));
+              } else if (val == 'settings') {
                 ForumFilterDialog.show(context);
               } else if (val == 'hide') {
                 ForumPreferences.instance.hideHole(widget.holeId);
@@ -359,6 +520,47 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
               }
             },
             itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'reply',
+                child: Row(
+                  children: [
+                    Icon(Icons.reply_rounded, size: 20),
+                    SizedBox(width: 8),
+                    Text('回复帖子'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'refresh',
+                child: Row(
+                  children: [
+                    Icon(Icons.refresh, size: 20),
+                    SizedBox(width: 8),
+                    Text('刷新'),
+                  ],
+                ),
+              ),
+              if (_opName != null)
+                PopupMenuItem(
+                  value: 'op',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.person_outline_rounded, size: 20),
+                      const SizedBox(width: 8),
+                      Text(_onlyPerson == null ? '只看洞主' : '显示全部回复'),
+                    ],
+                  ),
+                ),
+              const PopupMenuItem(
+                value: 'copy',
+                child: Row(
+                  children: [
+                    Icon(Icons.tag_rounded, size: 20),
+                    SizedBox(width: 8),
+                    Text('复制帖子号'),
+                  ],
+                ),
+              ),
               const PopupMenuItem(
                 value: 'settings',
                 child: Row(
@@ -432,15 +634,17 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
       child: ListView.builder(
         controller: _scrollController,
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
-        itemCount: _floors.length + 1 + (_hasMore ? 1 : 0),
+        itemCount: _shownFloors.length + 1 + (_hasMore ? 1 : 0),
         itemBuilder: (context, index) {
           if (index == 0) {
             return _buildHoleHeader();
           }
 
+          final shown = _shownFloors;
           final floorIndex = index - 1;
-          if (floorIndex < _floors.length) {
-            return _buildFloorItem(_floors[floorIndex], floorIndex);
+          if (floorIndex < shown.length) {
+            final floor = shown[floorIndex];
+            return _buildFloorItem(floor, _floors.indexOf(floor));
           }
 
           // Load more indicator
@@ -525,6 +729,11 @@ class _HoleDetailPageState extends State<HoleDetailPage> {
       onTapHole: _openHole,
       onTapFloor: _locateFloor,
       onQuoteReply: (f) => _openReplyDialog(quoteFloor: f),
+      onEdit: _editFloor,
+      onDelete: _deleteFloor,
+      onReport: _reportFloor,
+      onlyPerson: _onlyPerson,
+      onToggleOnlyPerson: (f) => _toggleOnlyPerson(f.anonyname?.trim()),
     );
 
     if (_highlightFloorId != null && floor.floorId == _highlightFloorId) {
@@ -588,4 +797,45 @@ class _HighlightFadeWrapperState extends State<_HighlightFadeWrapper>
       ],
     );
   }
+}
+
+/// Asks why a floor is reported; owns its text so it outlives the closing animation.
+class _ReportReasonDialog extends StatefulWidget {
+  const _ReportReasonDialog({required this.floorId});
+  final int floorId;
+
+  @override
+  State<_ReportReasonDialog> createState() => _ReportReasonDialogState();
+}
+
+class _ReportReasonDialogState extends State<_ReportReasonDialog> {
+  final _reason = TextEditingController();
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('举报 ##${widget.floorId}'),
+    content: TextField(
+      controller: _reason,
+      autofocus: true,
+      maxLines: 3,
+      maxLength: 500,
+      decoration: const InputDecoration(hintText: '请说明举报理由'),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.of(context).pop(_reason.text.trim()),
+        child: const Text('举报'),
+      ),
+    ],
+  );
 }

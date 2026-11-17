@@ -114,6 +114,9 @@ pub struct SafeFloor {
     pub special_tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<u64>,
+    /// The floor was written by the signed-in account (DanXi `is_me`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_me: bool,
 }
 
 /// Durable guard status for single dispatch and uncertain timeouts.
@@ -368,6 +371,7 @@ fn parse_safe_floor(v: &Value) -> Option<SafeFloor> {
         .and_then(Value::as_str)
         .map(str::to_string);
     let modified = v.get("modified").and_then(Value::as_u64);
+    let is_me = v.get("is_me").and_then(Value::as_bool).unwrap_or(false);
 
     Some(SafeFloor {
         floor_id,
@@ -382,6 +386,7 @@ fn parse_safe_floor(v: &Value) -> Option<SafeFloor> {
         fold,
         special_tag,
         modified,
+        is_me,
     })
 }
 
@@ -436,6 +441,13 @@ pub(crate) async fn call_with_origins(
         "community.tea.floors" => tea_floors(context, principal, grant, params, tea_origin).await,
         "community.tea.publish" => tea_publish(context, principal, grant, params, tea_origin).await,
         "community.tea.reply" => tea_reply(context, principal, grant, params, tea_origin).await,
+        "community.tea.floor.modify" => {
+            tea_modify_floor(context, principal, grant, params, tea_origin).await
+        }
+        "community.tea.floor.delete" => {
+            tea_delete_floor(context, principal, grant, params, tea_origin).await
+        }
+        "community.tea.report" => tea_report(context, principal, grant, params, tea_origin).await,
         "community.tea.reconcile" => {
             tea_reconcile(context, principal, grant, params, tea_origin).await
         }
@@ -989,6 +1001,192 @@ async fn tea_set_favorite(
         .and_then(Value::as_array)
         .ok_or_else(|| CoreError::new("SourceSchemaChanged", "favorite answer has no id list"))?;
     Ok(json!({ "hole_id": hole_id, "favorite": favorite, "favorites": ids }))
+}
+
+/// One authenticated write to the forum on a floor the person picked.
+async fn floor_write(
+    context: &ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    params: &Value,
+    tea_origin: &str,
+    request: (&str, String, Option<Value>),
+) -> CoreResult<Value> {
+    let (method, path, body) = request;
+    if !principal.is_owner() {
+        return Err(CoreError::new(
+            "PermissionDenied",
+            "forum floor changes require the profile owner",
+        ));
+    }
+    let account = required_string(params, "account_id")?;
+    validate_account(account)?;
+    grant.check_account(principal, Some(account))?;
+    grant.check(principal, "community.write")?;
+    if !context
+        .network
+        .credential_available(account, tea_origin, CredentialKind::Bearer)
+    {
+        return Err(CoreError::new(
+            "AuthenticationRequired",
+            "account has no forum credentials; please login first",
+        ));
+    }
+    let io_grant = make_io_grant(grant, tea_origin, account, true);
+    let mut headers = BTreeMap::new();
+    headers.insert("accept".into(), "application/json".into());
+    if body.is_some() {
+        headers.insert("content-type".into(), "application/json".into());
+    }
+    let response = context
+        .network
+        .request_with_credentials(
+            principal,
+            &io_grant,
+            HttpRequest {
+                url: format!("{tea_origin}{path}"),
+                method: method.into(),
+                headers,
+                body,
+                account_id: Some(account.to_string()),
+                timeout_ms: Some(15000),
+                follow_redirects: false,
+            },
+            CredentialKind::Bearer,
+        )
+        .await
+        .map_err(gateway_sign_in)?;
+    match response.status {
+        401 => Err(CoreError::new(
+            "AuthenticationRequired",
+            "forum token rejected by server",
+        )),
+        403 => Err(CoreError::new(
+            "PermissionDenied",
+            "the forum refused this change",
+        )),
+        404 => Err(CoreError::new(
+            "FileUnavailable",
+            "the floor no longer exists",
+        )),
+        status if !(200..300).contains(&status) => Err(CoreError::new(
+            "SourceHttpError",
+            format!("forum returned status {status}"),
+        )),
+        _ => Ok(serde_json::from_str(&response.body).unwrap_or(Value::Null)),
+    }
+}
+
+fn floor_id(params: &Value) -> CoreResult<u64> {
+    let id = params
+        .get("floor_id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| CoreError::invalid("missing or invalid floor_id"))?;
+    validate_positive_id(id, "floor_id")
+}
+
+/// Replaces the text of one of the account's own floors, matching DanXi
+/// `modifyFloor` (`PATCH /api/floors/{id}/_webvpn` with `{content}`). Writing the
+/// same text again changes nothing, so an unanswered edit may be repeated.
+async fn tea_modify_floor(
+    context: &ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    params: &Value,
+    tea_origin: &str,
+) -> CoreResult<Value> {
+    let id = floor_id(params)?;
+    let content = validate_content(required_string(params, "content")?)?;
+    let answer = floor_write(
+        context,
+        principal,
+        grant,
+        params,
+        tea_origin,
+        (
+            "PATCH",
+            format!("/api/floors/{id}/_webvpn"),
+            Some(json!({ "content": content })),
+        ),
+    )
+    .await
+    .map_err(|e| {
+        if e.code == "NeedsReconciliation" {
+            CoreError::new("NetworkError", "floor edit got no answer")
+        } else {
+            e
+        }
+    })?;
+    Ok(json!({
+        "floor_id": id,
+        "floor": parse_safe_floor(&answer),
+    }))
+}
+
+/// Deletes one of the account's own floors, matching DanXi `deleteFloor`
+/// (`DELETE /api/floors/{id}`). Deleting it again changes nothing.
+async fn tea_delete_floor(
+    context: &ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    params: &Value,
+    tea_origin: &str,
+) -> CoreResult<Value> {
+    let id = floor_id(params)?;
+    let answer = floor_write(
+        context,
+        principal,
+        grant,
+        params,
+        tea_origin,
+        ("DELETE", format!("/api/floors/{id}"), None),
+    )
+    .await
+    .map_err(|e| {
+        if e.code == "NeedsReconciliation" {
+            CoreError::new("NetworkError", "floor deletion got no answer")
+        } else {
+            e
+        }
+    })?;
+    Ok(json!({
+        "floor_id": id,
+        "deleted": true,
+        "floor": parse_safe_floor(&answer),
+    }))
+}
+
+/// Reports a floor to the moderators, matching DanXi `reportPost`
+/// (`POST /api/reports` with `{floor_id, reason}`). A second report would be a
+/// second report, so an unanswered one stays NeedsReconciliation.
+async fn tea_report(
+    context: &ServiceContext<'_>,
+    principal: &Principal,
+    grant: &Grant,
+    params: &Value,
+    tea_origin: &str,
+) -> CoreResult<Value> {
+    let id = floor_id(params)?;
+    let reason = required_string(params, "reason")?.trim();
+    if reason.is_empty() || reason.chars().count() > 500 {
+        return Err(CoreError::invalid(
+            "report reason must be 1 to 500 characters",
+        ));
+    }
+    floor_write(
+        context,
+        principal,
+        grant,
+        params,
+        tea_origin,
+        (
+            "POST",
+            "/api/reports".into(),
+            Some(json!({ "floor_id": id, "reason": reason })),
+        ),
+    )
+    .await?;
+    Ok(json!({ "floor_id": id, "reported": true }))
 }
 
 /// Retrieve a single forum hole by ID matching DanXi `loadHoleById` (`GET /api/holes/{hole_id}`).
@@ -2448,6 +2646,114 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, "InvalidInput");
+    }
+
+    #[tokio::test]
+    async fn test_unit_own_floor_edit_delete_and_report() {
+        let floor = |content: &str, deleted: bool| json!({"floor_id": 5, "hole_id": 3, "content": content, "deleted": deleted, "is_me": true});
+        let (tea_origin, _srv) =
+            spawn_mock_server(
+                move |method, path, body| match (method.as_str(), path.as_str()) {
+                    ("PATCH", "/api/floors/5/_webvpn") => {
+                        assert_eq!(body.unwrap(), json!({"content": "edited"}));
+                        (200, floor("edited", false).to_string())
+                    }
+                    ("DELETE", "/api/floors/5") => {
+                        assert!(body.is_none());
+                        (200, floor("", true).to_string())
+                    }
+                    ("POST", "/api/reports") => {
+                        assert_eq!(body.unwrap(), json!({"floor_id": 5, "reason": "spam"}));
+                        (201, "{}".to_string())
+                    }
+                    ("DELETE", "/api/floors/6") => (403, "{}".to_string()),
+                    other => panic!("unexpected request {other:?}"),
+                },
+            )
+            .await;
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let network = dansheng_core::network::Network::default();
+        let platform = UnavailablePlatform;
+        let context = ServiceContext {
+            store: &store,
+            network: &network,
+            platform: &platform,
+        };
+        let owner = Principal::owner();
+        let grant = owner_grant_for("acc_floor");
+        network
+            .set_session("acc_floor", &tea_origin, Some("token".into()), vec![])
+            .unwrap();
+        let run = |method: &'static str, params: Value| {
+            let (context, owner, grant, tea_origin) = (&context, &owner, &grant, &tea_origin);
+            async move {
+                call_with_origins(
+                    context, owner, grant, method, &params, tea_origin, tea_origin,
+                )
+                .await
+            }
+        };
+
+        let edited = run(
+            "community.tea.floor.modify",
+            json!({"account_id": "acc_floor", "floor_id": 5, "content": " edited "}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(edited["floor"]["content"], "edited");
+        assert_eq!(edited["floor"]["is_me"], true);
+
+        let deleted = run(
+            "community.tea.floor.delete",
+            json!({"account_id": "acc_floor", "floor_id": 5}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(deleted["floor"]["deleted"], true);
+
+        let reported = run(
+            "community.tea.report",
+            json!({"account_id": "acc_floor", "floor_id": 5, "reason": "spam"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(reported["reported"], true);
+
+        // Someone else's floor: the forum's refusal is reported as such.
+        let refused = run(
+            "community.tea.floor.delete",
+            json!({"account_id": "acc_floor", "floor_id": 6}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused.code, "PermissionDenied");
+
+        let empty = run(
+            "community.tea.report",
+            json!({"account_id": "acc_floor", "floor_id": 5, "reason": "  "}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(empty.code, "InvalidInput");
+
+        // Only the profile owner changes floors.
+        let plugin = Principal {
+            id: "plugin".into(),
+            kind: dansheng_core::PrincipalKind::Plugin,
+        };
+        let err = call_with_origins(
+            &context,
+            &plugin,
+            &grant,
+            "community.tea.floor.delete",
+            &json!({"account_id": "acc_floor", "floor_id": 5}),
+            &tea_origin,
+            &tea_origin,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "PermissionDenied");
     }
 
     #[tokio::test]

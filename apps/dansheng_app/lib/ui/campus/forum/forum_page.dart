@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../campus_api.dart';
 import '../../core/dansheng_state.dart';
-import 'forum_editor_dialog.dart';
+import 'forum_editor_page.dart';
 import 'forum_filter_settings.dart';
 import 'forum_mention_support.dart';
 import 'forum_messages_page.dart';
@@ -321,26 +321,36 @@ class _ForumPageState extends State<ForumPage> {
     }
   }
 
-  /// Open publish dialog.
+  /// Opens the full-page editor for a new post (DanXi `OTEditor.createNewPost`).
   Future<void> _openPublishDialog() async {
-    final result = await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => ForumPublishDialog(
+    final result = await openForumEditor(
+      context,
+      ForumEditorPage(
+        mode: ForumEditorMode.publish,
         divisions: _divisions,
         initialDivisionId: _selectedDivisionId,
-        onPublish: _service.publish,
-        onReconcile: _service.reconcile,
+        onSubmit: (text) => _service.publish(
+          divisionId: text.divisionId!,
+          content: text.content,
+          tags: text.tags,
+        ),
+        onReconcile: (text) => _service.reconcile(
+          action: 'publish',
+          divisionId: text.divisionId,
+          content: text.content,
+        ),
+        onOpenLink: (uri) =>
+            _service.api.call('forum.openLink', {'url': uri.toString()}),
       ),
     );
-
-    if (result == 'reload_required' || result != null) {
-      await _refreshHoles(showLoading: true);
-      if (result != 'reload_required' && mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('发布成功')));
-      }
-    }
+    if (result == null || !mounted) return;
+    await _refreshHoles(showLoading: true);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.uncertain ? '树洞暂未确认这次发布，已刷新列表，请查看是否已经发出' : '发布成功'),
+      ),
+    );
   }
 
   /// Find division name by ID.
