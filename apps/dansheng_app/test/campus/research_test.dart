@@ -37,9 +37,13 @@ void main() {
       },
     );
 
-    test('getGroups returns groups, filters by department and handles follow toggle', () async {
+    test('getGroups returns groups with official websites, filters by department and handles follow toggle', () async {
       final allGroups = await service.getGroups();
-      expect(allGroups.length, greaterThanOrEqualTo(5));
+      expect(allGroups.length, greaterThanOrEqualTo(15));
+      expect(
+        allGroups.any((g) => g.websiteUrl.contains('fudan.edu.cn')),
+        isTrue,
+      );
 
       // Test follow toggle
       const testId = 'rg_chip';
@@ -53,38 +57,41 @@ void main() {
 
       // Filter by department
       final csGroups = await service.getGroups(department: '计算机科学技术学院');
-      expect(csGroups.every((g) => g.department == '计算机科学技术学院'), isTrue);
+      expect(csGroups.every((g) => g.department.contains('计算机')), isTrue);
     });
 
-    test(
-      'getLectures returns academic lectures and toggles bookmarks',
-      () async {
-        final lectures = await service.getLectures();
-        expect(lectures, isNotEmpty);
+    test('getLectures returns academic lectures, filters by category and toggles bookmarks', () async {
+      final lectures = await service.getLectures();
+      expect(lectures.length, greaterThanOrEqualTo(10));
+      expect(
+        lectures.any((l) => l.title.contains('西学') || l.title.contains('量子计算')),
+        isTrue,
+      );
 
-        const lecId = 'lec_2';
-        final initialBookmarked = service.isLectureBookmarked(lecId);
-        service.toggleBookmarkLecture(lecId);
-        expect(service.isLectureBookmarked(lecId), !initialBookmarked);
+      final humanities = await service.getLectures(category: '人文社科');
+      expect(humanities.every((l) => l.category == '人文社科'), isTrue);
 
-        service.toggleBookmarkLecture(lecId);
-        expect(service.isLectureBookmarked(lecId), initialBookmarked);
-      },
-    );
+      const lecId = 'lec_cs_1';
+      final initialBookmarked = service.isLectureBookmarked(lecId);
+      service.toggleBookmarkLecture(lecId);
+      expect(service.isLectureBookmarked(lecId), !initialBookmarked);
 
-    test('FDUROP services: getNotices, getProjects, and getDocuments with downloads', () async {
+      service.toggleBookmarkLecture(lecId);
+      expect(service.isLectureBookmarked(lecId), initialBookmarked);
+    });
+
+    test('FDUROP services: getNotices, getProjects with paper.fudan.edu.cn portal, and getDocuments with downloads', () async {
       // FDUROP Notices
       final notices = await service.getFduropNotices();
-      expect(notices.length, greaterThanOrEqualTo(4));
+      expect(notices.length, greaterThanOrEqualTo(5));
       expect(notices.any((n) => n.title.contains('FDUROP')), isTrue);
+      expect(notices.any((n) => n.title.contains('教师开放课题')), isTrue);
 
       // FDUROP Open Projects
       final projects = await service.getFduropProjects();
-      expect(projects.length, greaterThanOrEqualTo(5));
+      expect(projects.length, greaterThanOrEqualTo(8));
       expect(
-        projects.any(
-          (p) => p.program.contains('曦源') || p.program.contains('望道'),
-        ),
+        projects.every((p) => p.portalUrl.contains('paper.fudan.edu.cn')),
         isTrue,
       );
 
@@ -179,7 +186,7 @@ void main() {
     });
 
     testWidgets(
-      'Switching to 课题组 tab displays groups, allows follow toggle and details sheet',
+      'Switching to 课题组 tab displays groups, allows follow toggle and details sheet with website',
       (tester) async {
         await tester.pumpWidget(
           buildTestApp(
@@ -190,19 +197,19 @@ void main() {
         await tester.pumpAndSettle();
 
         // Switch to 课题组 tab
-        await tester.tap(find.widgetWithText(Tab, '课题组 (2)'));
+        await tester.tap(find.widgetWithText(Tab, '课题组 (3)'));
         await tester.pumpAndSettle();
 
         // Verify groups visible
-        expect(find.text('智能信息处理与大模型认知研究组'), findsOneWidget);
-        expect(find.text('类脑智能与脑机接口前沿实验室'), findsOneWidget);
+        expect(find.textContaining('智能信息处理与大模型认知研究组'), findsOneWidget);
+        expect(find.textContaining('软件工程实验室'), findsOneWidget);
 
         // Verify direction tags
         expect(find.text('自然语言处理'), findsOneWidget);
-        expect(find.text('类脑计算'), findsOneWidget);
+        expect(find.text('智能软件工程 (AI4SE)'), findsOneWidget);
 
         // Tap group card to open detail sheet
-        await tester.tap(find.text('智能信息处理与大模型认知研究组'));
+        await tester.tap(find.textContaining('智能信息处理与大模型认知研究组'));
         await tester.pumpAndSettle();
 
         // Verify lab detail sheet content
@@ -210,17 +217,26 @@ void main() {
         expect(find.text('代表性成果 / 近期论文'), findsOneWidget);
         final sheetScrollable = find.byType(Scrollable).last;
         await tester.scrollUntilVisible(
+          find.text('官方主页 / 学院网站'),
+          200,
+          scrollable: sheetScrollable,
+        );
+        expect(find.text('官方主页 / 学院网站'), findsOneWidget);
+        expect(find.text('https://nlp.fudan.edu.cn'), findsOneWidget);
+        expect(find.byTooltip('复制网址'), findsOneWidget);
+
+        await tester.scrollUntilVisible(
           find.text('招生与科研招募'),
           200,
           scrollable: sheetScrollable,
         );
         expect(find.text('招生与科研招募'), findsOneWidget);
         await tester.scrollUntilVisible(
-          find.text('nlp_fudan@fudan.edu.cn'),
+          find.text('xpqiu@fudan.edu.cn'),
           200,
           scrollable: sheetScrollable,
         );
-        expect(find.text('nlp_fudan@fudan.edu.cn'), findsOneWidget);
+        expect(find.text('xpqiu@fudan.edu.cn'), findsOneWidget);
         expect(find.byTooltip('复制邮箱'), findsOneWidget);
 
         // Close modal sheet
@@ -233,7 +249,7 @@ void main() {
     );
 
     testWidgets(
-      'Switching to 本科生科研 (FDUROP) tab allows viewing open projects, notices and downloading documents',
+      'Switching to 本科生科研 (FDUROP) tab displays portal banner, allows viewing open projects, notices and downloading documents',
       (tester) async {
         await tester.pumpWidget(
           buildTestApp(
@@ -247,9 +263,17 @@ void main() {
         await tester.tap(find.text('本科生科研 (FDUROP)'));
         await tester.pumpAndSettle();
 
+        // Verify teacher open topic portal banner is present
+        expect(find.text('FDUROP 教师开放课题系统'), findsOneWidget);
+        expect(
+          find.textContaining('paper.fudan.edu.cn/fdurop-pc'),
+          findsOneWidget,
+        );
+        expect(find.text('复制网址'), findsOneWidget);
+
         // Sub-segment 0: 开放课题 visible
         expect(find.textContaining('复旦大学本科生学术研究资助计划'), findsOneWidget);
-        expect(find.text('开放课题 (6)'), findsOneWidget);
+        expect(find.text('开放课题 (9)'), findsOneWidget);
         expect(find.textContaining('基于端侧小模型的高校课程智能问答助教系统'), findsOneWidget);
 
         // Tap project card to open project detail sheet
@@ -258,12 +282,15 @@ void main() {
 
         expect(find.text('课题内容与研究目标'), findsOneWidget);
         expect(find.text('申请要求与先修知识'), findsOneWidget);
+        final projSheetScrollable = find.byType(Scrollable).last;
         await tester.scrollUntilVisible(
-          find.text('联系导师申请课题'),
-          100,
-          scrollable: find.byType(Scrollable).last,
+          find.text('复制平台网址'),
+          250,
+          scrollable: projSheetScrollable,
         );
-        expect(find.text('联系导师申请课题'), findsOneWidget);
+        expect(find.text('FDUROP 教师开放课题系统'), findsWidgets);
+        expect(find.text('复制平台网址'), findsOneWidget);
+        expect(find.text('联系导师申请'), findsOneWidget);
 
         // Close detail sheet
         final navigator = tester.state<NavigatorState>(
@@ -273,17 +300,21 @@ void main() {
         await tester.pumpAndSettle();
 
         // Sub-segment 1: 网站通知
-        await tester.tap(find.text('网站通知 (5)'));
+        await tester.tap(find.textContaining('网站通知'));
         await tester.pumpAndSettle();
 
         expect(
           find.textContaining('关于启动2026-2027学年第一学期本科生学术研究资助计划'),
           findsOneWidget,
         );
+        expect(
+          find.textContaining('关于开通“FDUROP 教师开放课题申报与学生双选系统”'),
+          findsOneWidget,
+        );
         expect(find.textContaining('莙政学者'), findsWidgets);
 
         // Sub-segment 2: 文件下载
-        await tester.tap(find.text('文件下载 (6)'));
+        await tester.tap(find.textContaining('文件下载'));
         await tester.pumpAndSettle();
 
         expect(
@@ -303,7 +334,7 @@ void main() {
     );
 
     testWidgets(
-      'Switching to 学术讲座 tab displays lectures and allows bookmarking',
+      'Switching to 学术讲座 tab displays lectures with category filter and allows bookmarking',
       (tester) async {
         await tester.pumpWidget(
           buildTestApp(
@@ -318,9 +349,15 @@ void main() {
         await tester.pumpAndSettle();
 
         // Verify lecture items visible
+        expect(find.textContaining('作为“国故”的西学'), findsOneWidget);
+        expect(find.textContaining('陈拓 青年研究员'), findsOneWidget);
+        expect(find.textContaining('光华楼西主楼2001'), findsWidgets);
+
+        // Filter by category
+        await tester.tap(find.widgetWithText(FilterChip, '物质前沿'));
+        await tester.pumpAndSettle();
+
         expect(find.textContaining('量子计算前沿演进与拓扑容错物态实现'), findsOneWidget);
-        expect(find.textContaining('彼得·格林教授'), findsOneWidget);
-        expect(find.textContaining('邯郸校区 相辉堂北堂'), findsOneWidget);
 
         // Toggle bookmark icon button
         final bookmarkBtn = find.byIcon(Icons.bookmark).first;

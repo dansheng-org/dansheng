@@ -71,6 +71,18 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
     }
   }
 
+  Future<void> _copyPortalUrl() async {
+    await Clipboard.setData(ClipboardData(text: _project.portalUrl));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已复制教师开放课题平台网址：${_project.portalUrl}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -235,6 +247,59 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
             ),
             const SizedBox(height: 24),
 
+            // FDUROP Teacher Open Topic Portal Card
+            Card(
+              color: colorScheme.surfaceContainerHighest.withAlpha(120),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(color: colorScheme.outlineVariant),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.open_in_browser,
+                          size: 18,
+                          color: colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'FDUROP 教师开放课题系统',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.copy, size: 18),
+                          tooltip: '复制申报网址',
+                          onPressed: _copyPortalUrl,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _project.portalUrl,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
             // Contact & Action
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -248,10 +313,24 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
               ),
             ),
             const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: _copyContact,
-              icon: const Icon(Icons.send_outlined),
-              label: const Text('联系导师申请课题'),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _copyPortalUrl,
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text('复制平台网址'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _copyContact,
+                    icon: const Icon(Icons.send_outlined, size: 18),
+                    label: const Text('联系导师申请'),
+                  ),
+                ),
+              ],
             ),
           ],
         );

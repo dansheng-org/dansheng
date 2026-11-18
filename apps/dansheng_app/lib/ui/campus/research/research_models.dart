@@ -71,6 +71,7 @@ class ResearchGroupItem {
   final String? recruitment; // 招生与招聘信息 (直博生/联培硕士/博士后)
   final String contactEmail; // 联系邮箱
   final String labLocation; // 实验室地址
+  final String websiteUrl; // 课题组官方网站 / 导师主页 (复旦域名 *.fudan.edu.cn)
   final bool isFollowed; // 是否已关注
 
   const ResearchGroupItem({
@@ -86,6 +87,7 @@ class ResearchGroupItem {
     this.recruitment,
     required this.contactEmail,
     required this.labLocation,
+    this.websiteUrl = '',
     this.isFollowed = false,
   });
 
@@ -102,6 +104,7 @@ class ResearchGroupItem {
     String? recruitment,
     String? contactEmail,
     String? labLocation,
+    String? websiteUrl,
     bool? isFollowed,
   }) {
     return ResearchGroupItem(
@@ -117,6 +120,7 @@ class ResearchGroupItem {
       recruitment: recruitment ?? this.recruitment,
       contactEmail: contactEmail ?? this.contactEmail,
       labLocation: labLocation ?? this.labLocation,
+      websiteUrl: websiteUrl ?? this.websiteUrl,
       isFollowed: isFollowed ?? this.isFollowed,
     );
   }
@@ -132,6 +136,8 @@ class ResearchLectureItem {
   final String venue;
   final String organizer;
   final String description;
+  final String campus;
+  final String category; // 人文社科 / 物质前沿 / 信息技术 / 生命健康 / 通识名家
   final bool isBookmarked;
 
   const ResearchLectureItem({
@@ -143,6 +149,8 @@ class ResearchLectureItem {
     required this.venue,
     required this.organizer,
     required this.description,
+    this.campus = '邯郸校区',
+    this.category = '通识名家',
     this.isBookmarked = false,
   });
 
@@ -155,6 +163,8 @@ class ResearchLectureItem {
     String? venue,
     String? organizer,
     String? description,
+    String? campus,
+    String? category,
     bool? isBookmarked,
   }) {
     return ResearchLectureItem(
@@ -166,6 +176,8 @@ class ResearchLectureItem {
       venue: venue ?? this.venue,
       organizer: organizer ?? this.organizer,
       description: description ?? this.description,
+      campus: campus ?? this.campus,
+      category: category ?? this.category,
       isBookmarked: isBookmarked ?? this.isBookmarked,
     );
   }
@@ -232,6 +244,7 @@ class FduropProjectItem {
   final String description; // 课题简介与研究背景
   final String requirements; // 申请要求与先修知识
   final String contactEmail; // 联系邮箱
+  final String portalUrl; // 教师开放课题系统网址
   final bool isBookmarked; // 是否已收藏
 
   const FduropProjectItem({
@@ -249,6 +262,7 @@ class FduropProjectItem {
     required this.description,
     required this.requirements,
     required this.contactEmail,
+    this.portalUrl = 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
     this.isBookmarked = false,
   });
 
@@ -267,6 +281,7 @@ class FduropProjectItem {
     String? description,
     String? requirements,
     String? contactEmail,
+    String? portalUrl,
     bool? isBookmarked,
   }) {
     return FduropProjectItem(
@@ -284,6 +299,7 @@ class FduropProjectItem {
       description: description ?? this.description,
       requirements: requirements ?? this.requirements,
       contactEmail: contactEmail ?? this.contactEmail,
+      portalUrl: portalUrl ?? this.portalUrl,
       isBookmarked: isBookmarked ?? this.isBookmarked,
     );
   }
