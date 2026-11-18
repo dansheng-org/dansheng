@@ -71,11 +71,13 @@ jobs:
           RELEASE_TAG: ${{ steps.identity.outputs.tag }}
         run: |
           # A rerun must never replace assets or move an existing tag.
-          $tags = @(gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot reconcile existing releases.' }
+          # Targeted check for this exact tag instead of paginating through all historical releases.
+          $existingTag = $null
+          $tagQuery = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" --jq '.tag_name' 2>$null
+          if ($LASTEXITCODE -eq 0 -and $tagQuery) { $existingTag = $tagQuery }
           $refs = @(gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/$env:RELEASE_TAG" --jq '.[].ref')
           if ($LASTEXITCODE -ne 0) { throw 'Cannot reconcile existing tags.' }
-          if ($tags -ccontains $env:RELEASE_TAG -or $refs -ccontains "refs/tags/$env:RELEASE_TAG") {
+          if ($existingTag -ceq $env:RELEASE_TAG -or $refs -ccontains "refs/tags/$env:RELEASE_TAG") {
             throw 'This commit already has a release. Inspect it before retrying; no overwrite is performed.'
           }
       - name: Build and verify SDK from exact checkout
@@ -122,7 +124,7 @@ jobs:
     # while still requiring a successful audited build and a non-cancelled run.
     if: always() && !cancelled() && needs.build.result == 'success'
     runs-on: [self-hosted, linux, x64, 1402ubuntu]
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
       actions: read
@@ -146,18 +148,30 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e "$DANSHENG_TASK_RUNTIME/release"
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4; do
+            echo "::group::Download attempt $attempt at $(date -u +%T)"
             staging="$DANSHENG_TASK_RUNTIME/release-download-$attempt"
-            mkdir "$staging"
-            if gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            rm -rf "$staging"
+            mkdir -p "$staging"
+            # Guard gh run download with a 90-second timeout to prevent dead TCP hangs on cross-border CDN transfers.
+            if timeout 90s gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
               --name "$ARTIFACT_NAME" --dir "$staging" &&
               (cd "$staging" && sha256sum --check SHA256SUMS); then
               mv -T "$staging" "$DANSHENG_TASK_RUNTIME/release"
+              echo "::endgroup::"
+              echo "Release payload verified and downloaded successfully on attempt $attempt."
               exit 0
             fi
-            echo "Release download attempt $attempt failed verification."
-            if test "$attempt" -lt 3; then sleep 10; fi
+            echo "::endgroup::"
+            echo "Release download attempt $attempt failed verification or timed out."
+            rm -rf "$staging"
+            if test "$attempt" -lt 4; then
+              delay=$((attempt * 5))
+              echo "Waiting ${delay}s before retry..."
+              sleep "$delay"
+            fi
           done
+          echo "All release download attempts failed."
           exit 1
       - name: Create a draft, attach validated assets, then publish Pre-release
         env:
@@ -173,7 +187,7 @@ jobs:
           sha256sum --check SHA256SUMS
           for asset in ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt release-notes.md core.lock.json core-receipt.json; do test -s "$asset"; done
           gh api "repos/$GH_REPO/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$APP_COMMIT" >/dev/null
-          gh release create "$RELEASE_TAG" ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt core.lock.json core-receipt.json release-notes.md \
+          timeout 180s gh release create "$RELEASE_TAG" ./*.apk SHA256SUMS build-info.json apk-audit.json signature.txt zipalign.txt core.lock.json core-receipt.json release-notes.md \
             --verify-tag --title "Android $APP_VERSION Pre-release (${APP_COMMIT:0:12})" \
             --notes-file release-notes.md --draft --prerelease --latest=false
-          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          timeout 60s gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
