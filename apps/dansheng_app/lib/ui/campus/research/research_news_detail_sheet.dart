@@ -130,10 +130,7 @@ class _ResearchNewsDetailView extends StatelessWidget {
                 color: colorScheme.surfaceContainerHighest.withAlpha(120),
                 borderRadius: BorderRadius.circular(8),
                 border: Border(
-                  left: BorderSide(
-                    color: colorScheme.primary,
-                    width: 4,
-                  ),
+                  left: BorderSide(color: colorScheme.primary, width: 4),
                 ),
               ),
               child: Text(

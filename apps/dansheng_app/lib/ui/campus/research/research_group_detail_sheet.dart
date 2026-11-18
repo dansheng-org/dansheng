@@ -45,9 +45,7 @@ class _ResearchGroupDetailViewState extends State<_ResearchGroupDetailView> {
   void _toggleFollow() {
     _service.toggleFollowGroup(_group.id);
     setState(() {
-      _group = _group.copyWith(
-        isFollowed: _service.isGroupFollowed(_group.id),
-      );
+      _group = _group.copyWith(isFollowed: _service.isGroupFollowed(_group.id));
     });
     final msg = _group.isFollowed
         ? '已关注「${_group.name}」'

@@ -38,7 +38,9 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
   void initState() {
     super.initState();
     _project = widget.initialProject.copyWith(
-      isBookmarked: _service.isFduropProjectBookmarked(widget.initialProject.id),
+      isBookmarked: _service.isFduropProjectBookmarked(
+        widget.initialProject.id,
+      ),
     );
   }
 
@@ -128,7 +130,9 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
                 IconButton(
                   tooltip: _project.isBookmarked ? '取消收藏' : '收藏课题',
                   icon: Icon(
-                    _project.isBookmarked ? Icons.bookmark : Icons.bookmark_border,
+                    _project.isBookmarked
+                        ? Icons.bookmark
+                        : Icons.bookmark_border,
                     color: _project.isBookmarked
                         ? colorScheme.primary
                         : colorScheme.outline,

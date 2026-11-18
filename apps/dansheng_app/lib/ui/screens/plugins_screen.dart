@@ -73,7 +73,10 @@ class _PluginsScreenState extends State<PluginsScreen> {
                           children: [
                             const Icon(Icons.timer_outlined, size: 34),
                             const SizedBox(height: 14),
-                            Text('定时抢场', style: Theme.of(ctx).textTheme.titleLarge),
+                            Text(
+                              '定时抢场',
+                              style: Theme.of(ctx).textTheme.titleLarge,
+                            ),
                             const SizedBox(height: 6),
                             const Text('未安装插件'),
                             const SizedBox(height: 16),
@@ -111,7 +114,9 @@ class _PluginsScreenState extends State<PluginsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       SwitchListTile(
-                        title: Text(sports ? '定时抢场' : m['name']?.toString() ?? id),
+                        title: Text(
+                          sports ? '定时抢场' : m['name']?.toString() ?? id,
+                        ),
                         subtitle: Text(enabled ? '已启用' : '已停用'),
                         value: enabled,
                         onChanged: (v) => command(

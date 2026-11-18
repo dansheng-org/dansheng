@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import 'package:flutter/foundation.dart';
+
 import 'research_models.dart';
 
 /// Service providing Fudan University research news, research groups (课题组),
@@ -75,10 +76,8 @@ class ResearchService extends ChangeNotifier {
     ResearchNewsItem(
       id: 'news_1',
       title: '《自然》发表复旦大学脑科学前沿科学中心最新神经计算成果',
-      summary:
-          '科研团队揭示了多尺度神经环路突触可塑性的自适应调控机制，为开发新型低功耗类脑计算算法提供了重要生物学启发。',
-      content:
-          '复旦大学脑科学前沿科学中心、脑功能与脑疾病全国重点实验室研究团队在《自然》（Nature）发表题为《Adaptive Synaptic Plasticity in Multi-Scale Neural Circuits》的长篇研究论文。该研究结合在体双光子钙成像与全脑投射重构技术，解析了小鼠在复杂联想学习任务中海马与皮层间突触权重的动态演进规律。成果对新一代仿生神经网络与类脑芯片架构设计具有重大指导意义。',
+      summary: '科研团队揭示了多尺度神经环路突触可塑性的自适应调控机制，为开发新型低功耗类脑计算算法提供了重要生物学启发。',
+      content: '复旦大学脑科学前沿科学中心、脑功能与脑疾病全国重点实验室研究团队在《自然》（Nature）发表题为《Adaptive Synaptic Plasticity in Multi-Scale Neural Circuits》的长篇研究论文。该研究结合在体双光子钙成像与全脑投射重构技术，解析了小鼠在复杂联想学习任务中海马与皮层间突触权重的动态演进规律。成果对新一代仿生神经网络与类脑芯片架构设计具有重大指导意义。',
       source: '科学技术研究院',
       department: '脑科学研究院',
       publishDate: '2026-11-16',
@@ -90,10 +89,8 @@ class ResearchService extends ChangeNotifier {
     ResearchNewsItem(
       id: 'news_2',
       title: '复旦集成芯片全国重点实验室研制出晶圆级二维互补场效应芯片',
-      summary:
-          '微电子学院芯片团队攻克超薄二维半导体沟道与高介电常数栅介质集成难题，芯片能效比提升超3倍。',
-      content:
-          '复旦大学微电子学院、集成芯片与系统全国重点实验室团队在后摩尔时代先进逻辑芯片领域取得关键技术突破，研制出基于双层二硫化钼材料的晶圆级二维互补场效应晶体管（CFET）芯片原型。在1nm等效栅长节点下实现了极低的亚阈值摆幅与超低漏电流，为后摩尔时代高性能计算芯片提供了新型技术路径。',
+      summary: '微电子学院芯片团队攻克超薄二维半导体沟道与高介电常数栅介质集成难题，芯片能效比提升超3倍。',
+      content: '复旦大学微电子学院、集成芯片与系统全国重点实验室团队在后摩尔时代先进逻辑芯片领域取得关键技术突破，研制出基于双层二硫化钼材料的晶圆级二维互补场效应晶体管（CFET）芯片原型。在1nm等效栅长节点下实现了极低的亚阈值摆幅与超低漏电流，为后摩尔时代高性能计算芯片提供了新型技术路径。',
       source: '集成芯片与系统全国重点实验室',
       department: '微电子学院',
       publishDate: '2026-11-14',
@@ -105,10 +102,8 @@ class ResearchService extends ChangeNotifier {
     ResearchNewsItem(
       id: 'news_3',
       title: '关于组织申报2027年度国家自然科学基金青年学生基础研究项目（博士研究生）的通知',
-      summary:
-          '面向在读二年级及以上全日制博士生，支持开展高水平探索性原创研究，请各院系科研科研秘书于12月10日前完成初审。',
-      content:
-          '为进一步强化青年科技人才队伍建设，国家自然科学基金委2027年度青年学生基础研究项目（博士研究生）申报工作现已启动。资助强度为每项30万元，资助期限2-3年。申请人须具有扎实理论功底和创新学术思想，各院系需严格把握申报质量，做好伦理审查与学术规范把关。',
+      summary: '面向在读二年级及以上全日制博士生，支持开展高水平探索性原创研究，请各院系科研科研秘书于12月10日前完成初审。',
+      content: '为进一步强化青年科技人才队伍建设，国家自然科学基金委2027年度青年学生基础研究项目（博士研究生）申报工作现已启动。资助强度为每项30万元，资助期限2-3年。申请人须具有扎实理论功底和创新学术思想，各院系需严格把握申报质量，做好伦理审查与学术规范把关。',
       source: '科学技术研究院',
       department: '科研院基础研究处',
       publishDate: '2026-11-12',
@@ -120,10 +115,8 @@ class ResearchService extends ChangeNotifier {
     ResearchNewsItem(
       id: 'news_4',
       title: '高分子科学系团队研发出超高透气自愈合生物相容柔性传感电子织物',
-      summary:
-          '发表于《先进材料》（Advanced Materials），实现了全天候健康体征连续监测与闭环电生理刺激。',
-      content:
-          '复旦大学高分子科学系、聚合物分子工程国家重点实验室研究团队通过微相分离与动态配位键构筑技术，合成了兼具自愈合、超高透气性与优异拉伸导电率的本征弹性复合材料。该材料在经历10000次弯折后仍能保持99%以上的导电灵敏度，在智能医疗织物和脑机接口体表电极领域展现出广泛应用潜力。',
+      summary: '发表于《先进材料》（Advanced Materials），实现了全天候健康体征连续监测与闭环电生理刺激。',
+      content: '复旦大学高分子科学系、聚合物分子工程国家重点实验室研究团队通过微相分离与动态配位键构筑技术，合成了兼具自愈合、超高透气性与优异拉伸导电率的本征弹性复合材料。该材料在经历10000次弯折后仍能保持99%以上的导电灵敏度，在智能医疗织物和脑机接口体表电极领域展现出广泛应用潜力。',
       source: '高分子科学系',
       department: '高分子科学系',
       publishDate: '2026-11-10',
@@ -134,10 +127,8 @@ class ResearchService extends ChangeNotifier {
     ResearchNewsItem(
       id: 'news_5',
       title: '【招生招募】计算机学院智能信息处理重点实验室NLP团队招收2027级推免直博生',
-      summary:
-          '研究方向涵盖大语言模型推理加速、具身智能知识图谱与多模态对齐，欢迎计算机、数学及相关专业推免生投递简历。',
-      content:
-          '复旦大学计算机科学技术学院智能信息处理重点实验室NLP与多模态研究组开放2027级推免直博生（2名）与科研助理（2名）申请。实验室拥有充足的高性能算力集群，与国内外一流顶尖实验室保持深度合作，常年支持博士生前往顶级学术会议（ACL、EMNLP、NeurIPS、ICLR）现场作口头报告。',
+      summary: '研究方向涵盖大语言模型推理加速、具身智能知识图谱与多模态对齐，欢迎计算机、数学及相关专业推免生投递简历。',
+      content: '复旦大学计算机科学技术学院智能信息处理重点实验室NLP与多模态研究组开放2027级推免直博生（2名）与科研助理（2名）申请。实验室拥有充足的高性能算力集群，与国内外一流顶尖实验室保持深度合作，常年支持博士生前往顶级学术会议（ACL、EMNLP、NeurIPS、ICLR）现场作口头报告。',
       source: '计算机科学技术学院',
       department: '计算机科学技术学院',
       publishDate: '2026-11-08',
@@ -148,10 +139,8 @@ class ResearchService extends ChangeNotifier {
     ResearchNewsItem(
       id: 'news_6',
       title: '第十五届相辉学术沙龙：从基础物理拓扑物态到量子计算架构',
-      summary:
-          '特邀中科院与复旦物理系知名学者作专题学术报告，邯郸校区相辉堂北堂同步开放线上直播。',
-      content:
-          '本期学术沙龙围绕拓扑量子绝缘体、马约拉纳费米子与容错量子计算展开跨学科研讨。报告会设置青年学者研讨环节与墙报交流展区，欢迎全校物理、材料及微电子方向师生参加。',
+      summary: '特邀中科院与复旦物理系知名学者作专题学术报告，邯郸校区相辉堂北堂同步开放线上直播。',
+      content: '本期学术沙龙围绕拓扑量子绝缘体、马约拉纳费米子与容错量子计算展开跨学科研讨。报告会设置青年学者研讨环节与墙报交流展区，欢迎全校物理、材料及微电子方向师生参加。',
       source: '物理学系',
       department: '物理学系',
       publishDate: '2026-11-05',
@@ -173,8 +162,7 @@ class ResearchService extends ChangeNotifier {
       department: '计算机科学技术学院',
       campus: '江湾校区',
       researchDirections: ['自然语言处理', '大模型推理加速', '多模态对齐', 'AI for Science'],
-      description:
-          '课题组长期深耕自然语言处理与认知推理前沿，主持国家重点研发计划项目与多项国家自然科学基金重点项目。在国际顶级人工智能与计算语言学会议发表高水平论文百余篇，开源成果获得学术界与产业界广泛关注。',
+      description: '课题组长期深耕自然语言处理与认知推理前沿，主持国家重点研发计划项目与多项国家自然科学基金重点项目。在国际顶级人工智能与计算语言学会议发表高水平论文百余篇，开源成果获得学术界与产业界广泛关注。',
       recentPapers: [
         'MOSS-2: Efficient Multimodal Alignment via Hierarchical Representation (ICLR 2026)',
         'Reasoning Graph Distillation for Large Language Models (ACL 2026 Oral)',
@@ -192,8 +180,7 @@ class ResearchService extends ChangeNotifier {
       department: '类脑智能科学与技术研究院 / 脑科学研究院',
       campus: '枫林校区',
       researchDirections: ['类脑计算', '脑机接口', '神经影像大数据', '神经形态芯片'],
-      description:
-          '实验室依托复旦大学脑科学前沿科学中心和类脑智能科学与技术研究院，面向国家脑科学重大战略，重点攻关高通量侵入/非侵入式脑机接口、全脑神经环路数字化仿真及类脑智能算法。',
+      description: '实验室依托复旦大学脑科学前沿科学中心和类脑智能科学与技术研究院，面向国家脑科学重大战略，重点攻关高通量侵入/非侵入式脑机接口、全脑神经环路数字化仿真及类脑智能算法。',
       recentPapers: [
         'Adaptive Synaptic Plasticity in Multi-Scale Neural Circuits (Nature 2026)',
         'Wireless High-Density Neural Interface for Motor Decoding (Nature Biomedical Engineering 2025)',
@@ -211,8 +198,7 @@ class ResearchService extends ChangeNotifier {
       department: '微电子学院',
       campus: '张江校区',
       researchDirections: ['二维材料集成电路', '存算一体芯片', '晶圆级CFET', '射频微波IC'],
-      description:
-          '课题组拥有完备的微纳加工平台与射频芯片高频测试实验室，承担国家科技重大专项核心课题，致力于攻克新原理器件物理、后摩尔时代三维异质集成与超低功耗智能芯片核心技术。',
+      description: '课题组拥有完备的微纳加工平台与射频芯片高频测试实验室，承担国家科技重大专项核心课题，致力于攻克新原理器件物理、后摩尔时代三维异质集成与超低功耗智能芯片核心技术。',
       recentPapers: [
         'Wafer-scale 2D Complementary Field-Effect Transistors (Science 2026)',
         'Sub-1nm Equivalent Oxide Thickness High-k Dielectric Integration (Nature Electronics 2025)',
@@ -230,8 +216,7 @@ class ResearchService extends ChangeNotifier {
       department: '高分子科学系',
       campus: '江湾校区',
       researchDirections: ['柔性光电纤维', '自愈合智能材料', '储能器件', '可穿戴生物传感'],
-      description:
-          '立足聚合物分子工程国家重点实验室，开创了新型纤维状能源与光电器件新方向，推动功能高分子在智慧医疗、柔性可穿戴传感与航空航天装备中的工程化应用。',
+      description: '立足聚合物分子工程国家重点实验室，开创了新型纤维状能源与光电器件新方向，推动功能高分子在智慧医疗、柔性可穿戴传感与航空航天装备中的工程化应用。',
       recentPapers: [
         'Breathable Self-Healing Smart Textiles with Closed-Loop Biofeedback (Advanced Materials 2026)',
         'Photovoltaic Fibers Integrated with Micro-Supercapacitors (Nature Nanotechnology 2025)',
@@ -290,8 +275,7 @@ class ResearchService extends ChangeNotifier {
       time: '2026-11-20 (周五) 14:30 - 16:30',
       venue: '邯郸校区 相辉堂北堂 / 线上同步直播',
       organizer: '复旦大学科学技术研究院、物理学系',
-      description:
-          '讲座将全面回顾非阿贝尔任意子态的实验探测历程，并深入探讨基于拓扑量子纠错码的下一代通用量子计算机系统设计挑战。',
+      description: '讲座将全面回顾非阿贝尔任意子态的实验探测历程，并深入探讨基于拓扑量子纠错码的下一代通用量子计算机系统设计挑战。',
     ),
     ResearchLectureItem(
       id: 'lec_2',
@@ -301,8 +285,7 @@ class ResearchService extends ChangeNotifier {
       time: '2026-11-24 (周二) 15:00 - 17:00',
       venue: '江湾校区 交叉二号楼一楼报告厅',
       organizer: '计算机科学技术学院、类脑智能科学与技术研究院',
-      description:
-          '探讨生物脑突触动力学在仿生四足机器人动态平衡与视觉伺服系统中的移植应用，现场将展示最新类脑控制演示样机。',
+      description: '探讨生物脑突触动力学在仿生四足机器人动态平衡与视觉伺服系统中的移植应用，现场将展示最新类脑控制演示样机。',
     ),
     ResearchLectureItem(
       id: 'lec_3',
@@ -312,8 +295,7 @@ class ResearchService extends ChangeNotifier {
       time: '2026-11-27 (周五) 10:00 - 11:30',
       venue: '枫林校区 复星楼三楼多功能学术厅',
       organizer: '基础医学院、药学院',
-      description:
-          '系统阐述基于人工智能晶体结构生成与微流控筛选技术的靶向蛋白降解化合物开发新范式。',
+      description: '系统阐述基于人工智能晶体结构生成与微流控筛选技术的靶向蛋白降解化合物开发新范式。',
     ),
   ];
 
@@ -326,10 +308,8 @@ class ResearchService extends ChangeNotifier {
       title: '关于启动2026-2027学年第一学期本科生学术研究资助计划（FDUROP）立项申报的通知',
       program: '望道/曦源',
       publishDate: '2026-10-18',
-      summary:
-          '涵盖“曦源项目”、“望道学者”、“登峰项目”，面向大二、大三全日制本科生开放系统填报，11月25日截止导师线上确认。',
-      content:
-          '为进一步营造浓郁本科生学术研究氛围，教务处拔尖人才培养办公室即日起启动2026-2027学年秋季学期复旦大学本科生学术研究资助计划（FDUROP）申报工作。曦源项目资助强度为每项1.0万元，望道学者项目资助强度为每项1.5万元，登峰计划每项资助最高2.5万元。申请人需在FDUROP管理系统完成《立项申请书》填报，并联系指导教师完成推荐确认。',
+      summary: '涵盖“曦源项目”、“望道学者”、“登峰项目”，面向大二、大三全日制本科生开放系统填报，11月25日截止导师线上确认。',
+      content: '为进一步营造浓郁本科生学术研究氛围，教务处拔尖人才培养办公室即日起启动2026-2027学年秋季学期复旦大学本科生学术研究资助计划（FDUROP）申报工作。曦源项目资助强度为每项1.0万元，望道学者项目资助强度为每项1.5万元，登峰计划每项资助最高2.5万元。申请人需在FDUROP管理系统完成《立项申请书》填报，并联系指导教师完成推荐确认。',
       url: 'http://www.fdurop.fudan.edu.cn/notices/20261018-declare',
     ),
     FduropNoticeItem(
@@ -337,10 +317,8 @@ class ResearchService extends ChangeNotifier {
       title: '关于开展2026年度复旦大学“莙政学者”项目结题答辩与优秀成果评选的通知',
       program: '莙政',
       publishDate: '2026-10-25',
-      summary:
-          '定于11月28日在邯郸校区光华楼举行现场学术汇报会，评选年度“优秀莙政学者”并颁发证书。',
-      content:
-          '各莙政学者项目组：2026年度李政道先生设立的“莙政学者”科研训练项目已进入收尾结题阶段。请各项目负责人于11月20日前在系统提交结题学术论文（按要求格式排版）、查重报告及财务报销明细表。各学科评审组将安排现场答辩与墙报展示，欢迎全校师生观摩旁听。',
+      summary: '定于11月28日在邯郸校区光华楼举行现场学术汇报会，评选年度“优秀莙政学者”并颁发证书。',
+      content: '各莙政学者项目组：2026年度李政道先生设立的“莙政学者”科研训练项目已进入收尾结题阶段。请各项目负责人于11月20日前在系统提交结题学术论文（按要求格式排版）、查重报告及财务报销明细表。各学科评审组将安排现场答辩与墙报展示，欢迎全校师生观摩旁听。',
       url: 'http://www.fdurop.fudan.edu.cn/notices/20261025-junzheng',
     ),
     FduropNoticeItem(
@@ -348,10 +326,8 @@ class ResearchService extends ChangeNotifier {
       title: '第十四届复旦大学本科生学术研究论坛暨FDUROP年会征文与报告通知',
       program: '全计划',
       publishDate: '2026-11-02',
-      summary:
-          '大会设自然科学、工程技术、人文社科、医学交叉4个分论坛，优秀论文将汇编成册入选校史文献库。',
-      content:
-          '复旦大学本科生学术研究论坛每年举办一届，旨在为广大致力于前沿探索的本科生搭建跨校区、跨学科的高水平学术交流舞台。征文范围覆盖所有正在执行或已结题的FDUROP项目研究成果，入选口头报告者将获颁优秀学术演讲证书。',
+      summary: '大会设自然科学、工程技术、人文社科、医学交叉4个分论坛，优秀论文将汇编成册入选校史文献库。',
+      content: '复旦大学本科生学术研究论坛每年举办一届，旨在为广大致力于前沿探索的本科生搭建跨校区、跨学科的高水平学术交流舞台。征文范围覆盖所有正在执行或已结题的FDUROP项目研究成果，入选口头报告者将获颁优秀学术演讲证书。',
       url: 'http://www.fdurop.fudan.edu.cn/forum/2026-annual',
     ),
     FduropNoticeItem(
@@ -359,10 +335,8 @@ class ResearchService extends ChangeNotifier {
       title: '关于组织2026年秋季学期“望道项目”中期进展报告提交与核查的通知',
       program: '望道',
       publishDate: '2026-11-06',
-      summary:
-          '请各项目负责人登录系统下载并填写《中期进展检查表》，由导师签署进展评估意见后扫描上传。',
-      content:
-          '望道学者项目执行期过半，中期考核是保证科研质量的关键环节。教务处将对实验进度缓慢、阶段成果不足的项目安排学术督导沟通。请于11月30日前完成系统提交。',
+      summary: '请各项目负责人登录系统下载并填写《中期进展检查表》，由导师签署进展评估意见后扫描上传。',
+      content: '望道学者项目执行期过半，中期考核是保证科研质量的关键环节。教务处将对实验进度缓慢、阶段成果不足的项目安排学术督导沟通。请于11月30日前完成系统提交。',
       url: 'http://www.fdurop.fudan.edu.cn/notices/20261106-midterm',
     ),
     FduropNoticeItem(
@@ -370,10 +344,8 @@ class ResearchService extends ChangeNotifier {
       title: '2026年度FDUROP交叉学科专项与质研计划立项评审结果公示',
       program: '登峰',
       publishDate: '2026-11-12',
-      summary:
-          '经专家委员会初审与现场双盲评审，共计42项交叉创新课题获得立项资助，现予以校内公示。',
-      content:
-          '本次交叉学科专项聚焦“人工智能赋能人文社科”与“医工交叉诊疗技术”两大前沿领域，共有来自18个院系的本科生团队脱颖而出。公示期为5个工作日。',
+      summary: '经专家委员会初审与现场双盲评审，共计42项交叉创新课题获得立项资助，现予以校内公示。',
+      content: '本次交叉学科专项聚焦“人工智能赋能人文社科”与“医工交叉诊疗技术”两大前沿领域，共有来自18个院系的本科生团队脱颖而出。公示期为5个工作日。',
       url: 'http://www.fdurop.fudan.edu.cn/results/2026-interdisciplinary',
     ),
   ];
@@ -394,8 +366,7 @@ class ResearchService extends ChangeNotifier {
       quota: 2,
       deadline: '2026-11-30',
       status: '招募中',
-      description:
-          '本项目依托智能信息处理重点实验室，探索将量化小语言模型（SLM）部署于本地移动端或边缘计算设备，结合检索增强生成（RAG）构建专属校园课程知识库，开展端侧推理加速与交互评测。',
+      description: '本项目依托智能信息处理重点实验室，探索将量化小语言模型（SLM）部署于本地移动端或边缘计算设备，结合检索增强生成（RAG）构建专属校园课程知识库，开展端侧推理加速与交互评测。',
       requirements: '掌握Python基础，了解PyTorch基本使用，具备基本自然语言处理或Web全栈开发经验。',
       contactEmail: 'nlp_fudan@fudan.edu.cn',
     ),
@@ -411,8 +382,7 @@ class ResearchService extends ChangeNotifier {
       quota: 1,
       deadline: '2026-12-05',
       status: '招募中',
-      description:
-          '利用双光子激光共聚焦显微镜观察APP/PS1转基因小鼠在早期认知减退阶段皮层锥体神经元树突棘的变化规律，结合荧光分子标记开展长时程活体追踪。',
+      description: '利用双光子激光共聚焦显微镜观察APP/PS1转基因小鼠在早期认知减退阶段皮层锥体神经元树突棘的变化规律，结合荧光分子标记开展长时程活体追踪。',
       requirements: '修读过生物化学或神经生物学，细心耐心，能保证每周至少8小时实验进组时间。',
       contactEmail: 'brain_lab@fudan.edu.cn',
     ),
@@ -497,7 +467,8 @@ class ResearchService extends ChangeNotifier {
       fileFormat: 'DOCX',
       fileSize: '340 KB',
       updateDate: '2026-10-15',
-      downloadUrl: 'http://www.fdurop.fudan.edu.cn/downloads/fdurop_apply_2026.docx',
+      downloadUrl:
+          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_apply_2026.docx',
     ),
     FduropDocumentItem(
       id: 'doc_2',
@@ -506,7 +477,8 @@ class ResearchService extends ChangeNotifier {
       fileFormat: 'DOCX',
       fileSize: '185 KB',
       updateDate: '2026-10-18',
-      downloadUrl: 'http://www.fdurop.fudan.edu.cn/downloads/fdurop_midterm_form.docx',
+      downloadUrl:
+          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_midterm_form.docx',
     ),
     FduropDocumentItem(
       id: 'doc_3',
@@ -515,7 +487,8 @@ class ResearchService extends ChangeNotifier {
       fileFormat: 'PDF',
       fileSize: '620 KB',
       updateDate: '2026-10-22',
-      downloadUrl: 'http://www.fdurop.fudan.edu.cn/downloads/fdurop_thesis_guide.pdf',
+      downloadUrl:
+          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_thesis_guide.pdf',
     ),
     FduropDocumentItem(
       id: 'doc_4',
@@ -524,7 +497,8 @@ class ResearchService extends ChangeNotifier {
       fileFormat: 'DOCX',
       fileSize: '120 KB',
       updateDate: '2026-10-15',
-      downloadUrl: 'http://www.fdurop.fudan.edu.cn/downloads/fdurop_recommendation.docx',
+      downloadUrl:
+          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_recommendation.docx',
     ),
     FduropDocumentItem(
       id: 'doc_5',
@@ -533,7 +507,8 @@ class ResearchService extends ChangeNotifier {
       fileFormat: 'PDF',
       fileSize: '1.1 MB',
       updateDate: '2026-09-28',
-      downloadUrl: 'http://www.fdurop.fudan.edu.cn/downloads/fdurop_financial_guide.pdf',
+      downloadUrl:
+          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_financial_guide.pdf',
     ),
     FduropDocumentItem(
       id: 'doc_6',
@@ -580,56 +555,62 @@ class ResearchService extends ChangeNotifier {
     String? campus,
     String? query,
   }) async {
-    return _initialGroups.map((group) {
-      return group.copyWith(
-        isFollowed: _followedGroupIds.contains(group.id),
-      );
-    }).where((item) {
-      if (followedOnly == true && !item.isFollowed) {
-        return false;
-      }
-      if (department != null &&
-          department != '全部' &&
-          item.department != department) {
-        return false;
-      }
-      if (campus != null && campus != '全部' && item.campus != campus) {
-        return false;
-      }
-      if (query != null && query.trim().isNotEmpty) {
-        final q = query.trim().toLowerCase();
-        final matchName = item.name.toLowerCase().contains(q);
-        final matchLeader = item.leader.toLowerCase().contains(q);
-        final matchDept = item.department.toLowerCase().contains(q);
-        final matchDirections = item.researchDirections.any(
-          (d) => d.toLowerCase().contains(q),
-        );
-        if (!matchName && !matchLeader && !matchDept && !matchDirections) {
-          return false;
-        }
-      }
-      return true;
-    }).toList();
+    return _initialGroups
+        .map((group) {
+          return group.copyWith(
+            isFollowed: _followedGroupIds.contains(group.id),
+          );
+        })
+        .where((item) {
+          if (followedOnly == true && !item.isFollowed) {
+            return false;
+          }
+          if (department != null &&
+              department != '全部' &&
+              item.department != department) {
+            return false;
+          }
+          if (campus != null && campus != '全部' && item.campus != campus) {
+            return false;
+          }
+          if (query != null && query.trim().isNotEmpty) {
+            final q = query.trim().toLowerCase();
+            final matchName = item.name.toLowerCase().contains(q);
+            final matchLeader = item.leader.toLowerCase().contains(q);
+            final matchDept = item.department.toLowerCase().contains(q);
+            final matchDirections = item.researchDirections.any(
+              (d) => d.toLowerCase().contains(q),
+            );
+            if (!matchName && !matchLeader && !matchDept && !matchDirections) {
+              return false;
+            }
+          }
+          return true;
+        })
+        .toList();
   }
 
   /// Get lectures with bookmark status applied.
   Future<List<ResearchLectureItem>> getLectures({String? query}) async {
-    return _initialLectures.map((lec) {
-      return lec.copyWith(
-        isBookmarked: _bookmarkedLectureIds.contains(lec.id),
-      );
-    }).where((item) {
-      if (query != null && query.trim().isNotEmpty) {
-        final q = query.trim().toLowerCase();
-        final matchTitle = item.title.toLowerCase().contains(q);
-        final matchSpeaker = item.speaker.toLowerCase().contains(q);
-        final matchVenue = item.venue.toLowerCase().contains(q);
-        if (!matchTitle && !matchSpeaker && !matchVenue) {
-          return false;
-        }
-      }
-      return true;
-    }).toList();
+    return _initialLectures
+        .map((lec) {
+          return lec.copyWith(
+            isBookmarked: _bookmarkedLectureIds.contains(lec.id),
+          );
+        })
+        .where((item) {
+          if (query != null && query.trim().isNotEmpty) {
+            final q = query.trim().toLowerCase();
+            final matchTitle = item.title.toLowerCase().contains(q);
+            final matchSpeaker = item.speaker.toLowerCase().contains(q);
+            final matchVenue = item.venue.toLowerCase().contains(q);
+            if (!matchTitle && !matchSpeaker && !matchVenue) {
+              return false;
+            }
+          }
+          return true;
+        })
+        .toList();
   }
 
   /// Get FDUROP website notices.
@@ -638,7 +619,9 @@ class ResearchService extends ChangeNotifier {
     String? query,
   }) async {
     return _initialFduropNotices.where((notice) {
-      if (program != null && program != '全部' && !notice.program.contains(program)) {
+      if (program != null &&
+          program != '全部' &&
+          !notice.program.contains(program)) {
         return false;
       }
       if (query != null && query.trim().isNotEmpty) {
@@ -660,34 +643,37 @@ class ResearchService extends ChangeNotifier {
     String? query,
     bool? bookmarkedOnly,
   }) async {
-    return _initialFduropProjects.map((project) {
-      return project.copyWith(
-        isBookmarked: _bookmarkedFduropProjectIds.contains(project.id),
-      );
-    }).where((item) {
-      if (bookmarkedOnly == true && !item.isBookmarked) {
-        return false;
-      }
-      if (program != null && program != '全部' && item.program != program) {
-        return false;
-      }
-      if (department != null &&
-          department != '全部' &&
-          item.department != department) {
-        return false;
-      }
-      if (query != null && query.trim().isNotEmpty) {
-        final q = query.trim().toLowerCase();
-        final matchTitle = item.title.toLowerCase().contains(q);
-        final matchAdvisor = item.advisor.toLowerCase().contains(q);
-        final matchDept = item.department.toLowerCase().contains(q);
-        final matchDesc = item.description.toLowerCase().contains(q);
-        if (!matchTitle && !matchAdvisor && !matchDept && !matchDesc) {
-          return false;
-        }
-      }
-      return true;
-    }).toList();
+    return _initialFduropProjects
+        .map((project) {
+          return project.copyWith(
+            isBookmarked: _bookmarkedFduropProjectIds.contains(project.id),
+          );
+        })
+        .where((item) {
+          if (bookmarkedOnly == true && !item.isBookmarked) {
+            return false;
+          }
+          if (program != null && program != '全部' && item.program != program) {
+            return false;
+          }
+          if (department != null &&
+              department != '全部' &&
+              item.department != department) {
+            return false;
+          }
+          if (query != null && query.trim().isNotEmpty) {
+            final q = query.trim().toLowerCase();
+            final matchTitle = item.title.toLowerCase().contains(q);
+            final matchAdvisor = item.advisor.toLowerCase().contains(q);
+            final matchDept = item.department.toLowerCase().contains(q);
+            final matchDesc = item.description.toLowerCase().contains(q);
+            if (!matchTitle && !matchAdvisor && !matchDept && !matchDesc) {
+              return false;
+            }
+          }
+          return true;
+        })
+        .toList();
   }
 
   /// Get FDUROP downloadable documents.
@@ -695,24 +681,29 @@ class ResearchService extends ChangeNotifier {
     String? category,
     String? query,
   }) async {
-    return _initialFduropDocuments.map((doc) {
-      return doc.copyWith(
-        isDownloaded: _downloadedFduropDocIds.contains(doc.id),
-      );
-    }).where((item) {
-      if (category != null && category != '全部' && item.category != category) {
-        return false;
-      }
-      if (query != null && query.trim().isNotEmpty) {
-        final q = query.trim().toLowerCase();
-        final matchTitle = item.title.toLowerCase().contains(q);
-        final matchCat = item.category.toLowerCase().contains(q);
-        if (!matchTitle && !matchCat) {
-          return false;
-        }
-      }
-      return true;
-    }).toList();
+    return _initialFduropDocuments
+        .map((doc) {
+          return doc.copyWith(
+            isDownloaded: _downloadedFduropDocIds.contains(doc.id),
+          );
+        })
+        .where((item) {
+          if (category != null &&
+              category != '全部' &&
+              item.category != category) {
+            return false;
+          }
+          if (query != null && query.trim().isNotEmpty) {
+            final q = query.trim().toLowerCase();
+            final matchTitle = item.title.toLowerCase().contains(q);
+            final matchCat = item.category.toLowerCase().contains(q);
+            if (!matchTitle && !matchCat) {
+              return false;
+            }
+          }
+          return true;
+        })
+        .toList();
   }
 
   /// List of distinct departments for filtering groups.
@@ -730,10 +721,21 @@ class ResearchService extends ChangeNotifier {
   }
 
   /// List of FDUROP programs for filtering.
-  List<String> get availableFduropPrograms =>
-      ['全部', '曦源项目', '望道项目', '莙政项目', '登峰项目', '开放自选课题'];
+  List<String> get availableFduropPrograms => [
+    '全部',
+    '曦源项目',
+    '望道项目',
+    '莙政项目',
+    '登峰项目',
+    '开放自选课题',
+  ];
 
   /// List of FDUROP document categories.
-  List<String> get availableFduropDocCategories =>
-      ['全部', '立项申报', '中期检查', '结题评审', '经费管理'];
+  List<String> get availableFduropDocCategories => [
+    '全部',
+    '立项申报',
+    '中期检查',
+    '结题评审',
+    '经费管理',
+  ];
 }

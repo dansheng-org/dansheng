@@ -37,13 +37,7 @@ class _ResearchPageState extends State<ResearchPage>
   final TextEditingController _fduropSearchCtrl = TextEditingController();
 
   String _selectedNewsCategory = '全部';
-  final List<String> _newsCategories = [
-    '全部',
-    '科研突破',
-    '项目申报',
-    '招募招生',
-    '学术讲座',
-  ];
+  final List<String> _newsCategories = ['全部', '科研突破', '项目申报', '招募招生', '学术讲座'];
 
   bool _groupFollowedOnly = false;
   String _selectedGroupDepartment = '全部';
@@ -153,7 +147,8 @@ class _ResearchPageState extends State<ResearchPage>
           ],
         ),
       ),
-      body: _loading &&
+      body:
+          _loading &&
               _newsList.isEmpty &&
               _groupList.isEmpty &&
               _fduropProjects.isEmpty
@@ -236,7 +231,11 @@ class _ResearchPageState extends State<ResearchPage>
                 padding: const EdgeInsets.only(top: 48),
                 child: Column(
                   children: [
-                    Icon(Icons.feed_outlined, size: 48, color: colorScheme.outline),
+                    Icon(
+                      Icons.feed_outlined,
+                      size: 48,
+                      color: colorScheme.outline,
+                    ),
                     const SizedBox(height: 12),
                     Text(
                       '暂无匹配的科研消息',
@@ -249,7 +248,8 @@ class _ResearchPageState extends State<ResearchPage>
               ),
             )
           else
-            for (final news in _newsList) _buildNewsCard(news, theme, colorScheme),
+            for (final news in _newsList)
+              _buildNewsCard(news, theme, colorScheme),
         ],
       ),
     );
@@ -726,8 +726,11 @@ class _ResearchPageState extends State<ResearchPage>
               padding: const EdgeInsets.all(14),
               child: Row(
                 children: [
-                  Icon(Icons.workspace_premium_outlined,
-                      size: 32, color: colorScheme.primary),
+                  Icon(
+                    Icons.workspace_premium_outlined,
+                    size: 32,
+                    color: colorScheme.primary,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -799,10 +802,7 @@ class _ResearchPageState extends State<ResearchPage>
   }
 
   // --- Sub-view 0: 开放科研项目 (Open Research Projects) ---
-  Widget _buildFduropProjectsSection(
-    ThemeData theme,
-    ColorScheme colorScheme,
-  ) {
+  Widget _buildFduropProjectsSection(ThemeData theme, ColorScheme colorScheme) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -825,9 +825,7 @@ class _ResearchPageState extends State<ResearchPage>
               horizontal: 16,
               vertical: 10,
             ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
           onChanged: (_) => _loadData(),
         ),
@@ -961,7 +959,11 @@ class _ResearchPageState extends State<ResearchPage>
               // Mentor & Grade
               Row(
                 children: [
-                  Icon(Icons.person_outline, size: 14, color: colorScheme.primary),
+                  Icon(
+                    Icons.person_outline,
+                    size: 14,
+                    color: colorScheme.primary,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '${proj.advisor} (${proj.advisorTitle})',
@@ -971,7 +973,11 @@ class _ResearchPageState extends State<ResearchPage>
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Icon(Icons.event_outlined, size: 14, color: colorScheme.outline),
+                  Icon(
+                    Icons.event_outlined,
+                    size: 14,
+                    color: colorScheme.outline,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '截止 ${proj.deadline}',
@@ -1001,10 +1007,7 @@ class _ResearchPageState extends State<ResearchPage>
   }
 
   // --- Sub-view 1: 网站通知 (FDUROP Notices) ---
-  Widget _buildFduropNoticesSection(
-    ThemeData theme,
-    ColorScheme colorScheme,
-  ) {
+  Widget _buildFduropNoticesSection(ThemeData theme, ColorScheme colorScheme) {
     if (_fduropNotices.isEmpty) {
       return Center(
         child: Padding(
@@ -1198,7 +1201,9 @@ class _ResearchPageState extends State<ResearchPage>
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('已成功下载：${doc.title}（保存在 Download/旦生/FDUROP/）'),
+                          content: Text(
+                            '已成功下载：${doc.title}（保存在 Download/旦生/FDUROP/）',
+                          ),
                           duration: const Duration(seconds: 2),
                         ),
                       );
@@ -1319,7 +1324,9 @@ class _ResearchPageState extends State<ResearchPage>
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHighest.withAlpha(100),
+                        color: colorScheme.surfaceContainerHighest.withAlpha(
+                          100,
+                        ),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
