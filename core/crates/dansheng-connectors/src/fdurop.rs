@@ -73,30 +73,45 @@ impl<'a> FduropClient<'a> {
         {
             let mut pairs = url.query_pairs_mut();
             pairs.append_pair("queryPage__", &format!("{page},{page_size}"));
-            if let Some(ref t) = query.title {
-                if !t.trim().is_empty() {
-                    pairs.append_pair("title", t.trim());
-                }
+            if let Some(t) = query
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("title", t);
             }
-            if let Some(ref c) = query.code_or_name {
-                if !c.trim().is_empty() {
-                    pairs.append_pair("codeOrName", c.trim());
-                }
+            if let Some(c) = query
+                .code_or_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("codeOrName", c);
             }
-            if let Some(ref s) = query.subject_kind_id {
-                if !s.trim().is_empty() {
-                    pairs.append_pair("subjectKindId", s.trim());
-                }
+            if let Some(s) = query
+                .subject_kind_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("subjectKindId", s);
             }
-            if let Some(ref l) = query.topic_label_id {
-                if !l.trim().is_empty() {
-                    pairs.append_pair("topicLabelId", l.trim());
-                }
+            if let Some(l) = query
+                .topic_label_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("topicLabelId", l);
             }
-            if let Some(ref d) = query.department_id {
-                if !d.trim().is_empty() {
-                    pairs.append_pair("departmentId", d.trim());
-                }
+            if let Some(d) = query
+                .department_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("departmentId", d);
             }
         }
 

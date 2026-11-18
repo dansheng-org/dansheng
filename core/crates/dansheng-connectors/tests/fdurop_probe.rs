@@ -234,14 +234,12 @@ async fn test_fdurop_login_and_query() {
     );
 
     // Extract idToken from redirect location or query/fragment
-    let mut id_token = None;
-    if let Some(ref loc) = step8_loc {
-        if let Some(pos) = loc.find("idToken=") {
-            let part = &loc[pos + 8..];
-            let end = part.find('&').unwrap_or(part.len());
-            id_token = Some(part[..end].to_string());
-        }
-    }
+    let id_token = step8_loc.as_deref().and_then(|loc| {
+        let pos = loc.find("idToken=")?;
+        let part = &loc[pos + 8..];
+        let end = part.find('&').unwrap_or(part.len());
+        Some(part[..end].to_string())
+    });
     println!("Step 8 extracted idToken present: {}", id_token.is_some());
 
     let token = id_token.expect("expected idToken");
