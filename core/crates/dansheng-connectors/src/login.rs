@@ -54,6 +54,7 @@ pub enum LoginTarget {
     Bus,
     Dining,
     WebVpn,
+    Fdurop,
 }
 
 impl LoginTarget {
@@ -66,6 +67,7 @@ impl LoginTarget {
             Self::Dorm | Self::Bus => "https://zlapp.fudan.edu.cn",
             Self::Dining => "https://my.fudan.edu.cn",
             Self::WebVpn => "https://webvpn.fudan.edu.cn",
+            Self::Fdurop => "https://paper.fudan.edu.cn",
         }
     }
 
@@ -81,6 +83,7 @@ impl LoginTarget {
             Self::Bus => "https://zlapp.fudan.edu.cn/fudanbus/wap/default/lists",
             Self::Dining => "https://my.fudan.edu.cn/simple_list/stqk",
             Self::WebVpn => "https://webvpn.fudan.edu.cn/login?cas_login=true",
+            Self::Fdurop => "https://paper.fudan.edu.cn/fdurop-service/jwt/cas/login",
         }
     }
 
@@ -97,6 +100,7 @@ impl LoginTarget {
 pub struct LoginSession {
     pub origin: String,
     pub cookies: Vec<String>,
+    pub token: Option<String>,
 }
 /// Safe stage telemetry. It stores no URL/query, identity, password or response.
 #[derive(Clone, Default)]
@@ -462,6 +466,7 @@ impl Transport for GatewayHttps {
         Some(LoginSession {
             origin: crate::webvpn::GATEWAY_ORIGIN.into(),
             cookies,
+            token: None,
         })
     }
 }
@@ -829,7 +834,7 @@ impl<T: Transport> Flow<T> {
                 {
                     return Err(LoginError::AuthenticationRejected);
                 }
-                return self.export();
+                return self.export_with_url(Some(&page.url));
             }
             if let Some(url) = ticket_url(&page, self.target)? {
                 self.ticket_consumed = true;
@@ -843,7 +848,12 @@ impl<T: Transport> Flow<T> {
         Err(LoginError::LimitExceeded)
     }
 
+    #[allow(dead_code)]
     fn export(&self) -> Result<LoginSession, LoginError> {
+        self.export_with_url(None)
+    }
+
+    fn export_with_url(&self, final_url: Option<&Url>) -> Result<LoginSession, LoginError> {
         if let Some(session) = self.transport.gateway_session() {
             return if session.cookies.is_empty() {
                 Err(LoginError::SessionUnavailable)
@@ -874,9 +884,11 @@ impl<T: Transport> Flow<T> {
         if cookies.is_empty() {
             return Err(LoginError::SessionUnavailable);
         }
+        let token = final_url.and_then(extract_token_from_url);
         Ok(LoginSession {
             origin: self.target.origin().into(),
             cookies,
+            token,
         })
     }
 }
@@ -959,6 +971,9 @@ fn validate_url_depth(url: &Url, target: LoginTarget, depth: usize) -> Result<()
         ]
         .contains(&name.as_str())
         {
+            if value.is_empty() || value == "null" {
+                continue;
+            }
             if value.contains('\\') || value.chars().any(char::is_control) {
                 return Err(LoginError::UnsafeRedirect);
             }
@@ -967,6 +982,23 @@ fn validate_url_depth(url: &Url, target: LoginTarget, depth: usize) -> Result<()
         }
     }
     Ok(())
+}
+
+fn extract_token_from_url(url: &Url) -> Option<String> {
+    for (k, v) in url.query_pairs() {
+        if (k == "idToken" || k == "token") && !v.is_empty() {
+            return Some(v.into_owned());
+        }
+    }
+    if let Some(frag) = url.fragment() {
+        let query = frag.split_once('?').map(|(_, q)| q).unwrap_or(frag);
+        for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+            if (k == "idToken" || k == "token") && !v.is_empty() {
+                return Some(v.into_owned());
+            }
+        }
+    }
+    None
 }
 
 fn resolve_url(base: &Url, location: &str, target: LoginTarget) -> Result<Url, LoginError> {

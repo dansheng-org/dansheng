@@ -1,28 +1,45 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/dansheng_state.dart';
 import '../campus_api.dart';
+import 'agent_chat_page.dart';
 import 'agent_models.dart';
 import 'agent_service.dart';
 
-/// First-class Campus Agent tab:
-/// 1. Local account-scoped evidence-based search and question answering (not pretending to be an LLM).
-/// 2. Opt-in OFF-by-default loopback HTTP MCP server (2025-11-25) with ephemeral bearer token (only exposed on explicit copy).
-/// 3. Clear readable excerpts for evidence sources, concise product-focused Chinese without implementation jargon.
-class AgentPage extends StatefulWidget {
+class AgentPage extends StatelessWidget {
   final DanshengController controller;
 
   const AgentPage({super.key, required this.controller});
 
   @override
-  State<AgentPage> createState() => _AgentPageState();
+  Widget build(BuildContext context) => AgentChatPage(
+    controller: controller,
+    onOpenLocal: () => Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _LocalAgentPage(controller: controller),
+      ),
+    ),
+  );
 }
 
-class _AgentPageState extends State<AgentPage> {
+class _LocalAgentPage extends StatefulWidget {
+  const _LocalAgentPage({required this.controller});
+
+  final DanshengController controller;
+
+  @override
+  State<_LocalAgentPage> createState() => _LocalAgentPageState();
+}
+
+class _LocalAgentPageState extends State<_LocalAgentPage> {
   late final AgentService _service;
+  late final CampusAccountScope _accountScope;
+  ModalRoute<dynamic>? _route;
   final TextEditingController _queryController = TextEditingController();
 
   McpServerStatus _mcpStatus = const McpServerStatus(running: false, port: 0);
@@ -36,7 +53,6 @@ class _AgentPageState extends State<AgentPage> {
 
   AgentAnswer? _answer;
   List<AgentHit> _hits = [];
-  String? _lastAccount;
 
   // Track expanded sources to follow excerpts easily
   final Set<int> _expandedSources = <int>{};
@@ -44,39 +60,54 @@ class _AgentPageState extends State<AgentPage> {
   @override
   void initState() {
     super.initState();
-    _service = AgentService(CampusApi(widget.controller.client));
-    _lastAccount = widget.controller.activeAccountId;
-    widget.controller.addListener(_onControllerChanged);
-    _loadMcpStatus();
+    final api = CampusApi.forAccount(widget.controller);
+    _service = AgentService(api);
+    _accountScope = api.accountScope!;
+    _accountScope.addListener(_dismissOnAccountChange);
+    if (_accountScope.accountId?.isNotEmpty ?? false) {
+      unawaited(_loadMcpStatus());
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+    if (!_accountScope.isCurrent) _dismissOnAccountChange();
   }
 
   @override
   void dispose() {
-    widget.controller.removeListener(_onControllerChanged);
+    _accountScope.removeListener(_dismissOnAccountChange);
+    _accountScope.dispose();
     _queryController.dispose();
     super.dispose();
   }
 
-  void _onControllerChanged() {
-    final current = widget.controller.activeAccountId;
-    if (current != _lastAccount) {
-      _lastAccount = current;
-      _loadMcpStatus();
-      if (mounted) {
-        setState(() {
-          _answer = null;
-          _hits = [];
-          _hasSearched = false;
-          _expandedSources.clear();
-        });
-      }
+  bool get _isCurrent => mounted && _accountScope.isCurrent;
+
+  void _showSnackBar(String message) {
+    if (_isCurrent) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
+  }
+
+  void _dismissOnAccountChange() {
+    final route = _route;
+    if (route == null) return;
+    scheduleMicrotask(() {
+      final navigator = route.navigator;
+      if (navigator != null && navigator.mounted && route.isActive) {
+        navigator.removeRoute(route);
+      }
+    });
   }
 
   Future<void> _loadMcpStatus() async {
     try {
       final status = await _service.getMcpStatus();
-      if (mounted) {
+      if (_isCurrent) {
         setState(() {
           _mcpStatus = status;
         });
@@ -87,10 +118,10 @@ class _AgentPageState extends State<AgentPage> {
   }
 
   Future<void> _toggleMcp(bool enable) async {
-    final account = widget.controller.activeAccountId;
+    if (!_isCurrent || _mcpLoading) return;
+    final account = _accountScope.accountId;
     if (account == null || account.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请先在账号设置中选择活动账号。')));
+      _showSnackBar('请先在账号设置中选择活动账号。');
       return;
     }
 
@@ -99,57 +130,47 @@ class _AgentPageState extends State<AgentPage> {
       final status = enable
           ? await _service.startMcp()
           : await _service.stopMcp();
-      if (mounted) {
+      if (_isCurrent) {
         setState(() {
           _mcpStatus = status;
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(campusError(e))));
-      }
+      _showSnackBar(campusError(e));
     } finally {
-      if (mounted) {
+      if (_isCurrent) {
         setState(() => _mcpLoading = false);
       }
     }
   }
 
   Future<void> _copyMcpToken() async {
+    if (!_isCurrent || _tokenCopying) return;
     setState(() => _tokenCopying = true);
     try {
       final token = await _service.getMcpToken();
+      if (!_isCurrent) return;
       if (token.isNotEmpty) {
         await Clipboard.setData(ClipboardData(text: token));
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('已复制连接凭据，请在电脑端外部工具中配置。')),
-          );
-        }
+        _showSnackBar('已复制连接凭据，请在电脑端外部工具中配置。');
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('服务未就绪，暂无法获取连接凭据。')));
-        }
+        _showSnackBar('服务未就绪，暂无法获取连接凭据。');
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(campusError(e))));
-      }
+      _showSnackBar(campusError(e));
     } finally {
-      if (mounted) {
+      if (_isCurrent) {
         setState(() => _tokenCopying = false);
       }
     }
   }
 
   Future<void> _executeSearch() async {
+    if (!_isCurrent || _isSearching) return;
     final q = _queryController.text.trim();
     if (q.isEmpty) return;
 
-    final account = widget.controller.activeAccountId;
+    final account = _accountScope.accountId;
     if (account == null || account.isEmpty) {
       setState(() {
         _errorMessage = '请先在账号设置中选择活动账号。';
@@ -166,7 +187,7 @@ class _AgentPageState extends State<AgentPage> {
     try {
       if (_modeIndex == 0) {
         final answer = await _service.ask(q);
-        if (mounted) {
+        if (_isCurrent) {
           setState(() {
             _answer = answer;
             _hits = [];
@@ -179,7 +200,7 @@ class _AgentPageState extends State<AgentPage> {
         }
       } else {
         final hits = await _service.search(q);
-        if (mounted) {
+        if (_isCurrent) {
           setState(() {
             _hits = hits;
             _answer = null;
@@ -187,13 +208,13 @@ class _AgentPageState extends State<AgentPage> {
         }
       }
     } catch (e) {
-      if (mounted) {
+      if (_isCurrent) {
         setState(() {
           _errorMessage = campusError(e);
         });
       }
     } finally {
-      if (mounted) {
+      if (_isCurrent) {
         setState(() => _isSearching = false);
       }
     }
@@ -201,10 +222,10 @@ class _AgentPageState extends State<AgentPage> {
 
   @override
   Widget build(BuildContext context) {
-    final account = widget.controller.activeAccountId;
+    final account = _accountScope.accountId;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('校园助手'), centerTitle: false),
+      appBar: AppBar(title: const Text('本地检索与配对'), centerTitle: false),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         children: [
@@ -484,6 +505,7 @@ class _AgentPageState extends State<AgentPage> {
                   ),
                   OutlinedButton.icon(
                     onPressed: () {
+                      if (!_isCurrent) return;
                       final cmd = _mcpStatus.adbCommand;
                       if (cmd != null && cmd.isNotEmpty) {
                         Clipboard.setData(ClipboardData(text: cmd));

@@ -93,7 +93,7 @@ Instructure 官方协议：
 | `canvas.submission.read` | GET /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/self | 仅本人提交；include[]=submission_comments/attachments 按权限和最小字段选择 |
 | `canvas.assignment_groups.sync` | GET /api/v1/courses/{course_id}/assignment_groups | 保留学校分组/权重，不生成权威总成绩 |
 
-官方文档：[Quizzes](https://developerdocs.instructure.com/services/canvas/resources/quizzes)、[Discussion Topics](https://developerdocs.instructure.com/services/canvas/resources/discussion_topics)、[Submissions](https://developerdocs.instructure.com/services/canvas/resources/submissions)。这些是标准协议的官方证据，**本轮未登录复旦 Canvas 验证这些路由、scope、站点版本或返回字段**。Dela `reference/Dela/docs/sjtu-apis.md:44`、`:50`、`:76` 的提交/测验/讨论结果来自交大，不能写成复旦实测。现有复旦能力和 token 失效历史见 docs/live-campus-triage.md，当前凭据状态必须由主代理另行确认。
+**本轮未登录复旦 Canvas 验证这些路由、scope、站点版本或返回字段**。现有复旦能力和 token 失效历史见 docs/live-campus-triage.md。标准协议见 [Quizzes](https://developerdocs.instructure.com/services/canvas/resources/quizzes)、[Discussion Topics](https://developerdocs.instructure.com/services/canvas/resources/discussion_topics) 和 [Submissions](https://developerdocs.instructure.com/services/canvas/resources/submissions)。
 
 提交附件下载应沿用 managed files 和实时授权，不持久化带 verifier/token 的 URL；HTML使用已有富文本处理策略，不能执行。测验/提交缺权限应返回 PermissionDenied/Unsupported，不能删掉已缓存记录或显示“未提交”。New Quizzes 必须另查部署支持，不能把经典 quizzes 404解释为无测验。
 
@@ -103,7 +103,7 @@ Instructure 官方协议：
 
 官方入口 https://icourse.fudan.edu.cn/；本轮本机公开GET报主机解析失败，**不能判定学校服务下线或账号无权限**。没有取得首页JS或任何API。[教师发展中心2026手册](https://cfd.fudan.edu.cn/upload/2026031634924545.pdf)说明 UIS 登录、校外 VPN，截图有我的课程、我的资源、我的学习等。[录像指南](https://cfd.fudan.edu.cn/yuyue2/demo.asp)说明部分教室本地录制后应自行拷走，并指向 icourse；因此不能把所有教室录像推断为自动上传和学生可读。
 
-可行路径是主代理在校园网/已授权VPN里验证DNS和入口，再由可信宿主可见登录；先读课程目录/节次标题/发布时间/访问权限，不碰观看进度、签到、学习时长、弹题或完成状态回传。**当前没有经验证的 course/video/transcript API；任何 `/api/courses`、字幕、下载地址都只能是假设，不在实施清单中。** Dela 的课堂录像属于交大服务，不能复用其学校域名/接口或断言复旦有字幕。
+可行路径是在复旦校园网或已授权 VPN 中验证 DNS 和入口，再由可信宿主可见登录。优先读取课程目录、节次标题、发布时间和访问权限。**复旦的录像、字幕和下载接口待取证。**
 
 架构建议官方 `fudan-icourse` 连接器；若只能在已认证页面访问则可用官方JS插件承载学校查询和结构转换，经平台 BrowserSession执行。视频播放保留学校播放器/可见跳转，避免在核心内嵌浏览器/Chromium。若后续证明学校明确提供字幕/可下载文件，再复用托管资产/全文索引；HLS/DRM媒体不作为普通文件下载器默认能力。首批建议 methods `fudan.icourse.courses`、`fudan.icourse.recordings`（名称待协议取证），只导出元数据和受控打开动作。
 
@@ -117,7 +117,6 @@ Instructure 官方协议：
 - `crates/dansheng-connectors/src/core_adapter.rs:228`：学校服务注册；`:256`Canvas已存在服务面。
 - `crates/dansheng-connectors/src/login.rs`、`webvpn.rs`：认证和网关由可信宿主配置，SSO仅是进入服务的条件，不代表所有角色/资源授权。
 - `reference/DanXi/lib/repository/fdu/edu_service_repository.dart`、`time_table_repository.dart`、`postgraduate_timetable_repository.dart`：固定复旦课表/成绩参考，无新培养/评教/录播完整协议。
-- `reference/Dela/src/main/canvas/api.ts` 与 `reference/Dela/docs/sjtu-apis.md`：可复用Canvas领域设计和标准分页经验，交大实测不能作为复旦兼容证明。
 
 本轮只新增研究文档，没有实现新连接器、fixture或客户端；没有运行构建/测试。公开GET的成功仅覆盖上述具体路径，认证后业务和平台/模拟器验收均未完成。
 

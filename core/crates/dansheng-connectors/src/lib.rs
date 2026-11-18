@@ -16,6 +16,7 @@ pub mod electricity_alert;
 pub mod energy_history;
 #[cfg(feature = "services")]
 mod expanded_services;
+pub mod fdurop;
 #[cfg(feature = "services")]
 pub mod forum_actions;
 pub mod fudan;

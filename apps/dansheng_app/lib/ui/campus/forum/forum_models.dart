@@ -3,6 +3,38 @@
 // Floor fields adapted from DanXi lib/model/forum/floor.dart.
 // Copyright (C) 2021 DanXi-Dev; GPL-3.0-or-later.
 
+/// Helper to unpack a list from either a direct List or a SourceBatch map.
+List<Map<String, dynamic>> forumRowsOf(dynamic res) {
+  if (res is List) {
+    return res.whereType<Map<String, dynamic>>().toList();
+  }
+  if (res is Map) {
+    if (res['records'] is List) {
+      final list = <Map<String, dynamic>>[];
+      for (final item in res['records'] as List) {
+        if (item is Map) {
+          final payload = item['payload'];
+          if (payload is Map<String, dynamic>) {
+            list.add(payload);
+          } else if (item is Map<String, dynamic>) {
+            list.add(item);
+          }
+        }
+      }
+      return list;
+    }
+    if (res['items'] is List) {
+      return (res['items'] as List).whereType<Map<String, dynamic>>().toList();
+    }
+    if (res['results'] is List) {
+      return (res['results'] as List)
+          .whereType<Map<String, dynamic>>()
+          .toList();
+    }
+  }
+  return <Map<String, dynamic>>[];
+}
+
 /// Star-prefixed tags mark folded threads and are hidden from tag chips.
 bool isHiddenForumTag(String tag) => tag.startsWith('*');
 

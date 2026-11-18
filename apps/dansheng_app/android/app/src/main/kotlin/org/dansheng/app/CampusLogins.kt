@@ -11,7 +11,7 @@ internal class CampusLogins(private val rt: RuntimeHost) {
     private val serial = Mutex()
     private val recovered = mutableMapOf<Pair<String,String>,Long>()
     private val recentFailures = mutableMapOf<Pair<String,String>,Pair<Long,String>>()
-    private val services=setOf("ecard","academic","power","bus","dining","forum","canvas","webvpn","cloud")
+    private val services=setOf("ecard","academic","power","bus","dining","forum","canvas","webvpn","cloud","fdurop")
     // The cloud drive starts with the UIS password but its owner may change it there; a
     // password typed for the drive is saved apart from the UIS one.
     private fun kind(service:String)=when { service in setOf("forum","canvas","cloud") -> service
@@ -111,6 +111,7 @@ internal class CampusLogins(private val rt: RuntimeHost) {
             "canvas" -> rt.request("canvas.token.bind",p.put("token",secret.trim()).put("persist",false))
             "forum" -> rt.request("community.tea.login",p.put("email",email).put("password",secret))
             "cloud" -> rt.request("fudan.cloud.login",p.put("password",secret))
+            "fdurop" -> rt.request("fudan.fdurop.login",p.put("password",secret))
             else -> if(isWebdav(service))
                 rt.request("webdav.login",p.put("id",service.removePrefix("webdav:")).put("username",email.trim()).put("password",secret))
                 else throw PortError("MethodUnavailable")

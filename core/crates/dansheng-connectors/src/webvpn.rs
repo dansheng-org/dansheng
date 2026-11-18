@@ -36,6 +36,7 @@ pub const FUDAN_ORIGINS: &[&str] = &[
     "https://mlibrary.fudan.edu.cn",
     "https://news.fudan.edu.cn",
     "https://opac.fudan.edu.cn",
+    "https://paper.fudan.edu.cn",
     "https://yzsfwapp.fudan.edu.cn",
     "http://10.64.130.6",
 ];
@@ -68,6 +69,7 @@ pub const DEFAULT_ORIGINS: &[&str] = &[
     "https://mlibrary.fudan.edu.cn",
     "https://news.fudan.edu.cn",
     "https://opac.fudan.edu.cn",
+    "https://paper.fudan.edu.cn",
     "https://yzsfwapp.fudan.edu.cn",
     "http://10.64.130.6",
     "https://www.fduhole.com",
