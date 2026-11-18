@@ -370,6 +370,32 @@ class FduropProjectItem {
       topicLabels: topicLabels ?? this.topicLabels,
     );
   }
+
+  /// Check whether this project matches a given text query.
+  bool matchesQuery(String? q) {
+    if (q == null || q.trim().isEmpty) return true;
+    final term = q.trim().toLowerCase();
+    return title.toLowerCase().contains(term) ||
+        advisor.toLowerCase().contains(term) ||
+        advisorTitle.toLowerCase().contains(term) ||
+        department.toLowerCase().contains(term) ||
+        description.toLowerCase().contains(term) ||
+        requirements.toLowerCase().contains(term) ||
+        subjectKinds.any((s) => s.toLowerCase().contains(term)) ||
+        topicLabels.any((l) => l.toLowerCase().contains(term));
+  }
+
+  /// Check whether this project matches a given subject discipline kind.
+  bool matchesSubjectKind(String? kind) {
+    if (kind == null || kind == '全部') return true;
+    return subjectKinds.any((s) => s.contains(kind)) || program.contains(kind);
+  }
+
+  /// Check whether this project matches a given topic label / funding source.
+  bool matchesTopicLabel(String? label) {
+    if (label == null || label == '全部') return true;
+    return topicLabels.any((l) => l.contains(label)) || program.contains(label);
+  }
 }
 
 /// Data model representing downloadable documents from FDUROP (相关文件下载).

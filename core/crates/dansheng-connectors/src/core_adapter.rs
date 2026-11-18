@@ -700,6 +700,8 @@ impl CoreService for CampusService {
             ("fudan.postgraduate.semester", "fudan.catalog.read"),
             ("fudan.fdurop.topics", "fudan.academic.read"),
             ("fudan.fdurop.topic.detail", "fudan.academic.read"),
+            ("fudan.fdurop.labels", "fudan.academic.read"),
+            ("fudan.fdurop.subjects", "fudan.academic.read"),
             #[cfg(feature = "login")]
             ("fudan.fdurop.login", "fudan.academic.login"),
             ("fudan.timetable.sync", "fudan.academic.read"),
@@ -2188,11 +2190,12 @@ impl CoreService for CampusService {
                     let fdurop_client = crate::fdurop::FduropClient::new(&transport, account);
                     let query = crate::fdurop::FduropSearchQuery {
                         page: params["page"].as_u64().unwrap_or(1) as u32,
-                        page_size: params["page_size"].as_u64().unwrap_or(20) as u32,
+                        page_size: params["page_size"].as_u64().unwrap_or(50) as u32,
                         title: params["title"].as_str().map(str::to_string),
-                        code_or_name: params["code_or_name"]
+                        code_or_name: params["code_or_name"].as_str().map(str::to_string),
+                        keyword: params["keyword"]
                             .as_str()
-                            .or_else(|| params["keyword"].as_str())
+                            .or_else(|| params["query"].as_str())
                             .map(str::to_string),
                         subject_kind_id: params["subject_kind_id"].as_str().map(str::to_string),
                         topic_label_id: params["topic_label_id"].as_str().map(str::to_string),
@@ -2220,6 +2223,44 @@ impl CoreService for CampusService {
                     let id = required_string(&params, "id")?;
                     serde_json::to_value(
                         fdurop_client.topic_detail(id).await.map_err(source_error)?,
+                    )?
+                }
+                "fudan.fdurop.labels" => {
+                    let transport = BoundTransport {
+                        account,
+                        store: context.store,
+                        source_capability: capability,
+                        credential_lease: Default::default(),
+                        network: context.network,
+                        platform: context.platform,
+                        principal,
+                        grant: &io_grant,
+                    };
+                    let fdurop_client = crate::fdurop::FduropClient::new(&transport, account);
+                    serde_json::to_value(
+                        fdurop_client
+                            .query_topic_labels()
+                            .await
+                            .map_err(source_error)?,
+                    )?
+                }
+                "fudan.fdurop.subjects" => {
+                    let transport = BoundTransport {
+                        account,
+                        store: context.store,
+                        source_capability: capability,
+                        credential_lease: Default::default(),
+                        network: context.network,
+                        platform: context.platform,
+                        principal,
+                        grant: &io_grant,
+                    };
+                    let fdurop_client = crate::fdurop::FduropClient::new(&transport, account);
+                    serde_json::to_value(
+                        fdurop_client
+                            .query_subject_kinds()
+                            .await
+                            .map_err(source_error)?,
                     )?
                 }
                 _ => return Err(CoreError::new("MethodNotFound", "unknown campus query")),

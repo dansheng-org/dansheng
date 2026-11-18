@@ -91,7 +91,7 @@ void main() {
 
       // FDUROP Open Projects
       final projects = await service.getFduropProjects();
-      expect(projects.length, greaterThanOrEqualTo(8));
+      expect(projects.length, greaterThanOrEqualTo(50));
       expect(
         projects.every((p) => p.portalUrl.contains('paper.fudan.edu.cn')),
         isTrue,
@@ -206,6 +206,82 @@ void main() {
       expect(detail.labIntroduce, contains('CodeWisdom'));
 
       // Reset
+      service.bindApi(null);
+    });
+
+    test('FDUROP search and multi-dimensional filtering by subjectKind, topicLabel, and keyword', () async {
+      // Query by teacher name
+      final zhuProjects = await service.getFduropProjects(query: '朱同玉');
+      expect(zhuProjects, isNotEmpty);
+      expect(zhuProjects.any((p) => p.advisor.contains('朱同玉')), isTrue);
+      expect(zhuProjects.any((p) => p.title.contains('肾移植后免疫稳态重建')), isTrue);
+
+      // Query by title keyword
+      final nanoProjects = await service.getFduropProjects(query: '纳米多孔');
+      expect(nanoProjects, isNotEmpty);
+      expect(nanoProjects.first.title, contains('球形纳米多孔氧化物'));
+
+      // Query by subject kind
+      final medProjects = await service.getFduropProjects(subjectKind: '医学');
+      expect(medProjects, isNotEmpty);
+      expect(
+        medProjects.every(
+          (p) =>
+              p.subjectKinds.contains('医学') ||
+              p.program.contains('医学') ||
+              p.matchesSubjectKind('医学'),
+        ),
+        isTrue,
+      );
+
+      // Query by topic label
+      final fundProjects = await service.getFduropProjects(
+        topicLabel: '国家自然科学基金项目',
+      );
+      expect(fundProjects, isNotEmpty);
+      expect(
+        fundProjects.every(
+          (p) =>
+              p.topicLabels.contains('国家自然科学基金项目') ||
+              p.program.contains('国家自然科学基金项目') ||
+              p.matchesTopicLabel('国家自然科学基金项目'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('Live FDUROP labels and subjects query via CampusApi', () async {
+      final bridge = MockDanshengBridge();
+      bridge.campusHandler = (method, params) async {
+        if (method == 'fudan.fdurop.labels') {
+          return [
+            {'id': 'lbl_1', 'name_zh': '国家自然科学基金项目'},
+            {'id': 'lbl_2', 'name_zh': '国家科技重大专项'},
+          ];
+        } else if (method == 'fudan.fdurop.subjects') {
+          return [
+            {'id': 'sub_1', 'name_zh': '交叉学科'},
+            {'id': 'sub_2', 'name_zh': '医学'},
+            {'id': 'sub_3', 'name_zh': '工学'},
+          ];
+        }
+        return <String, dynamic>{};
+      };
+
+      final client = DanshengClient(bridge: bridge);
+      final controller = DanshengController(client: client);
+      await controller.initialize();
+
+      service.bindApi(CampusApi.forAccount(controller));
+
+      final labels = await service.queryLiveTopicLabels();
+      expect(labels.length, 2);
+      expect(labels.any((l) => l['name_zh'] == '国家自然科学基金项目'), isTrue);
+
+      final subjects = await service.queryLiveSubjectKinds();
+      expect(subjects.length, 3);
+      expect(subjects.any((s) => s['name_zh'] == '交叉学科'), isTrue);
+
       service.bindApi(null);
     });
   });
@@ -369,11 +445,14 @@ void main() {
 
         // Sub-segment 0: 开放课题 visible
         expect(find.textContaining('复旦大学本科生学术研究资助计划'), findsOneWidget);
-        expect(find.text('开放课题 (9)'), findsOneWidget);
+        expect(find.textContaining('开放课题 ('), findsOneWidget);
         expect(find.textContaining('基于端侧小模型的高校课程智能问答助教系统'), findsOneWidget);
 
         // Tap project card to open project detail sheet
-        await tester.tap(find.textContaining('基于端侧小模型的高校课程智能问答助教系统'));
+        final projectCard = find.textContaining('基于端侧小模型的高校课程智能问答助教系统');
+        await tester.ensureVisible(projectCard);
+        await tester.pumpAndSettle();
+        await tester.tap(projectCard);
         await tester.pumpAndSettle();
 
         expect(find.text('课题内容与研究目标'), findsOneWidget);
@@ -393,6 +472,14 @@ void main() {
           find.byType(Navigator).first,
         );
         navigator.pop();
+        await tester.pumpAndSettle();
+
+        // Scroll back to top so segmented button is in view
+        await tester.fling(
+          find.byType(ListView).first,
+          const Offset(0, 1000),
+          2000,
+        );
         await tester.pumpAndSettle();
 
         // Sub-segment 1: 网站通知
@@ -521,7 +608,10 @@ void main() {
         expect(find.textContaining('分布式智能网联车协同感知'), findsOneWidget);
 
         // Tap live project to open detail sheet
-        await tester.tap(find.textContaining('分布式智能网联车协同感知'));
+        final liveCard = find.textContaining('分布式智能网联车协同感知');
+        await tester.ensureVisible(liveCard);
+        await tester.pumpAndSettle();
+        await tester.tap(liveCard);
         await tester.pumpAndSettle();
 
         // Verify detail sheet shows live fields

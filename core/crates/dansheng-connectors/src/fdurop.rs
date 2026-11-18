@@ -39,12 +39,29 @@ pub struct FduropTopicDetail {
     pub lab_introduce: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FduropTopicLabel {
+    pub id: String,
+    pub name_zh: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_en: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FduropSubjectKind {
+    pub id: String,
+    pub name_zh: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_en: Option<String>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FduropSearchQuery {
     pub page: u32,
     pub page_size: u32,
     pub title: Option<String>,
     pub code_or_name: Option<String>,
+    pub keyword: Option<String>,
     pub subject_kind_id: Option<String>,
     pub topic_label_id: Option<String>,
     pub department_id: Option<String>,
@@ -64,8 +81,57 @@ impl<'a> FduropClient<'a> {
         &self,
         query: &FduropSearchQuery,
     ) -> Result<Vec<FduropOpenTopicItem>, ConnectorError> {
+        let kw = query
+            .keyword
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let has_title = query
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_some();
+        let has_code = query
+            .code_or_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_some();
+
+        if let Some(keyword) = kw.filter(|_| !has_title && !has_code) {
+            let mut title_q = query.clone();
+            title_q.keyword = None;
+            title_q.title = Some(keyword.to_string());
+            title_q.code_or_name = None;
+
+            let mut name_q = query.clone();
+            name_q.keyword = None;
+            name_q.title = None;
+            name_q.code_or_name = Some(keyword.to_string());
+
+            let mut items = self.search_open_topics_single(&title_q).await?;
+            if let Ok(extra) = self.search_open_topics_single(&name_q).await {
+                let mut seen: std::collections::HashSet<String> =
+                    items.iter().map(|i| i.id.clone()).collect();
+                for item in extra {
+                    if seen.insert(item.id.clone()) {
+                        items.push(item);
+                    }
+                }
+            }
+            return Ok(items);
+        }
+
+        self.search_open_topics_single(query).await
+    }
+
+    async fn search_open_topics_single(
+        &self,
+        query: &FduropSearchQuery,
+    ) -> Result<Vec<FduropOpenTopicItem>, ConnectorError> {
         let page = query.page.max(1);
-        let page_size = query.page_size.clamp(1, 100);
+        let page_size = query.page_size.clamp(1, 1000);
         let mut url = Url::parse(&format!(
             "{FDUROP_BASE}/api/v1/for-std/urop-init-flow/open-topic/search"
         ))
@@ -225,6 +291,110 @@ impl<'a> FduropClient<'a> {
         }
 
         Ok(items)
+    }
+
+    pub async fn query_topic_labels(&self) -> Result<Vec<FduropTopicLabel>, ConnectorError> {
+        let url = Url::parse(&format!(
+            "{FDUROP_BASE}/api/v1/bizType/2/urop-topic-label/queryAll"
+        ))
+        .map_err(|_| ConnectorError::InvalidConfiguration("fdurop labels url"))?;
+        let request = ConnectorRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: vec![("Accept".into(), "application/json".into())],
+            body: None,
+            auth: TransportAuth::HostToken {
+                account_id: self.account.into(),
+            },
+        };
+        let response = self.transport.execute(request).await?;
+        if response.status == 401 || response.status == 403 {
+            return Err(ConnectorError::AuthRequired(
+                crate::transport::AuthChallenge {
+                    connector: "fdurop".into(),
+                    origin: "https://paper.fudan.edu.cn".into(),
+                    account_id: self.account.into(),
+                    mode: crate::transport::AuthMode::Token,
+                },
+            ));
+        }
+        if response.status != 200 {
+            return Err(ConnectorError::HttpStatus(response.status));
+        }
+        let val: serde_json::Value = serde_json::from_slice(&response.body)
+            .map_err(|_| ConnectorError::InvalidConfiguration("fdurop labels json parse"))?;
+        let mut labels = Vec::new();
+        if let Some(arr) = val["data"].as_array() {
+            for row in arr {
+                let id = row["id"].as_str().unwrap_or_default().to_string();
+                let name_zh = row["nameZh"]
+                    .as_str()
+                    .or_else(|| row["name"].as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let name_en = row["nameEn"].as_str().map(|s| s.to_string());
+                if !id.is_empty() && !name_zh.is_empty() {
+                    labels.push(FduropTopicLabel {
+                        id,
+                        name_zh,
+                        name_en,
+                    });
+                }
+            }
+        }
+        Ok(labels)
+    }
+
+    pub async fn query_subject_kinds(&self) -> Result<Vec<FduropSubjectKind>, ConnectorError> {
+        let url = Url::parse(&format!(
+            "{FDUROP_BASE}/api/v1/bizType/2/urop-subject-kind/queryAll"
+        ))
+        .map_err(|_| ConnectorError::InvalidConfiguration("fdurop subjects url"))?;
+        let request = ConnectorRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: vec![("Accept".into(), "application/json".into())],
+            body: None,
+            auth: TransportAuth::HostToken {
+                account_id: self.account.into(),
+            },
+        };
+        let response = self.transport.execute(request).await?;
+        if response.status == 401 || response.status == 403 {
+            return Err(ConnectorError::AuthRequired(
+                crate::transport::AuthChallenge {
+                    connector: "fdurop".into(),
+                    origin: "https://paper.fudan.edu.cn".into(),
+                    account_id: self.account.into(),
+                    mode: crate::transport::AuthMode::Token,
+                },
+            ));
+        }
+        if response.status != 200 {
+            return Err(ConnectorError::HttpStatus(response.status));
+        }
+        let val: serde_json::Value = serde_json::from_slice(&response.body)
+            .map_err(|_| ConnectorError::InvalidConfiguration("fdurop subjects json parse"))?;
+        let mut subjects = Vec::new();
+        if let Some(arr) = val["data"].as_array() {
+            for row in arr {
+                let id = row["id"].as_str().unwrap_or_default().to_string();
+                let name_zh = row["nameZh"]
+                    .as_str()
+                    .or_else(|| row["name"].as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let name_en = row["nameEn"].as_str().map(|s| s.to_string());
+                if !id.is_empty() && !name_zh.is_empty() {
+                    subjects.push(FduropSubjectKind {
+                        id,
+                        name_zh,
+                        name_en,
+                    });
+                }
+            }
+        }
+        Ok(subjects)
     }
 
     pub async fn topic_detail(&self, topic_id: &str) -> Result<FduropTopicDetail, ConnectorError> {
