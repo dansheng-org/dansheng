@@ -9,7 +9,7 @@ import 'test_helpers.dart';
 
 void main() {
   testWidgets(
-    'Journey: Fresh client has zero plugins, defaults eHall, navigates to 插件, and imports .dspack via modal sheet with {}',
+    'Journey: Fresh client has zero plugins, defaults eHall, navigates to 设置 -> 插件管理, and imports .dspack via modal sheet with {}',
     (WidgetTester tester) async {
       final mockBridge = MockDanshengBridge();
       mockBridge.plugins = []; // Fresh client: zero plugins
@@ -29,19 +29,25 @@ void main() {
       expect(find.byTooltip('账号与校园卡'), findsOneWidget);
       expect(find.text('场馆预约'), findsOneWidget);
 
-      // Verify five bottom navigation labels
+      // Verify bottom navigation labels (research replaces plugins)
       expect(find.text('eHall'), findsWidgets);
       expect(find.text('eLearning'), findsOneWidget);
       expect(find.text('Agent'), findsOneWidget);
       // No forum sign-in on a fresh client, so no forum tab.
       expect(find.text('论坛'), findsNothing);
-      expect(find.text('插件'), findsOneWidget);
+      expect(find.text('科研'), findsOneWidget);
 
       // Verify lazy pages: PluginsScreen is not loaded initially
       expect(find.text('定时抢场'), findsNothing);
 
-      // 2. Navigate to Tab 4 (插件)
-      await tester.tap(find.text('插件'));
+      // 2. Open Settings and navigate to 插件管理
+      await tester.tap(find.byTooltip('设置'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('设置'), findsOneWidget);
+      expect(find.text('插件管理'), findsOneWidget);
+
+      await tester.tap(find.text('插件管理'));
       await tester.pumpAndSettle();
 
       // Verify empty state is displayed on PluginsScreen

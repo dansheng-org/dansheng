@@ -4,6 +4,7 @@ import 'package:dansheng_app/ui/campus/ehall/ehall_page.dart';
 import 'package:dansheng_app/ui/campus/learning/learning_page.dart';
 import 'package:dansheng_app/ui/campus/agent/agent_page.dart';
 import 'package:dansheng_app/ui/campus/forum/forum_page.dart';
+import 'package:dansheng_app/ui/campus/research/research_page.dart';
 import 'package:dansheng_app/ui/campus/venues/venue_page.dart';
 import 'package:dansheng_app/ui/core/dansheng_client.dart';
 import 'package:dansheng_app/ui/core/dansheng_state.dart';
@@ -53,7 +54,7 @@ void main() {
         expect(find.text('eLearning'), findsOneWidget);
         expect(find.text('Agent'), findsOneWidget);
         expect(find.text('论坛'), findsOneWidget);
-        expect(find.text('插件'), findsOneWidget);
+        expect(find.text('科研'), findsOneWidget);
 
         // Active page is EHallPage
         expect(find.byType(EHallPage), findsOneWidget);
@@ -63,7 +64,7 @@ void main() {
         expect(find.byType(LearningPage), findsNothing);
         expect(find.byType(AgentPage), findsNothing);
         expect(find.byType(ForumPage), findsNothing);
-        expect(find.byType(PluginsScreen), findsNothing);
+        expect(find.byType(ResearchPage), findsNothing);
 
         // Navigate to eLearning (Tab 1)
         await tester.tap(find.text('eLearning'));
@@ -80,48 +81,46 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byType(ForumPage), findsOneWidget);
 
-        // Navigate to 插件 (Tab 4)
-        await tester.tap(find.text('插件'));
+        // Navigate to 科研 (Tab 4)
+        await tester.tap(find.text('科研'));
         await tester.pumpAndSettle();
-        expect(find.byType(PluginsScreen), findsOneWidget);
+        expect(find.byType(ResearchPage), findsOneWidget);
       },
     );
 
-    testWidgets(
-      'External notification navigation event opens TasksScreen and selects Tab 4',
-      (tester) async {
-        await tester.pumpWidget(
-          buildTestApp(
-            home: HomeShell(controller: controller),
-            controller: controller,
-          ),
-        );
-        await tester.pumpAndSettle();
+    testWidgets('External notification navigation event opens TasksScreen', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        buildTestApp(
+          home: HomeShell(controller: controller),
+          controller: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
 
-        // Trigger incremental poll that requests opening tasks
-        bridge.openTasksOnPoll = true;
-        await controller.pollIncrementalEvents();
-        await tester.pumpAndSettle();
+      // Trigger incremental poll that requests opening tasks
+      bridge.openTasksOnPoll = true;
+      await controller.pollIncrementalEvents();
+      await tester.pumpAndSettle();
 
-        // Pushes TasksScreen
-        expect(find.byType(TasksScreen), findsOneWidget);
-        expect(find.text('任务调度中心'), findsOneWidget);
+      // Pushes TasksScreen
+      expect(find.byType(TasksScreen), findsOneWidget);
+      expect(find.text('任务调度中心'), findsOneWidget);
 
-        // Pop back to shell: Tab 4 (插件) is selected and opened
-        final navigator = tester.state<NavigatorState>(
-          find.byType(Navigator).first,
-        );
-        navigator.pop();
-        await tester.pumpAndSettle();
+      // Pop back to shell
+      final navigator = tester.state<NavigatorState>(
+        find.byType(Navigator).first,
+      );
+      navigator.pop();
+      await tester.pumpAndSettle();
 
-        final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
-        expect(navBar.selectedIndex, 4);
-        expect(find.byType(PluginsScreen), findsOneWidget);
-      },
-    );
+      final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+      expect(navBar.selectedIndex, 0);
+    });
 
     testWidgets(
-      'eHall toolbar actions open AccountBalanceScreen and SettingsScreen',
+      'eHall toolbar actions open AccountBalanceScreen and SettingsScreen with PluginsScreen entry',
       (tester) async {
         await tester.pumpWidget(
           buildTestApp(
@@ -146,12 +145,23 @@ void main() {
         navigator.pop();
         await tester.pumpAndSettle();
 
-        // 2. Tooltip '设置'
+        // 2. Tooltip '设置' -> opens SettingsScreen
         await tester.tap(find.byTooltip('设置'));
         await tester.pumpAndSettle();
 
         expect(find.byType(SettingsScreen), findsOneWidget);
         expect(find.text('设置'), findsOneWidget);
+        expect(find.text('插件管理'), findsOneWidget);
+
+        // 3. Open PluginsScreen from SettingsScreen
+        await tester.tap(find.text('插件管理'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(PluginsScreen), findsOneWidget);
+        expect(find.text('插件'), findsOneWidget);
+
+        navigator.pop();
+        await tester.pumpAndSettle();
 
         navigator.pop();
         await tester.pumpAndSettle();

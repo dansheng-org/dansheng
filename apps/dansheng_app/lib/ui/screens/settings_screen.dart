@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../campus/webvpn_settings.dart';
 import '../core/dansheng_state.dart';
+import 'plugins_screen.dart';
+import 'tasks_screen.dart';
 
 /// App settings: campus network, appearance, reminders and app information.
 class SettingsScreen extends StatelessWidget {
@@ -85,6 +87,41 @@ class _SettingsBody extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ),
+        const _SectionTitle('功能扩展'),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.extension_outlined),
+                title: const Text('插件管理'),
+                subtitle: Text(
+                  controller.plugins.isEmpty
+                      ? '未安装插件，可导入 .dspack 扩展包'
+                      : '已安装 ${controller.plugins.length} 个插件',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PluginsScreen(controller: controller),
+                  ),
+                ),
+              ),
+              const Divider(height: 1, indent: 56),
+              ListTile(
+                leading: const Icon(Icons.schedule_outlined),
+                title: const Text('定时任务'),
+                subtitle: const Text('查看后台定时任务调度'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => TasksScreen(controller: controller),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         const _SectionTitle('通知与提醒'),
