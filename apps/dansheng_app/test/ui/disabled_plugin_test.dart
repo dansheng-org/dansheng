@@ -46,9 +46,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Root defaults to eHall; navigate to 插件 tab
+      // Root defaults to eHall; navigate to Settings -> 插件管理
       expect(find.text('eHall').first, findsOneWidget);
-      await tester.tap(find.text('插件'));
+      await tester.tap(find.byTooltip('设置'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('插件管理'));
       await tester.pumpAndSettle();
 
       // Verify compact plugin card is displayed as disabled

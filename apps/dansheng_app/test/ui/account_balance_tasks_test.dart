@@ -86,11 +86,14 @@ void main() {
       navigator.pop();
       await tester.pumpAndSettle();
 
-      // 2. Jobs under 插件 top button tooltip 定时任务
-      await tester.tap(find.text('插件'));
+      // 2. Jobs under Settings -> 定时任务
+      await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('定时任务'));
+      await tester.scrollUntilVisible(find.text('定时任务'), 100);
+      await tester.drag(find.byType(ListView).last, const Offset(0, -100));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('定时任务'));
       await tester.pumpAndSettle();
 
       expect(find.text('任务调度中心'), findsOneWidget);
@@ -107,18 +110,23 @@ void main() {
       );
       expect(eventsCall, isNotNull);
 
-      // Return back from TasksScreen
+      // Return back from TasksScreen and SettingsScreen to eHall
+      navigator.pop();
+      await tester.pumpAndSettle();
       navigator.pop();
       await tester.pumpAndSettle();
 
       // 3. Settings under eHall toolbar
-      await tester.tap(find.text('eHall'));
+      await tester.tap(find.text('eHall').first);
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
 
       expect(find.text('设置'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('前往设置'), 100);
+      await tester.ensureVisible(find.text('前往设置'));
+      await tester.pumpAndSettle();
       expect(find.text('准时提醒'), findsOneWidget);
       expect(find.text('前往设置'), findsOneWidget);
 
@@ -141,6 +149,8 @@ void main() {
       expect(notifCall, isNotNull);
 
       // Verify theme toggle
+      await tester.scrollUntilVisible(find.text('深色'), -100);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('深色'));
       await tester.pumpAndSettle();
       expect(controller.themeMode, ThemeMode.dark);

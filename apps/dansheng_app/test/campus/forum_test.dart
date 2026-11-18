@@ -562,7 +562,7 @@ void main() {
       final page = tester.state(find.byType(ForumPage));
 
       // Away and back: the same page, nothing read again.
-      await tester.tap(find.text('插件'));
+      await tester.tap(find.text('科研'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('论坛'));
       await tester.pumpAndSettle();

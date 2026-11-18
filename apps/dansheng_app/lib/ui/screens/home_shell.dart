@@ -7,7 +7,7 @@ import '../campus/ehall/ehall_page.dart';
 import '../campus/learning/learning_page.dart';
 import '../campus/forum/forum_page.dart';
 import '../campus/agent/agent_page.dart';
-import 'plugins_screen.dart';
+import '../campus/research/research_page.dart';
 import 'tasks_screen.dart';
 
 enum _Tab {
@@ -21,7 +21,7 @@ enum _Tab {
   agent('Agent', Icons.auto_awesome_outlined, Icons.auto_awesome),
   // The forum keeps where you were reading; tapping its tab again refreshes it.
   forum('论坛', Icons.forum_outlined, Icons.forum, refreshOnTap: true),
-  plugins('插件', Icons.extension_outlined, Icons.extension);
+  research('科研', Icons.science_outlined, Icons.science, refreshOnTap: true);
 
   const _Tab(
     this.label,
@@ -60,10 +60,6 @@ class _HomeShellState extends State<HomeShell> {
     super.initState();
     links = widget.controller.navigation.listen((_) {
       if (!mounted) return;
-      setState(() {
-        opened.add(_Tab.plugins);
-        current = _Tab.plugins;
-      });
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => TasksScreen(controller: widget.controller),
@@ -105,7 +101,7 @@ class _HomeShellState extends State<HomeShell> {
     _Tab.learning => LearningPage(controller: widget.controller),
     _Tab.agent => AgentPage(controller: widget.controller),
     _Tab.forum => ForumPage(controller: widget.controller),
-    _Tab.plugins => PluginsScreen(controller: widget.controller),
+    _Tab.research => ResearchPage(controller: widget.controller),
   };
 
   @override

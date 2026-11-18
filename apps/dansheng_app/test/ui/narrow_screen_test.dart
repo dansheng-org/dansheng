@@ -106,12 +106,12 @@ void main() {
       await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
       expect(find.text('设置'), findsOneWidget);
-      expect(find.text('准时提醒'), findsOneWidget);
-      navigator.pop();
-      await tester.pumpAndSettle();
 
-      // 4. Switch to 插件 tab: verify compact list with long plugin name renders without overflow
-      await tester.tap(find.text('插件'));
+      // 4. Open PluginsScreen from Settings: verify compact list with long plugin name renders without overflow
+      await tester.scrollUntilVisible(find.text('插件管理'), 50);
+      await tester.ensureVisible(find.text('插件管理'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('插件管理'));
       await tester.pumpAndSettle();
       expect(find.text('已启用'), findsOneWidget);
       expect(find.textContaining('超长名称插件'), findsOneWidget);
@@ -123,9 +123,18 @@ void main() {
       expect(find.textContaining('job_long_identifier'), findsOneWidget);
       navigator.pop();
       await tester.pumpAndSettle();
+      navigator.pop();
+      await tester.pumpAndSettle();
+      navigator.pop();
+      await tester.pumpAndSettle();
 
-      // 6. Return to eHall and check Mailing Shell without overflow
-      await tester.tap(find.text('eHall'));
+      // 6. Switch to 科研 tab: verify research page renders without overflow
+      await tester.tap(find.text('科研'));
+      await tester.pumpAndSettle();
+      expect(find.text('科研动态'), findsOneWidget);
+
+      // 7. Return to eHall and check Mailing Shell without overflow
+      await tester.tap(find.text('eHall').first);
       await tester.pumpAndSettle();
 
       await tester.scrollUntilVisible(find.text('校园邮箱'), 300);
