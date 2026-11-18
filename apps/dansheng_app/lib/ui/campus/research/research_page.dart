@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/dansheng_state.dart';
 import '../../widgets/campus_account_actions.dart';
@@ -35,12 +36,17 @@ class _ResearchPageState extends State<ResearchPage>
   final TextEditingController _newsSearchCtrl = TextEditingController();
   final TextEditingController _groupSearchCtrl = TextEditingController();
   final TextEditingController _fduropSearchCtrl = TextEditingController();
+  final TextEditingController _lectureSearchCtrl = TextEditingController();
 
   String _selectedNewsCategory = '全部';
   final List<String> _newsCategories = ['全部', '科研突破', '项目申报', '招募招生', '学术讲座'];
 
   bool _groupFollowedOnly = false;
   String _selectedGroupDepartment = '全部';
+
+  // Academic Lectures filter states
+  String _selectedLectureCategory = '全部';
+  bool _lectureBookmarkedOnly = false;
 
   // FDUROP Sub-tab state: 0: 开放科研项目, 1: 网站通知, 2: 常用文件下载
   int _fduropSubIndex = 0;
@@ -71,6 +77,7 @@ class _ResearchPageState extends State<ResearchPage>
     _newsSearchCtrl.dispose();
     _groupSearchCtrl.dispose();
     _fduropSearchCtrl.dispose();
+    _lectureSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -91,7 +98,11 @@ class _ResearchPageState extends State<ResearchPage>
       department: _selectedGroupDepartment,
       query: _groupSearchCtrl.text,
     );
-    final lectures = await _service.getLectures();
+    final lectures = await _service.getLectures(
+      query: _lectureSearchCtrl.text,
+      category: _selectedLectureCategory,
+      bookmarkedOnly: _lectureBookmarkedOnly,
+    );
     final fduropProjects = await _service.getFduropProjects(
       program: _selectedFduropProgram,
       query: _fduropSearchCtrl.text,
@@ -636,6 +647,38 @@ class _ResearchPageState extends State<ResearchPage>
                       ),
                     ),
                   ),
+                  if (group.websiteUrl.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.tertiaryContainer.withAlpha(140),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.language,
+                            size: 11,
+                            color: colorScheme.onTertiaryContainer,
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            '官网',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onTertiaryContainer,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (group.recruitment != null) ...[
                     const Spacer(),
                     Container(
@@ -753,6 +796,75 @@ class _ResearchPageState extends State<ResearchPage>
                         ),
                       ],
                     ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // FDUROP Teacher Open Topic Portal Access Card
+          Card(
+            color: colorScheme.surfaceContainerHighest.withAlpha(140),
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: colorScheme.primary.withAlpha(90)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.open_in_browser_rounded,
+                    size: 26,
+                    color: colorScheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'FDUROP 教师开放课题系统',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'paper.fudan.edu.cn/fdurop-pc · 导师开放课题与在线申报',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                    onPressed: () async {
+                      const url =
+                          'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index';
+                      await Clipboard.setData(const ClipboardData(text: url));
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              '已复制 FDUROP 教师开放课题申报网址：$url\n可在浏览器或配合复旦内网访问。',
+                            ),
+                            duration: Duration(seconds: 3),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.copy, size: 16),
+                    label: const Text('复制网址'),
                   ),
                 ],
               ),
@@ -1225,119 +1337,274 @@ class _ResearchPageState extends State<ResearchPage>
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          for (final lec in _lectureList)
-            Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: colorScheme.outlineVariant),
+          // Search input
+          TextField(
+            controller: _lectureSearchCtrl,
+            decoration: InputDecoration(
+              hintText: '搜索讲座主题、主讲学者、报告地点或主办方...',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              suffixIcon: _lectureSearchCtrl.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () {
+                        _lectureSearchCtrl.clear();
+                        _loadData();
+                      },
+                    )
+                  : null,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 10,
               ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onChanged: (_) => _loadData(),
+          ),
+          const SizedBox(height: 10),
+
+          // Filters: [已标想去] + Category Chips
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                FilterChip(
+                  avatar: Icon(
+                    _lectureBookmarkedOnly
+                        ? Icons.bookmark
+                        : Icons.bookmark_border,
+                    size: 16,
+                  ),
+                  label: const Text('已标想去'),
+                  selected: _lectureBookmarkedOnly,
+                  onSelected: (val) {
+                    setState(() => _lectureBookmarkedOnly = val);
+                    _loadData();
+                  },
+                ),
+                const SizedBox(width: 8),
+                for (final cat in _service.availableLectureCategories) ...[
+                  FilterChip(
+                    label: Text(cat),
+                    selected: _selectedLectureCategory == cat,
+                    onSelected: (selected) {
+                      setState(() {
+                        _selectedLectureCategory = selected ? cat : '全部';
+                      });
+                      _loadData();
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          if (_lectureList.isEmpty)
+            Center(
               child: Padding(
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.only(top: 48),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            lec.title,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              height: 1.3,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: lec.isBookmarked ? '取消想去' : '标记想去',
-                          icon: Icon(
-                            lec.isBookmarked
-                                ? Icons.bookmark
-                                : Icons.bookmark_border,
-                            color: lec.isBookmarked
-                                ? colorScheme.primary
-                                : colorScheme.outline,
-                          ),
-                          onPressed: () {
-                            _service.toggleBookmarkLecture(lec.id);
-                          },
-                        ),
-                      ],
+                    Icon(
+                      Icons.event_busy_outlined,
+                      size: 48,
+                      color: colorScheme.outline,
                     ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.person_outline,
-                          size: 16,
-                          color: colorScheme.primary,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            '${lec.speaker} (${lec.speakerTitle})',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.schedule_outlined,
-                          size: 16,
-                          color: colorScheme.outline,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          lec.time,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.place_outlined,
-                          size: 16,
-                          color: colorScheme.outline,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            lec.venue,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHighest.withAlpha(
-                          100,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        lec.description,
-                        style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+                    const SizedBox(height: 12),
+                    Text(
+                      _lectureBookmarkedOnly ? '暂未标记想去的讲座' : '暂无匹配的学术讲座与学术报告',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.outline,
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
+            )
+          else
+            for (final lec in _lectureList)
+              Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: lec.isBookmarked
+                        ? colorScheme.primary.withAlpha(120)
+                        : colorScheme.outlineVariant,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header Row: Category Badge & Bookmark
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              lec.category,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: colorScheme.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              lec.campus,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            tooltip: lec.isBookmarked ? '取消想去' : '标记想去',
+                            icon: Icon(
+                              lec.isBookmarked
+                                  ? Icons.bookmark
+                                  : Icons.bookmark_border,
+                              color: lec.isBookmarked
+                                  ? colorScheme.primary
+                                  : colorScheme.outline,
+                            ),
+                            onPressed: () {
+                              _service.toggleBookmarkLecture(lec.id);
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+
+                      Text(
+                        lec.title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.person_outline,
+                            size: 16,
+                            color: colorScheme.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '${lec.speaker} (${lec.speakerTitle})',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.schedule_outlined,
+                            size: 16,
+                            color: colorScheme.outline,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            lec.time,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.place_outlined,
+                            size: 16,
+                            color: colorScheme.outline,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              lec.venue,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.account_balance_outlined,
+                            size: 16,
+                            color: colorScheme.outline,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '主办：${lec.organizer}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest.withAlpha(
+                            100,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          lec.description,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
         ],
       ),
     );

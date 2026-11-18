@@ -67,6 +67,19 @@ class _ResearchGroupDetailViewState extends State<_ResearchGroupDetailView> {
     }
   }
 
+  Future<void> _copyWebsite() async {
+    if (_group.websiteUrl.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: _group.websiteUrl));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已复制官方网址：${_group.websiteUrl}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -261,6 +274,25 @@ class _ResearchGroupDetailViewState extends State<_ResearchGroupDetailView> {
                 ),
               ),
               const SizedBox(height: 16),
+            ],
+
+            // Official Website
+            if (_group.websiteUrl.isNotEmpty) ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.language_outlined),
+                title: const Text('官方主页 / 学院网站'),
+                subtitle: Text(
+                  _group.websiteUrl,
+                  style: TextStyle(color: colorScheme.primary),
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.copy),
+                  tooltip: '复制网址',
+                  onPressed: _copyWebsite,
+                ),
+              ),
+              const SizedBox(height: 4),
             ],
 
             // Contact & Action
