@@ -52,6 +52,8 @@ class _ResearchPageState extends State<ResearchPage>
   // FDUROP Sub-tab state: 0: 开放科研项目, 1: 网站通知, 2: 常用文件下载
   int _fduropSubIndex = 0;
   String _selectedFduropProgram = '全部';
+  String _selectedFduropSubject = '全部';
+  String _selectedFduropTopicLabel = '全部';
   String _selectedFduropDocCategory = '全部';
 
   List<ResearchNewsItem> _newsList = [];
@@ -107,6 +109,8 @@ class _ResearchPageState extends State<ResearchPage>
     );
     final fduropProjects = await _service.getFduropProjects(
       program: _selectedFduropProgram,
+      subjectKind: _selectedFduropSubject,
+      topicLabel: _selectedFduropTopicLabel,
       query: _fduropSearchCtrl.text,
     );
     final fduropNotices = await _service.getFduropNotices(
@@ -924,7 +928,7 @@ class _ResearchPageState extends State<ResearchPage>
         TextField(
           controller: _fduropSearchCtrl,
           decoration: InputDecoration(
-            hintText: '搜索开放课题、指导老师、院系...',
+            hintText: '搜索课题名称、导师姓名、工号、院系、学科或先修要求...',
             prefixIcon: const Icon(Icons.search, size: 20),
             suffixIcon: _fduropSearchCtrl.text.isNotEmpty
                 ? IconButton(
@@ -945,10 +949,131 @@ class _ResearchPageState extends State<ResearchPage>
         ),
         const SizedBox(height: 10),
 
+        // Portal Info Banner
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest.withAlpha(150),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: colorScheme.outlineVariant.withAlpha(120)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.school_outlined, size: 18, color: colorScheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '教师开放课题库 (源自 paper.fudan.edu.cn) · 已呈现 ${_fduropProjects.length} 项 (全库 1,100+ 条)',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // Subject Kinds Filter Chips
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
             children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer.withAlpha(100),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '学科门类',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.primary,
+                  ),
+                ),
+              ),
+              for (final sub in _service.availableFduropSubjectKinds) ...[
+                FilterChip(
+                  label: Text(sub),
+                  selected: _selectedFduropSubject == sub,
+                  onSelected: (selected) {
+                    setState(() {
+                      _selectedFduropSubject = selected ? sub : '全部';
+                    });
+                    _loadData();
+                  },
+                ),
+                const SizedBox(width: 6),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Topic Labels / Programs Filter Chips
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(
+                  color: colorScheme.tertiaryContainer.withAlpha(100),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '课题标签',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.tertiary,
+                  ),
+                ),
+              ),
+              for (final lbl in _service.availableFduropTopicLabels) ...[
+                FilterChip(
+                  label: Text(lbl),
+                  selected: _selectedFduropTopicLabel == lbl,
+                  onSelected: (selected) {
+                    setState(() {
+                      _selectedFduropTopicLabel = selected ? lbl : '全部';
+                    });
+                    _loadData();
+                  },
+                ),
+                const SizedBox(width: 6),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Program Filter Chips (曦源/望道/莙政/登峰)
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(
+                  color: colorScheme.secondaryContainer.withAlpha(120),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '项目计划',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.secondary,
+                  ),
+                ),
+              ),
               for (final prog in _service.availableFduropPrograms) ...[
                 FilterChip(
                   label: Text(prog),
@@ -960,7 +1085,7 @@ class _ResearchPageState extends State<ResearchPage>
                     _loadData();
                   },
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
               ],
             ],
           ),
@@ -1113,6 +1238,53 @@ class _ResearchPageState extends State<ResearchPage>
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
+
+              if (proj.subjectKinds.isNotEmpty || proj.topicLabels.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    for (final s in proj.subjectKinds)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.tertiaryContainer.withAlpha(120),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          s,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            color: colorScheme.onTertiaryContainer,
+                          ),
+                        ),
+                      ),
+                    for (final l in proj.topicLabels)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          l,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
