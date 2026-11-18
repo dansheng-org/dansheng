@@ -32,7 +32,9 @@ class AgentMockBridge implements DanshengBridge {
         final methodParams = params['params'] as Map<String, dynamic>? ?? {};
         campusInvocations.add({'method': method, 'params': methodParams});
 
-        if (method == 'agent.query') {
+        if (method == 'agent.settings.get') {
+          return 'null';
+        } else if (method == 'agent.query') {
           return jsonEncode({
             'account_id': accountId ?? '',
             'query': methodParams['query'] ?? '',
@@ -224,15 +226,20 @@ void main() {
       await controller.initialize();
     });
 
+    Future<void> openLocal(WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(home: AgentPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('本地检索与配对'));
+      await tester.pumpAndSettle();
+    }
+
     testWidgets(
       'Initial view renders concise UI, account bar, and MCP is OFF by default',
       (tester) async {
-        await tester.pumpWidget(
-          MaterialApp(home: AgentPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
+        await openLocal(tester);
 
-        expect(find.text('校园助手'), findsOneWidget);
         expect(find.text('当前账号：user_001'), findsOneWidget);
         expect(find.text('外部 AI 助手连接'), findsOneWidget);
         expect(find.text('已停止 (未监听端口)'), findsOneWidget);
@@ -262,10 +269,7 @@ void main() {
           },
         );
 
-        await tester.pumpWidget(
-          MaterialApp(home: AgentPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
+        await openLocal(tester);
 
         // Tap Switch to enable MCP
         final switchFinder = find.byType(Switch);
@@ -315,10 +319,7 @@ void main() {
     testWidgets(
       'Local Ask query renders evidence-based answer with readable source excerpt',
       (tester) async {
-        await tester.pumpWidget(
-          MaterialApp(home: AgentPage(controller: controller)),
-        );
-        await tester.pumpAndSettle();
+        await openLocal(tester);
 
         // Enter question
         final inputFinder = find.byType(TextField);
@@ -348,10 +349,7 @@ void main() {
     testWidgets('Local Search mode renders typed hit cards with snippets', (
       tester,
     ) async {
-      await tester.pumpWidget(
-        MaterialApp(home: AgentPage(controller: controller)),
-      );
-      await tester.pumpAndSettle();
+      await openLocal(tester);
 
       // Switch to search mode
       await tester.tap(find.text('数据检索'));

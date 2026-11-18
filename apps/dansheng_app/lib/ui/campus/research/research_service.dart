@@ -2,6 +2,7 @@
 
 import 'package:flutter/foundation.dart';
 
+import '../campus_api.dart';
 import 'research_models.dart';
 
 /// Service providing Fudan University research news, research groups (课题组),
@@ -9,6 +10,13 @@ import 'research_models.dart';
 class ResearchService extends ChangeNotifier {
   static final ResearchService instance = ResearchService._();
   ResearchService._();
+
+  CampusApi? _api;
+
+  /// Bind or unbind the authenticated campus API port from the host session.
+  void bindApi(CampusApi? api) {
+    _api = api;
+  }
 
   // In-memory persistent states
   final Set<String> _followedGroupIds = {'rg_nlp', 'rg_brain', 'rg_chip'};
@@ -1372,6 +1380,59 @@ class ResearchService extends ChangeNotifier {
     String? query,
     bool? bookmarkedOnly,
   }) async {
+    if (_api != null) {
+      try {
+        final params = <String, dynamic>{
+          'page': 1,
+          'page_size': 50,
+          if (query != null && query.trim().isNotEmpty)
+            'code_or_name': query.trim(),
+        };
+        final res = await _api!.call('fudan.fdurop.topics', params);
+        if (res is List && res.isNotEmpty) {
+          final liveList = res
+              .map(
+                (e) => FduropProjectItem.fromLiveJson(
+                  Map<String, dynamic>.from(e as Map),
+                  isBookmarked: _bookmarkedFduropProjectIds.contains(
+                    e['id']?.toString(),
+                  ),
+                ),
+              )
+              .toList();
+
+          return liveList.where((item) {
+            if (bookmarkedOnly == true && !item.isBookmarked) return false;
+            if (program != null && program != '全部') {
+              final matchProgram =
+                  item.program.contains(program) ||
+                  item.topicLabels.any((l) => l.contains(program)) ||
+                  item.subjectKinds.any((s) => s.contains(program));
+              if (!matchProgram) return false;
+            }
+            if (department != null &&
+                department != '全部' &&
+                !item.department.contains(department)) {
+              return false;
+            }
+            if (query != null && query.trim().isNotEmpty) {
+              final q = query.trim().toLowerCase();
+              final matchTitle = item.title.toLowerCase().contains(q);
+              final matchAdvisor = item.advisor.toLowerCase().contains(q);
+              final matchDept = item.department.toLowerCase().contains(q);
+              final matchDesc = item.description.toLowerCase().contains(q);
+              if (!matchTitle && !matchAdvisor && !matchDept && !matchDesc) {
+                return false;
+              }
+            }
+            return true;
+          }).toList();
+        }
+      } catch (_) {
+        // Fallback to static mock on error / unauthenticated
+      }
+    }
+
     return _initialFduropProjects
         .map((project) {
           return project.copyWith(
@@ -1403,6 +1464,26 @@ class ResearchService extends ChangeNotifier {
           return true;
         })
         .toList();
+  }
+
+  /// Get detailed profile of an FDUROP topic including tutor and lab details.
+  Future<FduropProjectItem?> getFduropProjectDetail(String id) async {
+    if (_api != null) {
+      try {
+        final res = await _api!.call('fudan.fdurop.topic.detail', {'id': id});
+        if (res is Map) {
+          return FduropProjectItem.fromLiveJson(
+            Map<String, dynamic>.from(res),
+            isBookmarked: _bookmarkedFduropProjectIds.contains(id),
+          );
+        }
+      } catch (_) {
+        // Fallback
+      }
+    }
+    final list = await getFduropProjects();
+    final matches = list.where((p) => p.id == id);
+    return matches.isNotEmpty ? matches.first : null;
   }
 
   /// Get FDUROP downloadable documents.

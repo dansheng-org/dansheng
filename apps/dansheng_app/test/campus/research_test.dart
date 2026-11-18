@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import 'package:dansheng_app/ui/campus/campus_api.dart';
+import 'package:dansheng_app/ui/campus/research/research_models.dart';
 import 'package:dansheng_app/ui/campus/research/research_page.dart';
 import 'package:dansheng_app/ui/campus/research/research_service.dart';
 import 'package:dansheng_app/ui/core/dansheng_client.dart';
@@ -111,6 +113,100 @@ void main() {
       expect(service.isFduropDocumentDownloaded(docId), isFalse);
       await service.downloadFduropDocument(docId);
       expect(service.isFduropDocumentDownloaded(docId), isTrue);
+    });
+
+    test('FduropProjectItem.fromLiveJson correctly parses backend payload', () {
+      final json = {
+        'id': 'urop_123',
+        'title': '基于Rust的高性能校园内核开发',
+        'teacher_name': '张老师',
+        'teacher_code': '009988',
+        'department_name': '计算机科学技术学院',
+        'brief': '设计微内核与沙箱网络',
+        'requirement': '熟练掌握 Rust / C++',
+        'tutor_email': 'zhang@fudan.edu.cn',
+        'tutor_mobile': '13800000000',
+        'tutor_introduce': '系统软件专家',
+        'lab_introduce': '系统与安全实验室',
+        'subject_kinds': ['计算机科学与技术'],
+        'topic_labels': ['望道项目'],
+      };
+      final item = FduropProjectItem.fromLiveJson(json, isBookmarked: true);
+      expect(item.id, 'urop_123');
+      expect(item.title, '基于Rust的高性能校园内核开发');
+      expect(item.advisor, '张老师');
+      expect(item.advisorTitle, '教师编号: 009988');
+      expect(item.department, '计算机科学技术学院');
+      expect(item.description, '设计微内核与沙箱网络');
+      expect(item.requirements, '熟练掌握 Rust / C++');
+      expect(item.contactEmail, 'zhang@fudan.edu.cn');
+      expect(item.tutorMobile, '13800000000');
+      expect(item.tutorIntroduce, '系统软件专家');
+      expect(item.labIntroduce, '系统与安全实验室');
+      expect(item.program, '望道项目');
+      expect(item.isBookmarked, isTrue);
+    });
+
+    test('Live FDUROP queries topics and detail via CampusApi', () async {
+      final bridge = MockDanshengBridge();
+      bridge.campusHandler = (method, params) async {
+        if (method == 'fudan.fdurop.topics') {
+          return [
+            {
+              'id': 'live_fdurop_101',
+              'title': '基于大语言模型的软件工程自动化测试用例生成',
+              'teacher_name': '彭鑫',
+              'teacher_code': '001234',
+              'department_name': '计算机科学技术学院',
+              'brief': '研究利用大模型提高复杂系统自动化测试的覆盖率与缺陷检出率。',
+              'requirement': '熟练掌握 Python 或 Java，熟悉软件工程与大语言模型微调。',
+              'tutor_email': 'pengxin@fudan.edu.cn',
+              'tutor_mobile': '021-31242255',
+              'tutor_introduce': '复旦大学计算机科学技术学院教授、博士生导师、副院长。',
+              'lab_introduce': '复旦大学软件工程实验室 CodeWisdom 团队。',
+              'subject_kinds': ['计算机科学与技术', '软件工程'],
+              'topic_labels': ['望道项目', '重点项目'],
+            },
+          ];
+        } else if (method == 'fudan.fdurop.topic.detail') {
+          return {
+            'id': params['id'] ?? 'live_fdurop_101',
+            'title': '基于大语言模型的软件工程自动化测试用例生成',
+            'teacher_name': '彭鑫',
+            'teacher_code': '001234',
+            'department_name': '计算机科学技术学院',
+            'brief': '研究利用大模型提高复杂系统自动化测试的覆盖率与缺陷检出率。',
+            'requirement': '熟练掌握 Python 或 Java，熟悉软件工程与大语言模型微调。',
+            'tutor_email': 'pengxin@fudan.edu.cn',
+            'tutor_mobile': '021-31242255',
+            'tutor_introduce': '复旦大学计算机科学技术学院教授、博士生导师、副院长。',
+            'lab_introduce': '复旦大学软件工程实验室 CodeWisdom 团队。',
+            'subject_kinds': ['计算机科学与技术', '软件工程'],
+            'topic_labels': ['望道项目', '重点项目'],
+          };
+        }
+        return <String, dynamic>{};
+      };
+
+      final client = DanshengClient(bridge: bridge);
+      final controller = DanshengController(client: client);
+      await controller.initialize();
+
+      service.bindApi(CampusApi.forAccount(controller));
+
+      final liveProjects = await service.getFduropProjects();
+      expect(liveProjects.length, 1);
+      expect(liveProjects.first.title, contains('大语言模型'));
+
+      final detail = await service.getFduropProjectDetail('live_fdurop_101');
+      expect(detail, isNotNull);
+      expect(detail!.advisor, '彭鑫');
+      expect(detail.tutorIntroduce, contains('副院长'));
+      expect(detail.tutorMobile, '021-31242255');
+      expect(detail.labIntroduce, contains('CodeWisdom'));
+
+      // Reset
+      service.bindApi(null);
     });
   });
 
@@ -363,6 +459,100 @@ void main() {
         final bookmarkBtn = find.byIcon(Icons.bookmark).first;
         await tester.tap(bookmarkBtn);
         await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'Live FDUROP topics and project detail sheet renders tutor biography and lab introduction',
+      (tester) async {
+        bridge.campusHandler = (method, params) async {
+          if (method == 'fudan.fdurop.topics') {
+            return [
+              {
+                'id': 'live_urop_test',
+                'title': '分布式智能网联车协同感知与边缘决策',
+                'teacher_name': '陈老师',
+                'teacher_code': '007788',
+                'department_name': '计算机科学技术学院',
+                'brief': '边缘协同多传感器多模态融合感知与实时路径决策。',
+                'requirement': '熟悉 Linux / ROS、C++ 及计算机视觉基础。',
+                'tutor_email': 'chen_lab@fudan.edu.cn',
+                'tutor_mobile': '13912345678',
+                'tutor_introduce': '教育部青年学者，主要从事车联网与边缘计算研究。',
+                'lab_introduce': '智能网联边缘计算联合实验室（iConnect Lab）。',
+                'subject_kinds': ['计算机科学与技术'],
+                'topic_labels': ['登峰项目', '自动驾驶'],
+              },
+            ];
+          } else if (method == 'fudan.fdurop.topic.detail') {
+            return {
+              'id': 'live_urop_test',
+              'title': '分布式智能网联车协同感知与边缘决策',
+              'teacher_name': '陈老师',
+              'teacher_code': '007788',
+              'department_name': '计算机科学技术学院',
+              'brief': '边缘协同多传感器多模态融合感知与实时路径决策。',
+              'requirement': '熟悉 Linux / ROS、C++ 及计算机视觉基础。',
+              'tutor_email': 'chen_lab@fudan.edu.cn',
+              'tutor_mobile': '13912345678',
+              'tutor_introduce': '教育部青年学者，主要从事车联网与边缘计算研究。',
+              'lab_introduce': '智能网联边缘计算联合实验室（iConnect Lab）。',
+              'subject_kinds': ['计算机科学与技术'],
+              'topic_labels': ['登峰项目', '自动驾驶'],
+            };
+          }
+          return <String, dynamic>{};
+        };
+
+        await tester.pumpWidget(
+          buildTestApp(
+            home: ResearchPage(controller: controller),
+            controller: controller,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Switch to FDUROP tab
+        await tester.tap(find.text('本科生科研 (FDUROP)'));
+        await tester.pumpAndSettle();
+
+        // Verify live project appears
+        expect(find.text('开放课题 (1)'), findsOneWidget);
+        expect(find.textContaining('分布式智能网联车协同感知'), findsOneWidget);
+
+        // Tap live project to open detail sheet
+        await tester.tap(find.textContaining('分布式智能网联车协同感知'));
+        await tester.pumpAndSettle();
+
+        // Verify detail sheet shows live fields
+        final sheetScrollable = find.byType(Scrollable).last;
+        await tester.scrollUntilVisible(
+          find.textContaining('教育部青年学者'),
+          200,
+          scrollable: sheetScrollable,
+        );
+        expect(find.text('指导教师简介'), findsOneWidget);
+        expect(find.textContaining('教育部青年学者'), findsOneWidget);
+
+        await tester.scrollUntilVisible(
+          find.textContaining('智能网联边缘计算联合实验室'),
+          200,
+          scrollable: sheetScrollable,
+        );
+        expect(find.text('课题组与实验室介绍'), findsOneWidget);
+        expect(find.textContaining('智能网联边缘计算联合实验室'), findsOneWidget);
+
+        await tester.scrollUntilVisible(
+          find.text('13912345678'),
+          200,
+          scrollable: sheetScrollable,
+        );
+        expect(find.text('导师联系电话'), findsOneWidget);
+        expect(find.text('13912345678'), findsOneWidget);
+        expect(find.text('登峰项目'), findsWidgets);
+
+        // Reset
+        ResearchService.instance.bindApi(null);
       },
     );
   });

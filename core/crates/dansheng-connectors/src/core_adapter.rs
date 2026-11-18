@@ -170,9 +170,12 @@ async fn uis_sign_in(
     #[cfg(not(feature = "webvpn"))]
     let session = direct_result.map_err(fail)?;
 
-    context
-        .network
-        .set_session(account, &session.origin, None, session.cookies)?;
+    context.network.set_session(
+        account,
+        &session.origin,
+        session.token.clone(),
+        session.cookies,
+    )?;
     #[cfg(feature = "webvpn")]
     if target == crate::login::LoginTarget::WebVpn
         || context
@@ -695,6 +698,10 @@ impl CoreService for CampusService {
         let mut methods = vec![
             ("fudan.semesters", "fudan.academic.read"),
             ("fudan.postgraduate.semester", "fudan.catalog.read"),
+            ("fudan.fdurop.topics", "fudan.academic.read"),
+            ("fudan.fdurop.topic.detail", "fudan.academic.read"),
+            #[cfg(feature = "login")]
+            ("fudan.fdurop.login", "fudan.academic.login"),
             ("fudan.timetable.sync", "fudan.academic.read"),
             ("fudan.postgraduate.sync", "fudan.academic.read"),
             ("fudan.student_association", "fudan.academic.read"),
@@ -1133,6 +1140,7 @@ impl CoreService for CampusService {
                 | "fudan.ecard.session"
                 | "fudan.academic.login"
                 | "fudan.life.login"
+                | "fudan.fdurop.login"
         ) {
             // A local trusted host can establish a card session. This is never a
             // plugin action or a scheduled job, and no credentials leave the service.
@@ -1163,6 +1171,8 @@ impl CoreService for CampusService {
                     Some("postgraduate") => crate::login::LoginTarget::Postgraduate,
                     _ => return Err(CoreError::invalid("unknown academic service")),
                 }
+            } else if method == "fudan.fdurop.login" {
+                crate::login::LoginTarget::Fdurop
             } else {
                 crate::login::LoginTarget::Ecard
             };
@@ -2163,6 +2173,54 @@ impl CoreService for CampusService {
                 )?,
                 "fudan.qr.status" => {
                     serde_json::to_value(client.qr_state(&source).await.map_err(campus_error)?)?
+                }
+                "fudan.fdurop.topics" => {
+                    let transport = BoundTransport {
+                        account,
+                        store: context.store,
+                        source_capability: capability,
+                        credential_lease: Default::default(),
+                        network: context.network,
+                        platform: context.platform,
+                        principal,
+                        grant: &io_grant,
+                    };
+                    let fdurop_client = crate::fdurop::FduropClient::new(&transport, account);
+                    let query = crate::fdurop::FduropSearchQuery {
+                        page: params["page"].as_u64().unwrap_or(1) as u32,
+                        page_size: params["page_size"].as_u64().unwrap_or(20) as u32,
+                        title: params["title"].as_str().map(str::to_string),
+                        code_or_name: params["code_or_name"]
+                            .as_str()
+                            .or_else(|| params["keyword"].as_str())
+                            .map(str::to_string),
+                        subject_kind_id: params["subject_kind_id"].as_str().map(str::to_string),
+                        topic_label_id: params["topic_label_id"].as_str().map(str::to_string),
+                        department_id: params["department_id"].as_str().map(str::to_string),
+                    };
+                    serde_json::to_value(
+                        fdurop_client
+                            .search_open_topics(&query)
+                            .await
+                            .map_err(source_error)?,
+                    )?
+                }
+                "fudan.fdurop.topic.detail" => {
+                    let transport = BoundTransport {
+                        account,
+                        store: context.store,
+                        source_capability: capability,
+                        credential_lease: Default::default(),
+                        network: context.network,
+                        platform: context.platform,
+                        principal,
+                        grant: &io_grant,
+                    };
+                    let fdurop_client = crate::fdurop::FduropClient::new(&transport, account);
+                    let id = required_string(&params, "id")?;
+                    serde_json::to_value(
+                        fdurop_client.topic_detail(id).await.map_err(source_error)?,
+                    )?
                 }
                 _ => return Err(CoreError::new("MethodNotFound", "unknown campus query")),
             };

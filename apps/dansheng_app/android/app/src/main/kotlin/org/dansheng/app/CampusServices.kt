@@ -22,6 +22,8 @@ internal class CampusServices(
     private val createDocument:suspend (String,String)->android.net.Uri,
 ) {
     private val venues=CampusVenueHost(activity,rt,sheet)
+    private val agentHistory=AgentHistoryStore(rt.vault)
+    private val agentCourseFiles=AgentCourseFiles()
     private val reads=setOf(
         "fudan.ecard.statement","fudan.ecard.statistics","fudan.electricity.statistics",
         "fudan.rooms","fudan.electricity","fudan.electricity.history","fudan.ecard.transactions","fudan.library.occupancy","fudan.dining.occupancy","fudan.bus","fudan.notices",
@@ -30,6 +32,7 @@ internal class CampusServices(
         "canvas.quizzes.sync","canvas.quiz.read","canvas.discussions.sync","canvas.discussion.read","canvas.discussion.view",
         "canvas.assignment_groups.sync","canvas.submission.self","canvas.grades.self","fudan.catalog.syllabus",
         "fudan.cloud.roots","fudan.cloud.list","fudan.notice.attachments","webdav.servers","webdav.list",
+        "fudan.fdurop.topics","fudan.fdurop.topic.detail",
         "community.tea.divisions","community.tea.holes","community.tea.hole","community.tea.floors","community.tea.favorites","community.danke.search","community.danke.group","community.danke.reviews","community.danke.random",
     )
     /** Drive writes: run exactly once after a UI action, never cached or retried. */
@@ -58,6 +61,49 @@ internal class CampusServices(
             val text=BoardLayoutStore.validate(supplied.optJSONObject("layout"))
             check(rt.prefs.edit().putString(BoardLayoutStore.KEY,text).commit())
             return JSONObject().put("saved",true)
+        }
+        if(method.startsWith("agent.settings."))return AgentModelSettings.call(rt.vault,method,supplied)
+        if(method.startsWith("agent.history.") || method.startsWith("agent.approvals."))return synchronized(rt.authGuard) {
+            val account=rt.account()
+            requireAgentAccount(account,supplied)
+            if(method.startsWith("agent.history."))agentHistory.call(account,method,supplied)
+            else AgentApprovalStore.call(rt.vault,account,method,supplied)
+        }
+        if(method=="agent.attachment.pick")return AgentAttachmentPicker.read(activity.contentResolver,pickDocument())
+        if(method=="agent.courseFile.read" || method=="agent.courseFile.clear"){
+            val (account,epoch)=synchronized(rt.authGuard) {
+                val active=rt.account() ?: throw PortError("AccountRequired")
+                requireAgentAccount(active,supplied)
+                active to rt.accountEpoch
+            }
+            val checkAccount={checked(account,epoch)}
+            return if(method=="agent.courseFile.read") {
+                agentCourseFiles.read(account,supplied,checkAccount,
+                    { name,params -> read(name,params,account,epoch) },rt::request)
+            } else {
+                agentCourseFiles.clear(account,checkAccount) { name,params ->
+                    synchronized(rt.authGuard) {
+                        checked(account,epoch)
+                        rt.request(name,params)
+                    }
+                }
+            }
+        }
+        if(method=="agent.web.open"){
+            val url=supplied.optString("url")
+            val uri=android.net.Uri.parse(url)
+            if(url.length !in 1..2048 || uri.scheme!="https" || uri.host.isNullOrBlank() ||
+                uri.userInfo!=null || (uri.port!=-1 && uri.port !in 1..65535))throw PortError("UntrustedOrigin")
+            withContext(Dispatchers.Main) {
+                try { activity.startActivity(Intent(Intent.ACTION_VIEW,uri).addCategory(Intent.CATEGORY_BROWSABLE)) }
+                catch(_:android.content.ActivityNotFoundException){throw PortError("ViewerUnavailable")}
+            }
+            return JSONObject().put("opened",true)
+        }
+        if(method.startsWith("agent.mcp."))return synchronized(rt.authGuard) {
+            if(supplied.has("account_id") && supplied.optString("account_id")!=rt.account())
+                throw PortError("AccountMismatch")
+            CampusAgent.call(rt,method.removePrefix("agent."),supplied)
         }
         if(method.startsWith("agent."))return CampusAgent.call(rt,method.removePrefix("agent."),supplied)
         val (account,epoch)=synchronized(rt.authGuard) {
@@ -209,6 +255,7 @@ internal class CampusServices(
                 method.startsWith("webdav.") && p.optString("id").matches(Regex("[0-9a-f]{12}")) -> "webdav:"+p.getString("id")
                 method.startsWith("community.") -> "forum"
                 method.startsWith("fudan.ecard.") -> "ecard"
+                method.startsWith("fudan.fdurop.") -> "fdurop"
                 method=="fudan.electricity" -> "power"
                 method=="fudan.dining.occupancy" || method=="fudan.electricity.history" || method=="fudan.electricity.statistics" -> "dining"
                 method=="fudan.bus" -> "bus"

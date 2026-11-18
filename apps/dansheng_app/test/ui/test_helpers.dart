@@ -155,6 +155,8 @@ class MockDanshengBridge implements DanshengBridge {
       case 'canvas.folders':
       case 'canvas.files':
         return [];
+      case 'agent.settings.get':
+        return null;
       case 'agent.query':
         return {'hits': []};
       case 'agent.ask':

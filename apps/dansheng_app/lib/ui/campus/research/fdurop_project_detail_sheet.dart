@@ -33,6 +33,7 @@ class _FduropProjectDetailView extends StatefulWidget {
 class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
   late FduropProjectItem _project;
   final ResearchService _service = ResearchService.instance;
+  bool _isLoadingDetail = false;
 
   @override
   void initState() {
@@ -42,6 +43,28 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
         widget.initialProject.id,
       ),
     );
+    _loadDetail();
+  }
+
+  Future<void> _loadDetail() async {
+    if (_project.id.isEmpty) return;
+    setState(() => _isLoadingDetail = true);
+    try {
+      final detail = await _service.getFduropProjectDetail(_project.id);
+      if (detail != null && mounted) {
+        setState(() {
+          _project = detail.copyWith(
+            isBookmarked: _service.isFduropProjectBookmarked(detail.id),
+          );
+        });
+      }
+    } catch (_) {
+      // Keep initial project info
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingDetail = false);
+      }
+    }
   }
 
   void _toggleBookmark() {
@@ -60,11 +83,36 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
   }
 
   Future<void> _copyContact() async {
+    if (_project.contactEmail.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('暂无公开导师邮箱，可前往平台查询或直接联系院系'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
     await Clipboard.setData(ClipboardData(text: _project.contactEmail));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('已复制导师邮箱：${_project.contactEmail}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _copyPhone() async {
+    final phone = _project.tutorMobile;
+    if (phone == null || phone.trim().isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: phone));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已复制导师电话：$phone'),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -98,6 +146,10 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
           controller: scrollController,
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
+            if (_isLoadingDetail) ...[
+              const LinearProgressIndicator(minHeight: 2),
+              const SizedBox(height: 8),
+            ],
             // Header: Program & Status
             Row(
               children: [
@@ -165,6 +217,58 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
             ),
             const SizedBox(height: 12),
 
+            // Topic Labels & Subject Kinds tags if present
+            if (_project.topicLabels.isNotEmpty ||
+                _project.subjectKinds.isNotEmpty) ...[
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  ..._project.topicLabels.map(
+                    (tag) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primaryContainer.withAlpha(120),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        tag,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colorScheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                  ..._project.subjectKinds.map(
+                    (sub) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.tertiaryContainer.withAlpha(120),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        sub,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colorScheme.onTertiaryContainer,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
+
             // Mentor & Dept badges
             Wrap(
               spacing: 8,
@@ -228,7 +332,7 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
             ),
             const SizedBox(height: 8),
             Text(
-              _project.description,
+              _project.description.isNotEmpty ? _project.description : '暂无详细描述',
               style: theme.textTheme.bodyMedium?.copyWith(height: 1.55),
             ),
             const SizedBox(height: 18),
@@ -242,10 +346,46 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
             ),
             const SizedBox(height: 8),
             Text(
-              _project.requirements,
+              _project.requirements.isNotEmpty
+                  ? _project.requirements
+                  : '暂无特殊先修要求',
               style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 18),
+
+            // Tutor Introduce (if present)
+            if (_project.tutorIntroduce != null &&
+                _project.tutorIntroduce!.trim().isNotEmpty) ...[
+              Text(
+                '指导教师简介',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _project.tutorIntroduce!,
+                style: theme.textTheme.bodyMedium?.copyWith(height: 1.55),
+              ),
+              const SizedBox(height: 18),
+            ],
+
+            // Lab Introduce (if present)
+            if (_project.labIntroduce != null &&
+                _project.labIntroduce!.trim().isNotEmpty) ...[
+              Text(
+                '课题组与实验室介绍',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _project.labIntroduce!,
+                style: theme.textTheme.bodyMedium?.copyWith(height: 1.55),
+              ),
+              const SizedBox(height: 18),
+            ],
 
             // FDUROP Teacher Open Topic Portal Card
             Card(
@@ -301,17 +441,31 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
             const SizedBox(height: 16),
 
             // Contact & Action
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.email_outlined),
-              title: const Text('导师联系邮箱'),
-              subtitle: Text(_project.contactEmail),
-              trailing: IconButton(
-                icon: const Icon(Icons.copy),
-                tooltip: '复制邮箱',
-                onPressed: _copyContact,
+            if (_project.tutorMobile != null &&
+                _project.tutorMobile!.trim().isNotEmpty)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.phone_outlined),
+                title: const Text('导师联系电话'),
+                subtitle: Text(_project.tutorMobile!),
+                trailing: IconButton(
+                  icon: const Icon(Icons.copy),
+                  tooltip: '复制电话',
+                  onPressed: _copyPhone,
+                ),
               ),
-            ),
+            if (_project.contactEmail.isNotEmpty)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.email_outlined),
+                title: const Text('导师联系邮箱'),
+                subtitle: Text(_project.contactEmail),
+                trailing: IconButton(
+                  icon: const Icon(Icons.copy),
+                  tooltip: '复制邮箱',
+                  onPressed: _copyContact,
+                ),
+              ),
             const SizedBox(height: 8),
             Row(
               children: [

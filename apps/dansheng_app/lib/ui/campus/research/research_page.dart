@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/dansheng_state.dart';
 import '../../widgets/campus_account_actions.dart';
+import '../campus_api.dart';
 import 'fdurop_notice_detail_sheet.dart';
 import 'fdurop_project_detail_sheet.dart';
 import 'research_group_detail_sheet.dart';
@@ -65,6 +66,7 @@ class _ResearchPageState extends State<ResearchPage>
   @override
   void initState() {
     super.initState();
+    _service.bindApi(CampusApi.forAccount(widget.controller));
     _tabController = TabController(length: 4, vsync: this);
     _service.addListener(_onServiceChanged);
     _loadData();

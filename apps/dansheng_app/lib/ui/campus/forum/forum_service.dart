@@ -15,7 +15,7 @@ class ForumService {
     final response = cached
         ? await api.call('campus.cached', {'method': 'community.tea.divisions'})
         : await api.call('community.tea.divisions');
-    return _extractList(response)
+    return forumRowsOf(response)
         .map((item) => TeaDivision.fromJson(item))
         .toList();
   }
@@ -49,9 +49,7 @@ class ForumService {
     }
 
     final response = await api.call('community.tea.holes', params);
-    return _extractList(response)
-        .map((item) => TeaHole.fromJson(item))
-        .toList();
+    return forumRowsOf(response).map((item) => TeaHole.fromJson(item)).toList();
   }
 
   /// Fetch single hole by ID.
@@ -65,7 +63,7 @@ class ForumService {
   /// The account's favourite holes as the forum keeps them.
   Future<List<TeaHole>> fetchFavorites() async {
     final response = await api.call('community.tea.favorites');
-    return _extractList(response).map(TeaHole.fromJson).toList();
+    return forumRowsOf(response).map(TeaHole.fromJson).toList();
   }
 
   /// Stars or unstars a hole on the forum account.
@@ -86,7 +84,7 @@ class ForumService {
       'size': size,
       'page_size': size,
     });
-    return _extractList(response)
+    return forumRowsOf(response)
         .map((item) => TeaFloor.fromJson(item))
         .toList();
   }
@@ -102,7 +100,7 @@ class ForumService {
       'offset': offset,
       'size': size,
     });
-    return _extractList(response)
+    return forumRowsOf(response)
         .map((item) => ForumSearchResult.fromJson(item))
         .toList();
   }
@@ -286,40 +284,6 @@ class ForumService {
     if (val is num) return val.toInt();
     if (val is String) return int.tryParse(val);
     return null;
-  }
-
-  /// Helper to unpack a list from either a direct List or a SourceBatch map.
-  List<Map<String, dynamic>> _extractList(dynamic res) {
-    if (res is List) {
-      return res.whereType<Map<String, dynamic>>().toList();
-    }
-    if (res is Map) {
-      if (res['records'] is List) {
-        final list = <Map<String, dynamic>>[];
-        for (final item in res['records'] as List) {
-          if (item is Map) {
-            final payload = item['payload'];
-            if (payload is Map<String, dynamic>) {
-              list.add(payload);
-            } else if (item is Map<String, dynamic>) {
-              list.add(item);
-            }
-          }
-        }
-        return list;
-      }
-      if (res['items'] is List) {
-        return (res['items'] as List)
-            .whereType<Map<String, dynamic>>()
-            .toList();
-      }
-      if (res['results'] is List) {
-        return (res['results'] as List)
-            .whereType<Map<String, dynamic>>()
-            .toList();
-      }
-    }
-    return <Map<String, dynamic>>[];
   }
 
   /// Helper to unpack a map from either a direct Map or a SourceRecord map.

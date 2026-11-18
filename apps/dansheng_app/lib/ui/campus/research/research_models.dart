@@ -246,6 +246,11 @@ class FduropProjectItem {
   final String contactEmail; // 联系邮箱
   final String portalUrl; // 教师开放课题系统网址
   final bool isBookmarked; // 是否已收藏
+  final String? tutorMobile; // 导师联系电话
+  final String? tutorIntroduce; // 导师简介与成果
+  final String? labIntroduce; // 实验室简介 / 主页链接
+  final List<String> subjectKinds; // 学科门类
+  final List<String> topicLabels; // 课题标签
 
   const FduropProjectItem({
     required this.id,
@@ -264,7 +269,59 @@ class FduropProjectItem {
     required this.contactEmail,
     this.portalUrl = 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
     this.isBookmarked = false,
+    this.tutorMobile,
+    this.tutorIntroduce,
+    this.labIntroduce,
+    this.subjectKinds = const [],
+    this.topicLabels = const [],
   });
+
+  factory FduropProjectItem.fromLiveJson(
+    Map<String, dynamic> json, {
+    bool isBookmarked = false,
+  }) {
+    final labels =
+        (json['topic_labels'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const <String>[];
+    final subjects =
+        (json['subject_kinds'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const <String>[];
+    final programName = labels.isNotEmpty
+        ? labels.join(' / ')
+        : (subjects.isNotEmpty ? subjects.join(' / ') : '开放课题');
+
+    return FduropProjectItem(
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      program: programName,
+      advisor: json['teacher_name']?.toString() ?? '',
+      advisorTitle:
+          json['teacher_code'] != null &&
+              json['teacher_code'].toString().isNotEmpty
+          ? '教师编号: ${json['teacher_code']}'
+          : '指导教师',
+      department: json['department_name']?.toString() ?? '复旦大学',
+      campus: '复旦大学',
+      targetGrade: subjects.isNotEmpty ? subjects.join('、') : '本科各年级相关专业',
+      quota: 1,
+      deadline: '长期开放 / 本学期招募',
+      status: '招募中',
+      description: json['brief']?.toString() ?? '',
+      requirements: json['requirement']?.toString() ?? '',
+      contactEmail: json['tutor_email']?.toString() ?? '',
+      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
+      isBookmarked: isBookmarked,
+      tutorMobile: json['tutor_mobile']?.toString(),
+      tutorIntroduce: json['tutor_introduce']?.toString(),
+      labIntroduce: json['lab_introduce']?.toString(),
+      subjectKinds: subjects,
+      topicLabels: labels,
+    );
+  }
 
   FduropProjectItem copyWith({
     String? id,
@@ -283,6 +340,11 @@ class FduropProjectItem {
     String? contactEmail,
     String? portalUrl,
     bool? isBookmarked,
+    String? tutorMobile,
+    String? tutorIntroduce,
+    String? labIntroduce,
+    List<String>? subjectKinds,
+    List<String>? topicLabels,
   }) {
     return FduropProjectItem(
       id: id ?? this.id,
@@ -301,6 +363,11 @@ class FduropProjectItem {
       contactEmail: contactEmail ?? this.contactEmail,
       portalUrl: portalUrl ?? this.portalUrl,
       isBookmarked: isBookmarked ?? this.isBookmarked,
+      tutorMobile: tutorMobile ?? this.tutorMobile,
+      tutorIntroduce: tutorIntroduce ?? this.tutorIntroduce,
+      labIntroduce: labIntroduce ?? this.labIntroduce,
+      subjectKinds: subjectKinds ?? this.subjectKinds,
+      topicLabels: topicLabels ?? this.topicLabels,
     );
   }
 }
