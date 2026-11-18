@@ -47,6 +47,11 @@ jobs:
           source "$DANSHENG_CI_ROOT/runner-env.sh"
           pwsh -NoLogo -NoProfile -File ../../scripts/ci/Test-WorkspaceScripts.ps1
           python ./scripts/tests/audit-paths.test.py
+      - name: Keep only this job's latest runtime and clean build outputs
+        if: always()
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE
   flutter:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, 1402ubuntu]
@@ -90,6 +95,11 @@ jobs:
         run: |
           dart run pigeon --input pigeons/dansheng.dart
           git diff --exit-code -- lib/bridge.g.dart android/app/src/main/kotlin/org/dansheng/app/Bridge.g.kt
+      - name: Keep only this job's latest runtime and clean build outputs
+        if: always()
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE
   core:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     uses: ./.github/workflows/core-ci.yml
@@ -155,7 +165,8 @@ jobs:
             ${{ env.DANSHENG_TASK_RUNTIME }}/apk-audit.json
           if-no-files-found: error
           retention-days: 14
-      - name: Remove this job's Rust build outputs
+      - name: Keep only this job's latest runtime and clean build outputs
         if: always()
+        shell: pwsh
         working-directory: ${{ github.workspace }}
-        run: ./scripts/ci/Clear-BuildOutputs.ps1
+        run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE

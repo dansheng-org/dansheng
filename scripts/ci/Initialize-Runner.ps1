@@ -19,6 +19,7 @@ foreach ($directory in @($layout.runtime, $layout.cache)) {
     }
 }
 if (Test-Path -LiteralPath $layout.runtime) { throw 'CI runtime already exists; rerun with a new attempt.' }
+Clear-DanshengCiRuntimes $layout
 [void][IO.Directory]::CreateDirectory($layout.runtime)
 [IO.File]::WriteAllText((Join-Path $layout.runtime '.ci-owned'), $layout.identity)
 $env:DANSHENG_TASK_RUNTIME = $layout.runtime
@@ -36,7 +37,13 @@ $nativeTargetRoot = $null
 if ($Role -eq 'AndroidSource') {
     $nativeTargetRoot = Get-DanshengCiBuildCacheRoot $layout
     foreach ($name in @('cargo-arm64', 'cargo-x86')) { Limit-DanshengCiBuildCache (Join-Path $nativeTargetRoot $name) $buildCacheBudget }
+    # Stable CARGO_HOME beside them (prepare-native.ps1); unpacked sources accumulate.
+    Limit-DanshengCiBuildCache (Join-Path $nativeTargetRoot 'cargo-home') 4GB
 }
+# The lane/job dependency cache only ever gains files (RuntimeToCache never
+# prunes), so old Gradle/Pub/Cargo/npm versions pile up. Start it over past the
+# budget; Cargo and Pub are re-seeded below, Gradle downloads once.
+Limit-DanshengCiBuildCache $layout.cache 12GB
 $values = @{
     DANSHENG_CI_ROOT=$layout.root; DANSHENG_TASK_RUNTIME=$layout.runtime; DANSHENG_CI_CACHE_ROOT=$layout.cache
     DANSHENG_TASK_HOME=$taskHome

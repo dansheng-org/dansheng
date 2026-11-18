@@ -54,17 +54,102 @@ function Get-DanshengCiCargoTarget($Layout, [string]$Role) {
     Assert-CiPlainPath (Join-Path $Layout.runtime 'cargo-target')
 }
 
-# A kept build directory grows with every dependency and toolchain change;
-# start it over once it passes the budget instead of letting the disk fill.
+# Managed enumeration never descends into links (they are skipped, not followed)
+# and is far faster than a Get-ChildItem pipeline over 100k+ cache files.
+function New-CiTreeEnumeration {
+    $options = [IO.EnumerationOptions]::new()
+    $options.RecurseSubdirectories = $true
+    $options.IgnoreInaccessible = $true
+    $options.AttributesToSkip = [IO.FileAttributes]::ReparsePoint
+    $options
+}
+
+function Get-CiDirectoryBytes([string]$Path) {
+    [long]$bytes = 0
+    foreach ($file in [IO.DirectoryInfo]::new($Path).EnumerateFiles('*', (New-CiTreeEnumeration))) { $bytes += $file.Length }
+    $bytes
+}
+
+# Delete a CI-owned tree. Links inside it are removed, never followed, so data
+# outside the tree survives. Read-only entries (Windows attributes, Unix
+# directories without owner write) are made writable without following links.
+function Remove-CiTree([string]$Path) {
+    $full = Assert-CiPlainPath $Path
+    if (-not [IO.Directory]::Exists($full)) { return }
+    try { [IO.Directory]::Delete($full, $true); return }
+    catch [System.IO.DirectoryNotFoundException] { return }
+    catch { if (-not [IO.Directory]::Exists($full)) { return } }
+    if ($IsWindows) {
+        foreach ($entry in [IO.DirectoryInfo]::new($full).EnumerateFileSystemInfos('*', (New-CiTreeEnumeration))) {
+            if ($entry.Attributes -band [IO.FileAttributes]::ReadOnly) { $entry.Attributes = $entry.Attributes -band -bnot [IO.FileAttributes]::ReadOnly }
+        }
+    } else {
+        # GNU chmod -R does not follow symbolic links met during traversal.
+        & chmod -R u+rwX -- $full 2>$null
+    }
+    [IO.Directory]::Delete($full, $true)
+}
+
+# A kept build or dependency directory grows with every dependency and toolchain
+# change; start it over once it passes the budget instead of letting the disk fill.
 function Limit-DanshengCiBuildCache([string]$Path, [long]$MaxBytes) {
     $full = Assert-CiPlainPath $Path
-    if (-not (Test-Path -LiteralPath $full)) { return }
-    $bytes = (Get-ChildItem -LiteralPath $full -Recurse -File -Force -ErrorAction SilentlyContinue |
-        Measure-Object -Property Length -Sum).Sum
+    if (-not [IO.Directory]::Exists($full)) { return }
+    $bytes = Get-CiDirectoryBytes $full
     if ($bytes -gt $MaxBytes) {
-        Write-Host ("Kept build directory reached {0:N1} GiB; starting it over." -f ($bytes / 1GB))
-        Remove-Item -LiteralPath $full -Recurse -Force
+        Write-Host ("Kept directory {0} reached {1:N1} GiB; starting it over." -f [IO.Path]::GetFileName($full), ($bytes / 1GB))
+        Remove-CiTree $full
     }
+}
+
+# Retention: each job keeps only its most recently finished runtime (for
+# inspecting the last run). Clear-Runtime.ps1 marks its own runtime finished and
+# then removes the finished runtimes of the same job (-Superseded). A runner that
+# is killed, loses power or fails before exporting its runtime never marks it,
+# so initialization also removes unfinished runtimes untouched for longer than
+# any job may run (Actions caps jobs at 6 h). Running runtimes are never
+# finished-marked and are younger than the cutoff, so neither pass touches them.
+# Failures only warn: another runner may be removing the same directory.
+function Clear-DanshengCiRuntimes($Layout, [switch]$Superseded, [TimeSpan]$MaxAge = [TimeSpan]::FromHours(24)) {
+    $root = Assert-CiPlainPath (Join-Path $Layout.root 'runtime')
+    if (-not [IO.Directory]::Exists($root)) { return }
+    $cutoff = [DateTime]::UtcNow - $MaxAge
+    $link = [IO.FileAttributes]::ReparsePoint
+    $jobName = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($Layout.runtime))
+    function Test-Stale([IO.FileSystemInfo]$Item) { $Item.LastWriteTimeUtc -lt $cutoff }
+    function Test-Finished([IO.DirectoryInfo]$Item) {
+        $finished = [IO.FileInfo]::new((Join-Path $Item.FullName '.ci-finished'))
+        $finished.Exists -and -not ($finished.Attributes -band $link)
+    }
+    function Remove-EmptyDirectory([IO.DirectoryInfo]$Item) {
+        try { $Item.Refresh(); if (-not $Item.EnumerateFileSystemInfos().GetEnumerator().MoveNext()) { $Item.Delete() } } catch { }
+    }
+    $removed = 0
+    foreach ($run in [IO.DirectoryInfo]::new($root).GetDirectories()) {
+        if (($run.Attributes -band $link) -or $run.Name -notmatch '^\d+$') { continue }
+        foreach ($job in $run.GetDirectories()) {
+            if (($job.Attributes -band $link) -or $job.Name -notmatch '^[A-Za-z0-9_-]+$') { continue }
+            if ($Superseded -and $job.Name -cne $jobName) { continue }
+            foreach ($attempt in $job.GetDirectories()) {
+                if (($attempt.Attributes -band $link) -or $attempt.Name -notmatch '^\d+$') { continue }
+                if ($attempt.FullName -ceq $Layout.runtime) { continue }
+                if ($Superseded) {
+                    if (-not (Test-Finished $attempt)) { continue }
+                } else {
+                    if ((Test-Finished $attempt) -or -not (Test-Stale $attempt)) { continue }
+                    $marker = [IO.FileInfo]::new((Join-Path $attempt.FullName '.ci-owned'))
+                    if ($marker.Exists -and -not (Test-Stale $marker)) { continue }
+                }
+                try { Remove-CiTree $attempt.FullName; $removed++ }
+                catch { Write-Warning "CI runtime $($run.Name)/$($job.Name)/$($attempt.Name) was not removed: $($_.Exception.Message)" }
+            }
+            Remove-EmptyDirectory $job
+        }
+        # A new attempt of an old run could be creating its directories right now.
+        $run.Refresh(); if (Test-Stale $run) { Remove-EmptyDirectory $run }
+    }
+    $kind = if ($Superseded) { "superseded $jobName" } else { 'stale unfinished' }
+    if ($removed) { Write-Host "Removed $removed $kind CI runtime(s)." }
 }
 
 function Assert-DanshengCiRuntime($Layout) {
