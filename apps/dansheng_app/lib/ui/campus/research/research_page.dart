@@ -955,7 +955,9 @@ class _ResearchPageState extends State<ResearchPage>
           decoration: BoxDecoration(
             color: colorScheme.surfaceContainerHighest.withAlpha(150),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: colorScheme.outlineVariant.withAlpha(120)),
+            border: Border.all(
+              color: colorScheme.outlineVariant.withAlpha(120),
+            ),
           ),
           child: Row(
             children: [
@@ -1239,7 +1241,8 @@ class _ResearchPageState extends State<ResearchPage>
                 overflow: TextOverflow.ellipsis,
               ),
 
-              if (proj.subjectKinds.isNotEmpty || proj.topicLabels.isNotEmpty) ...[
+              if (proj.subjectKinds.isNotEmpty ||
+                  proj.topicLabels.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 4,

@@ -101,27 +101,27 @@ impl<'a> FduropClient<'a> {
 
         if let Some(keyword) = kw.filter(|_| !has_title && !has_code) {
             let mut title_q = query.clone();
-                title_q.keyword = None;
-                title_q.title = Some(keyword.to_string());
-                title_q.code_or_name = None;
+            title_q.keyword = None;
+            title_q.title = Some(keyword.to_string());
+            title_q.code_or_name = None;
 
-                let mut name_q = query.clone();
-                name_q.keyword = None;
-                name_q.title = None;
-                name_q.code_or_name = Some(keyword.to_string());
+            let mut name_q = query.clone();
+            name_q.keyword = None;
+            name_q.title = None;
+            name_q.code_or_name = Some(keyword.to_string());
 
-                let mut items = self.search_open_topics_single(&title_q).await?;
-                if let Ok(extra) = self.search_open_topics_single(&name_q).await {
-                    let mut seen: std::collections::HashSet<String> =
-                        items.iter().map(|i| i.id.clone()).collect();
-                    for item in extra {
-                        if seen.insert(item.id.clone()) {
-                            items.push(item);
-                        }
+            let mut items = self.search_open_topics_single(&title_q).await?;
+            if let Ok(extra) = self.search_open_topics_single(&name_q).await {
+                let mut seen: std::collections::HashSet<String> =
+                    items.iter().map(|i| i.id.clone()).collect();
+                for item in extra {
+                    if seen.insert(item.id.clone()) {
+                        items.push(item);
                     }
                 }
-                return Ok(items);
             }
+            return Ok(items);
+        }
 
         self.search_open_topics_single(query).await
     }

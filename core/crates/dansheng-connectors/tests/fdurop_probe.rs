@@ -264,7 +264,10 @@ async fn test_fdurop_login_and_query() {
 
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&search_text) {
         println!("pageInfo: {}", v["pageInfo"]);
-        if let Some(arr) = v["data"].as_array().or_else(|| v["data"]["dataList"].as_array()) {
+        if let Some(arr) = v["data"]
+            .as_array()
+            .or_else(|| v["data"]["dataList"].as_array())
+        {
             println!("Page 1 item count: {}", arr.len());
             if let Some(first) = arr.first() {
                 println!(

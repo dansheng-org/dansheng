@@ -209,52 +209,46 @@ void main() {
       service.bindApi(null);
     });
 
-    test(
-      'FDUROP search and multi-dimensional filtering by subjectKind, topicLabel, and keyword',
-      () async {
-        // Query by teacher name
-        final zhuProjects = await service.getFduropProjects(query: '朱同玉');
-        expect(zhuProjects, isNotEmpty);
-        expect(zhuProjects.any((p) => p.advisor.contains('朱同玉')), isTrue);
-        expect(
-          zhuProjects.any((p) => p.title.contains('肾移植后免疫稳态重建')),
-          isTrue,
-        );
+    test('FDUROP search and multi-dimensional filtering by subjectKind, topicLabel, and keyword', () async {
+      // Query by teacher name
+      final zhuProjects = await service.getFduropProjects(query: '朱同玉');
+      expect(zhuProjects, isNotEmpty);
+      expect(zhuProjects.any((p) => p.advisor.contains('朱同玉')), isTrue);
+      expect(zhuProjects.any((p) => p.title.contains('肾移植后免疫稳态重建')), isTrue);
 
-        // Query by title keyword
-        final nanoProjects = await service.getFduropProjects(query: '纳米多孔');
-        expect(nanoProjects, isNotEmpty);
-        expect(nanoProjects.first.title, contains('球形纳米多孔氧化物'));
+      // Query by title keyword
+      final nanoProjects = await service.getFduropProjects(query: '纳米多孔');
+      expect(nanoProjects, isNotEmpty);
+      expect(nanoProjects.first.title, contains('球形纳米多孔氧化物'));
 
-        // Query by subject kind
-        final medProjects = await service.getFduropProjects(subjectKind: '医学');
-        expect(medProjects, isNotEmpty);
-        expect(
-          medProjects.every(
-            (p) =>
-                p.subjectKinds.contains('医学') ||
-                p.program.contains('医学') ||
-                p.matchesSubjectKind('医学'),
-          ),
-          isTrue,
-        );
+      // Query by subject kind
+      final medProjects = await service.getFduropProjects(subjectKind: '医学');
+      expect(medProjects, isNotEmpty);
+      expect(
+        medProjects.every(
+          (p) =>
+              p.subjectKinds.contains('医学') ||
+              p.program.contains('医学') ||
+              p.matchesSubjectKind('医学'),
+        ),
+        isTrue,
+      );
 
-        // Query by topic label
-        final fundProjects = await service.getFduropProjects(
-          topicLabel: '国家自然科学基金项目',
-        );
-        expect(fundProjects, isNotEmpty);
-        expect(
-          fundProjects.every(
-            (p) =>
-                p.topicLabels.contains('国家自然科学基金项目') ||
-                p.program.contains('国家自然科学基金项目') ||
-                p.matchesTopicLabel('国家自然科学基金项目'),
-          ),
-          isTrue,
-        );
-      },
-    );
+      // Query by topic label
+      final fundProjects = await service.getFduropProjects(
+        topicLabel: '国家自然科学基金项目',
+      );
+      expect(fundProjects, isNotEmpty);
+      expect(
+        fundProjects.every(
+          (p) =>
+              p.topicLabels.contains('国家自然科学基金项目') ||
+              p.program.contains('国家自然科学基金项目') ||
+              p.matchesTopicLabel('国家自然科学基金项目'),
+        ),
+        isTrue,
+      );
+    });
 
     test('Live FDUROP labels and subjects query via CampusApi', () async {
       final bridge = MockDanshengBridge();
@@ -481,7 +475,11 @@ void main() {
         await tester.pumpAndSettle();
 
         // Scroll back to top so segmented button is in view
-        await tester.fling(find.byType(ListView).first, const Offset(0, 1000), 2000);
+        await tester.fling(
+          find.byType(ListView).first,
+          const Offset(0, 1000),
+          2000,
+        );
         await tester.pumpAndSettle();
 
         // Sub-segment 1: 网站通知
