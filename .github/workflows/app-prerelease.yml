@@ -113,10 +113,11 @@ jobs:
       - name: Remove this job's temporary signing files
         if: always()
         run: ../../scripts/ci/Clear-Signing.ps1
-      - name: Remove this job's Rust build outputs
+      - name: Keep only this job's latest runtime and clean build outputs
         if: always()
+        shell: pwsh
         working-directory: ${{ github.workspace }}
-        run: ./scripts/ci/Clear-BuildOutputs.ps1
+        run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE
 
   publish:
     needs: build
@@ -191,3 +192,7 @@ jobs:
             --verify-tag --title "Android $APP_VERSION Pre-release (${APP_COMMIT:0:12})" \
             --notes-file release-notes.md --draft --prerelease --latest=false
           timeout 60s gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+      - name: Keep only this job's latest runtime and clean build outputs
+        if: always()
+        shell: pwsh
+        run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE

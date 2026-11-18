@@ -86,10 +86,11 @@ jobs:
       - name: Dependency cache isolation fixtures
         if: runner.os == 'Windows' && !inputs.smoke && (steps.affected.outcome != 'success' || steps.affected.outputs.workspace_fixtures != 'false')
         run: ./tools/workspace/tests/Test-Environment.ps1 -OutputRoot (Join-Path $env:DANSHENG_TASK_RUNTIME 'environment-fixtures')
-      - name: Remove this job's Rust build outputs
+      - name: Keep only this job's latest runtime and clean build outputs
         if: always()
+        shell: pwsh
         working-directory: ${{ github.workspace }}
-        run: ./scripts/ci/Clear-BuildOutputs.ps1
+        run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE
   sdk:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, 1402ubuntu]
@@ -114,6 +115,11 @@ jobs:
         working-directory: core/sdk
       - run: node --test scripts/tests/runtime-paths.test.mjs
         if: ${{ !inputs.smoke }}
+      - name: Keep only this job's latest runtime and clean build outputs
+        if: always()
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE
   android:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, 1402ubuntu]
@@ -150,8 +156,8 @@ jobs:
             export CLANG_PATH="$compiler"
             cargo build --package dansheng-ffi --target "$target" --release --locked
           done
-      - name: Remove this job's Rust build outputs
+      - name: Keep only this job's latest runtime and clean build outputs
         if: always()
         shell: pwsh
         working-directory: ${{ github.workspace }}
-        run: ./scripts/ci/Clear-BuildOutputs.ps1
+        run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE

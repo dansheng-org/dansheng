@@ -57,15 +57,15 @@ runner 父进程必须注入绝对路径 `DANSHENG_CI_ROOT`。公开 workflow �
 
 CI 根可同时容纳 runner 的 `_work` checkout，但 runtime/cache 必须位于 checkout 之外。runtime/cache 不接受链接或链接祖先。权限限制只作用于本次 runtime、由该 runtime 推导出的 task home 及 signing 子路径，绝不对系统 home 或其他真实用户目录执行 chmod。不要把真实账号、Cargo credentials、Gradle properties/init scripts 或用户配置预置进公共依赖缓存。
 
-检查类 job（Native、Android、AndroidSource 等）的 Rust 编译输出跨运行保留在 `$DANSHENG_CI_ROOT/build-cache/<lane>/<job>-<os>/`：`cargo-target`，以及 SDK 检查的 `cargo-arm64`、`cargo-x86`（经 `DANSHENG_CI_NATIVE_TARGET_ROOT` 传给 `prepare-native.ps1`）。原因：每次全新编译会重编全部依赖；Windows 桌面 runner 上每个新生成的可执行文件首次启动还要经过约 1–4 秒的信誉检查（Defender 目录排除不覆盖），一次运行新建约 120 个（构建脚本与测试程序），native job 因此 16–19 分钟而 CPU 大多空闲。`main` 与 `checks`（PR）两条 lane 互不共享；该目录不是依赖缓存，从不播种或发布；Cargo 的指纹保证复用正确，构建目录锁串行化并发 runner；单个目录超过 10 GiB 时在下一次初始化时清空重建（完整测试构建约 4 GiB）。Release/Publish 始终在本次 runtime 的空目录中编译，发布产物不依赖保留输出，`DANSHENG_CI_NATIVE_TARGET_ROOT` 对它们显式清空。
+检查类 job（Native、Android、AndroidSource 等）的 Rust 编译输出跨运行保留在 `$DANSHENG_CI_ROOT/build-cache/<lane>/<job>-<os>/`：`cargo-target`，以及 SDK 检查的 `cargo-arm64`、`cargo-x86`（经 `DANSHENG_CI_NATIVE_TARGET_ROOT` 传给 `prepare-native.ps1`）。原因：每次全新编译会重编全部依赖；Windows 桌面 runner 上每个新生成的可执行文件首次启动还要经过约 1–4 秒的信誉检查（Defender 目录排除不覆盖），一次运行新建约 120 个（构建脚本与测试程序），native job 因此 16–19 分钟而 CPU 大多空闲。`main` 与 `checks`（PR）两条 lane 互不共享；该目录不是依赖缓存，从不播种或发布；Cargo 的指纹保证复用正确，构建目录锁串行化并发 runner；单个目录超过 10 GiB 时在下一次初始化时清空重建（完整测试构建约 4 GiB）；SDK 检查旁的固定 `cargo-home` 上限 4 GiB。lane/job 依赖缓存（`cache/<lane>/<job>`）只增不减，超过 12 GiB 时同样清空，Cargo/Pub 随后由 seed 重新导入，Gradle 重新下载一次。体积统计使用托管枚举，跳过链接。Release/Publish 始终在本次 runtime 的空目录中编译，发布产物不依赖保留输出，`DANSHENG_CI_NATIVE_TARGET_ROOT` 对它们显式清空。
 
-Rust 和 Android job 最后通过 `always()` 清理本次 runtime 下的 `cargo-target`、`cargo-arm64`、`cargo-x86` 编译目录（发布路径使用的就是这些），核对 run/job/attempt 归属并拒绝链接路径。公开依赖缓存、SDK 和审计证据保留。
+每个 job 最后通过 `always()` 执行 `Clear-Runtime.ps1 -Checkout $GITHUB_WORKSPACE`：核对 run/job/attempt 归属 marker 与链接祖先后，在本次 runtime 写入 `.ci-finished`，作为该 job 最近一次 runtime 保留以便排查；同时删除同名 job 此前已标记完成的 runtime（复制进来的 Cargo/Pub/Gradle 缓存、Gradle/CMake 中间产物、发布用 Cargo target、下载的发布载荷、tmp 与 task home）。未标记完成的 runtime（可能仍在运行）不删除；runtime 内的链接只删除链接本身，不跟随。随后对 checkout 执行 `git clean -ffdx`（actions/checkout 下次也会做），释放 Flutter/Gradle 构建目录。保留的编译输出和依赖缓存位于 runtime 之外，不受影响。删除失败只发出 warning。
 
 ## 签名与发布
 
 继续使用仓库 Secrets `DANSHENG_PRERELEASE_KEYSTORE_BASE64` 和 `DANSHENG_PRERELEASE_KEYSTORE_PASSWORD`。源码 SDK 完成后才解码到本次 runtime 的 `signing/prerelease.p12`；Linux 目录 0700、文件 0600。密码只传给需要它的步骤，不写入 GITHUB_ENV 或缓存。
 
-build 最后的 `always()` 步骤只删除该 run/job/attempt 的固定 `signing` 子目录，并核对 runtime 路径、归属 marker 和链接。SDK/APK 证据上传只列明公开产物，不上传 runtime 整体。runner 被强制杀死或掉电时，Actions 无法执行最后一步；部署维护应在 runner 离线时处理遗留 signing 文件，禁止运行中的并发全根清理。
+build 最后的 `always()` 步骤只删除该 run/job/attempt 的固定 `signing` 子目录，并核对 runtime 路径、归属 marker 和链接。SDK/APK 证据上传只列明公开产物，不上传 runtime 整体。runner 被强制杀死或掉电时，Actions 无法执行最后一步；每次初始化会删除 `runtime/<run>/<job>/<attempt>` 中未标记完成、且目录与 marker 均超过 24 小时未修改的遗留 runtime（远超 Actions 单 job 6 小时上限，不会删除仍在运行的 job），只识别数字 run/attempt 与合法 job 名，不进入链接；遗留 signing 文件随之删除。
 
 发布 job 下载到自己的 runtime/release，先验证全部 SHA256SUMS 与必需资产，再创建新 tag、draft 并发布 prerelease。已有 release/tag 会失败，不覆盖、不移动 tag、不使用 `--clobber`。每次新 APK 发布仍须递增 pubspec 的版本和构建号；自动发布只在 main 的完整检查成功后触发，smoke 不触发发布。
 

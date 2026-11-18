@@ -13,7 +13,7 @@ try {
     ./scripts/tests/monorepo-paths.tests.ps1
     ../../scripts/ci/tests/Runner.Tests.ps1
     ../../scripts/ci/tests/PublicCaches.Tests.ps1
-    ../../scripts/ci/tests/BuildOutputs.Tests.ps1
+    ../../scripts/ci/tests/Runtime.Tests.ps1
     ../../scripts/tests/Enter.Tests.ps1 -FixtureRoot (Join-Path $env:DANSHENG_TASK_RUNTIME 'entry-fixtures')
 } finally {
     Pop-Location
