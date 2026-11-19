@@ -19,67 +19,157 @@ void main() {
       service = ResearchService.instance;
     });
 
+    test('News rows from department columns are parsed and categorised', () {
+      final item = ResearchNewsItem.fromSite({
+        'title': '复旦大学王建禄课题组Science：直接蒸镀单晶金属解决半导体接触问题',
+        'url': 'https://mp.weixin.qq.com/s/KKY1e5giNt_10L829QIVpA',
+        'published_on': '2026-08-28',
+      }, department: '集成电路与微纳电子创新学院');
+      expect(item, isNotNull);
+      expect(item!.id, item.url);
+      expect(item.publishDate, '2026-08-28');
+      expect(item.category, '科研成果');
+      expect(ResearchNewsItem.categorize('喜报：王国祯教授荣获求是杰出科学家奖'), '获奖荣誉');
+      expect(ResearchNewsItem.categorize('留德华人化学化工学会来访交流活动回顾'), '学术交流');
+      expect(ResearchNewsItem.categorize('学院举行毕业典礼'), '院系动态');
+      expect(
+        ResearchNewsItem.fromSite({'url': 'x'}, department: 'd'),
+        isNull,
+        reason: 'a row without a title is dropped',
+      );
+    });
+
+    test('The 课题组 directory lists real homepages and filters', () {
+      final all = service.getGroups();
+      expect(all.length, greaterThanOrEqualTo(500));
+      expect(
+        all.every(
+          (g) => g.websiteUrl.startsWith('https://faculty.fudan.edu.cn/'),
+        ),
+        isTrue,
+      );
+      expect(all.map((g) => g.id).toSet().length, all.length);
+      expect(service.availableDepartments.length, greaterThan(30));
+
+      final chem = service.getGroups(department: '化学系');
+      expect(chem, isNotEmpty);
+      expect(chem.every((g) => g.department == '化学系'), isTrue);
+
+      final withDirection = all.firstWhere(
+        (g) => g.researchDirections.isNotEmpty,
+      );
+      final byDirection = service.getGroups(
+        query: withDirection.researchDirections.first,
+      );
+      expect(byDirection.map((g) => g.id), contains(withDirection.id));
+
+      final id = all.first.id;
+      expect(service.isGroupFollowed(id), isFalse);
+      service.toggleFollowGroup(id);
+      expect(service.getGroups(followedOnly: true).single.id, id);
+      service.toggleFollowGroup(id);
+      expect(service.getGroups(followedOnly: true), isEmpty);
+    });
+
     test(
-      'getNews returns articles and filters by category and search query',
+      'News and lectures merge the department columns newest first',
       () async {
-        final allNews = await service.getNews();
-        expect(allNews.length, greaterThanOrEqualTo(5));
-
-        final breakthroughs = await service.getNews(category: '科研突破');
-        expect(breakthroughs.every((n) => n.category == '科研突破'), isTrue);
-
-        final searchBrain = await service.getNews(query: '脑科学');
-        expect(searchBrain, isNotEmpty);
-        expect(
-          searchBrain.any(
-            (n) => n.title.contains('脑科学') || n.department.contains('脑科学'),
-          ),
-          isTrue,
+        final bridge = MockDanshengBridge();
+        final asked = <String>[];
+        bridge.campusHandler = (method, params) async {
+          expect(method, 'fudan.site.articles');
+          final url = params['url'] as String;
+          asked.add(url);
+          if (url.contains('law.fudan')) throw StateError('site down');
+          if (url.contains('chemistry.fudan.edu.cn/45122')) {
+            return [
+              {
+                'title': '化学系团队在Nature发表催化新成果',
+                'url': 'https://chemistry.fudan.edu.cn/a/c45122a1/page.htm',
+                'published_on': '2026-11-05',
+              },
+            ];
+          }
+          if (url.contains('math.fudan.edu.cn/30298')) {
+            return [
+              {
+                'title': '喜报：数学学院教授荣获重要奖项',
+                'url': 'https://news.fudan.edu.cn/2026/1020/c31a1/page.htm',
+                'published_on': '2026-10-20',
+              },
+              {
+                // Linked by two columns: listed once.
+                'title': '化学系团队在Nature发表催化新成果',
+                'url': 'https://chemistry.fudan.edu.cn/a/c45122a1/page.htm',
+                'published_on': '2026-11-05',
+              },
+            ];
+          }
+          if (url.contains('spfdu.fudan.edu.cn/41399')) {
+            return [
+              {
+                'title': '11月20日松德名师讲坛',
+                'url': 'https://spfdu.fudan.edu.cn/a/c41399a1/page.htm',
+                'published_on': '2026-11-16',
+              },
+            ];
+          }
+          return <Object>[];
+        };
+        final controller = DanshengController(
+          client: DanshengClient(bridge: bridge),
         );
+        await controller.initialize();
+        service.bindApi(CampusApi.forAccount(controller));
+
+        final news = await service.fetchNews(refresh: true);
+        expect(
+          asked.toSet(),
+          containsAll(ResearchService.newsColumns.map((c) => c.url)),
+        );
+        expect(news.failedColumns, 1);
+        expect(news.items.map((n) => n.publishDate), [
+          '2026-11-05',
+          '2026-10-20',
+        ]);
+        // The article both columns link is listed once.
+        expect(news.items, hasLength(2));
+        expect(service.getNews(category: '获奖荣誉').single.department, '数学科学学院');
+        expect(service.getNews(query: '催化'), hasLength(1));
+
+        await service.fetchLectures(refresh: true);
+        final lectures = service.getLectures();
+        expect(lectures.single.organizer, '药学院');
+        expect(lectures.single.category, '生命健康');
+        expect(service.getLectures(category: '人文社科'), isEmpty);
+
+        final lecture = lectures.single;
+        service.toggleBookmarkLecture(lecture.id);
+        expect(service.getLectures(bookmarkedOnly: true).single.id, lecture.id);
+        expect(service.getLectures().single.isBookmarked, isTrue);
+        service.toggleBookmarkLecture(lecture.id);
+        expect(service.getLectures(bookmarkedOnly: true), isEmpty);
+
+        // Signing out drops what was read.
+        service.bindApi(null);
+        expect(service.hasNews, isFalse);
+        expect(service.getNews(), isEmpty);
       },
     );
 
-    test('getGroups returns groups with official websites, filters by department and handles follow toggle', () async {
-      final allGroups = await service.getGroups();
-      expect(allGroups.length, greaterThanOrEqualTo(15));
-      expect(
-        allGroups.any((g) => g.websiteUrl.contains('fudan.edu.cn')),
-        isTrue,
+    test('Every column failing is reported as an error', () async {
+      service.bindApi(null);
+      final bridge = MockDanshengBridge();
+      bridge.campusHandler = (method, params) async =>
+          throw StateError('offline');
+      final controller = DanshengController(
+        client: DanshengClient(bridge: bridge),
       );
-
-      // Test follow toggle
-      const testId = 'rg_chip';
-      final initialFollowed = service.isGroupFollowed(testId);
-      service.toggleFollowGroup(testId);
-      expect(service.isGroupFollowed(testId), !initialFollowed);
-
-      // Toggle back
-      service.toggleFollowGroup(testId);
-      expect(service.isGroupFollowed(testId), initialFollowed);
-
-      // Filter by department
-      final csGroups = await service.getGroups(department: '计算机科学技术学院');
-      expect(csGroups.every((g) => g.department.contains('计算机')), isTrue);
-    });
-
-    test('getLectures returns academic lectures, filters by category and toggles bookmarks', () async {
-      final lectures = await service.getLectures();
-      expect(lectures.length, greaterThanOrEqualTo(10));
-      expect(
-        lectures.any((l) => l.title.contains('西学') || l.title.contains('量子计算')),
-        isTrue,
-      );
-
-      final humanities = await service.getLectures(category: '人文社科');
-      expect(humanities.every((l) => l.category == '人文社科'), isTrue);
-
-      const lecId = 'lec_cs_1';
-      final initialBookmarked = service.isLectureBookmarked(lecId);
-      service.toggleBookmarkLecture(lecId);
-      expect(service.isLectureBookmarked(lecId), !initialBookmarked);
-
-      service.toggleBookmarkLecture(lecId);
-      expect(service.isLectureBookmarked(lecId), initialBookmarked);
+      await controller.initialize();
+      service.bindApi(CampusApi.forAccount(controller));
+      await expectLater(service.fetchNews(refresh: true), throwsA(anything));
+      expect(service.hasNews, isFalse);
+      service.bindApi(null);
     });
 
     test('FDUROP services: notices and paper.fudan.edu.cn open projects with bookmarks', () async {
@@ -476,9 +566,64 @@ void main() {
       await controller.initialize();
     });
 
-    testWidgets('Renders ResearchPage with 4 tabs and displays news items', (
+    /// Department columns for the widget tests: a 科研成果 and an award row
+    /// for news, two lectures in different categories; links are recorded.
+    Future<dynamic> siteColumns(
+      String method,
+      Map<String, dynamic> params,
+      List<String> opened,
+    ) async {
+      if (method == 'campus.openLink') {
+        opened.add(params['url'] as String);
+        return {'opened': true};
+      }
+      if (method != 'fudan.site.articles') return <String, dynamic>{};
+      final url = params['url'] as String;
+      if (url.contains('chemistry.fudan.edu.cn/45122')) {
+        return [
+          {
+            'title': '化学系团队在Nature发表催化新成果',
+            'url': 'https://mp.weixin.qq.com/s/chem-nature',
+            'published_on': '2026-11-05',
+          },
+        ];
+      }
+      if (url.contains('math.fudan.edu.cn/30298')) {
+        return [
+          {
+            'title': '喜报：数学学院教授荣获重要奖项',
+            'url': 'https://math.fudan.edu.cn/a/c30298a1/page.htm',
+            'published_on': '2026-10-20',
+          },
+        ];
+      }
+      if (url.contains('history.fudan.edu.cn')) {
+        return [
+          {
+            'title': '【会议预告】中西交流与知识生产',
+            'url': 'https://history.fudan.edu.cn/info/1403/23022.htm',
+            'published_on': '2026-11-17',
+          },
+        ];
+      }
+      if (url.contains('chemistry.fudan.edu.cn/45457')) {
+        return [
+          {
+            'title': '光华化学论坛：氮杂短肽基β-转角',
+            'url': 'https://chemistry.fudan.edu.cn/a/c45457a1/page.htm',
+            'published_on': '2026-11-15',
+          },
+        ];
+      }
+      return <Object>[];
+    }
+
+    testWidgets('科研动态 lists live department articles and opens them', (
       tester,
     ) async {
+      final opened = <String>[];
+      ResearchService.instance.bindApi(null);
+      bridge.campusHandler = (m, p) => siteColumns(m, p, opened);
       await tester.pumpWidget(
         buildTestApp(
           home: ResearchPage(controller: controller),
@@ -487,27 +632,52 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Verify app bar title and bottom tabs
       expect(find.text('科研'), findsOneWidget);
       expect(find.text('科研动态'), findsOneWidget);
       expect(find.textContaining('课题组'), findsWidgets);
       expect(find.text('本科生科研 (FDUROP)'), findsOneWidget);
       expect(find.widgetWithText(Tab, '学术讲座'), findsOneWidget);
 
-      // Tab 0: 科研动态 items visible
-      expect(find.textContaining('《自然》发表复旦大学脑科学'), findsOneWidget);
-      expect(find.textContaining('集成芯片全国重点实验室'), findsOneWidget);
+      expect(find.text('化学系团队在Nature发表催化新成果'), findsOneWidget);
+      expect(find.text('喜报：数学学院教授荣获重要奖项'), findsOneWidget);
+      expect(find.text('院系公众号文章'), findsOneWidget);
 
-      // Filter category chip tap
-      await tester.tap(find.widgetWithText(FilterChip, '项目申报'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '获奖荣誉'));
       await tester.pumpAndSettle();
+      expect(find.text('化学系团队在Nature发表催化新成果'), findsNothing);
+      expect(find.text('喜报：数学学院教授荣获重要奖项'), findsOneWidget);
 
-      expect(find.textContaining('国家自然科学基金青年学生基础研究项目'), findsOneWidget);
+      await tester.tap(find.text('喜报：数学学院教授荣获重要奖项'));
+      await tester.pumpAndSettle();
+      expect(opened, ['https://math.fudan.edu.cn/a/c30298a1/page.htm']);
+      ResearchService.instance.bindApi(null);
     });
 
-    testWidgets('Tapping a news card opens news detail bottom sheet', (
+    testWidgets('科研动态 shows a retry when no department site answers', (
       tester,
     ) async {
+      ResearchService.instance.bindApi(null);
+      bridge.campusHandler = (m, p) async => m == 'fudan.site.articles'
+          ? throw StateError('offline')
+          : <String, dynamic>{};
+      await tester.pumpWidget(
+        buildTestApp(
+          home: ResearchPage(controller: controller),
+          controller: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(FilledButton, '重试'), findsOneWidget);
+      ResearchService.instance.bindApi(null);
+    });
+
+    testWidgets('课题组 searches the directory and opens a PI homepage', (
+      tester,
+    ) async {
+      final opened = <String>[];
+      ResearchService.instance.bindApi(null);
+      bridge.campusHandler = (m, p) => siteColumns(m, p, opened);
+      final pi = ResearchService.instance.getGroups(department: '化学系').first;
       await tester.pumpWidget(
         buildTestApp(
           home: ResearchPage(controller: controller),
@@ -516,86 +686,33 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Tap first news card
-      final firstNewsCard = find.textContaining('《自然》发表复旦大学脑科学').first;
-      await tester.tap(firstNewsCard);
+      await tester.tap(find.widgetWithText(Tab, '课题组'));
       await tester.pumpAndSettle();
+      expect(find.textContaining('faculty.fudan.edu.cn'), findsOneWidget);
 
-      // Verify detail sheet is displayed
-      expect(find.text('科学技术研究院'), findsWidgets);
-      expect(find.textContaining('摘要：'), findsOneWidget);
-      expect(find.text('复制来源链接'), findsOneWidget);
-
-      // Close modal sheet
-      final navigator = tester.state<NavigatorState>(
-        find.byType(Navigator).first,
+      await tester.enterText(
+        find.widgetWithText(TextField, '搜索课题组、导师姓名、院系或研究方向...'),
+        pi.leader,
       );
-      navigator.pop();
       await tester.pumpAndSettle();
+      expect(find.text(pi.name), findsOneWidget);
+
+      await tester.tap(find.byTooltip('关注').first);
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(Tab, '课题组 (1)'), findsOneWidget);
+
+      await tester.tap(find.text(pi.name));
+      await tester.pumpAndSettle();
+      expect(find.text('教师个人主页'), findsOneWidget);
+      await tester.tap(find.text('教师个人主页'));
+      await tester.pumpAndSettle();
+      expect(opened, [pi.websiteUrl]);
+
+      tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+      await tester.pumpAndSettle();
+      ResearchService.instance.toggleFollowGroup(pi.id);
+      ResearchService.instance.bindApi(null);
     });
-
-    testWidgets(
-      'Switching to 课题组 tab displays groups, allows follow toggle and details sheet with website',
-      (tester) async {
-        await tester.pumpWidget(
-          buildTestApp(
-            home: ResearchPage(controller: controller),
-            controller: controller,
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        // Switch to 课题组 tab
-        await tester.tap(find.widgetWithText(Tab, '课题组 (3)'));
-        await tester.pumpAndSettle();
-
-        // Verify groups visible
-        expect(find.textContaining('智能信息处理与大模型认知研究组'), findsOneWidget);
-        expect(find.textContaining('软件工程实验室'), findsOneWidget);
-
-        // Verify direction tags
-        expect(find.text('自然语言处理'), findsOneWidget);
-        expect(find.text('智能软件工程 (AI4SE)'), findsOneWidget);
-
-        // Tap group card to open detail sheet
-        await tester.tap(find.textContaining('智能信息处理与大模型认知研究组'));
-        await tester.pumpAndSettle();
-
-        // Verify lab detail sheet content
-        expect(find.text('课题组简介'), findsOneWidget);
-        expect(find.text('代表性成果 / 近期论文'), findsOneWidget);
-        final sheetScrollable = find.byType(Scrollable).last;
-        await tester.scrollUntilVisible(
-          find.text('官方主页 / 学院网站'),
-          200,
-          scrollable: sheetScrollable,
-        );
-        expect(find.text('官方主页 / 学院网站'), findsOneWidget);
-        expect(find.text('https://nlp.fudan.edu.cn'), findsOneWidget);
-        expect(find.byTooltip('复制网址'), findsOneWidget);
-
-        await tester.scrollUntilVisible(
-          find.text('招生与科研招募'),
-          200,
-          scrollable: sheetScrollable,
-        );
-        expect(find.text('招生与科研招募'), findsOneWidget);
-        await tester.scrollUntilVisible(
-          find.text('xpqiu@fudan.edu.cn'),
-          200,
-          scrollable: sheetScrollable,
-        );
-        expect(find.text('xpqiu@fudan.edu.cn'), findsOneWidget);
-        expect(find.byTooltip('复制邮箱'), findsOneWidget);
-
-        // Close modal sheet
-        final navigator = tester.state<NavigatorState>(
-          find.byType(Navigator).first,
-        );
-        navigator.pop();
-        await tester.pumpAndSettle();
-      },
-    );
 
     testWidgets(
       'Switching to 本科生科研 (FDUROP) tab displays portal banner, allows viewing open projects, notices and downloading documents',
@@ -765,8 +882,11 @@ void main() {
     });
 
     testWidgets(
-      'Switching to 学术讲座 tab displays lectures with category filter and allows bookmarking',
+      '学术讲座 filters by category and the 想去 chip shows one icon, not two',
       (tester) async {
+        final opened = <String>[];
+        ResearchService.instance.bindApi(null);
+        bridge.campusHandler = (m, p) => siteColumns(m, p, opened);
         await tester.pumpWidget(
           buildTestApp(
             home: ResearchPage(controller: controller),
@@ -775,25 +895,38 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        // Switch to 学术讲座 tab
         await tester.tap(find.widgetWithText(Tab, '学术讲座'));
         await tester.pumpAndSettle();
+        expect(find.text('【会议预告】中西交流与知识生产'), findsOneWidget);
+        expect(find.text('光华化学论坛：氮杂短肽基β-转角'), findsOneWidget);
 
-        // Verify lecture items visible
-        expect(find.textContaining('作为“国故”的西学'), findsOneWidget);
-        expect(find.textContaining('陈拓 青年研究员'), findsOneWidget);
-        expect(find.textContaining('光华楼西主楼2001'), findsWidgets);
-
-        // Filter by category
-        await tester.tap(find.widgetWithText(FilterChip, '物质前沿'));
+        await tester.tap(find.widgetWithText(ChoiceChip, '物质前沿'));
         await tester.pumpAndSettle();
+        expect(find.text('【会议预告】中西交流与知识生产'), findsNothing);
+        expect(find.text('光华化学论坛：氮杂短肽基β-转角'), findsOneWidget);
 
-        expect(find.textContaining('量子计算前沿演进与拓扑容错物态实现'), findsOneWidget);
-
-        // Toggle bookmark icon button
-        final bookmarkBtn = find.byIcon(Icons.bookmark).first;
-        await tester.tap(bookmarkBtn);
+        await tester.tap(find.byTooltip('标记想去'));
         await tester.pumpAndSettle();
+        expect(find.byTooltip('取消想去'), findsOneWidget);
+
+        final chip = find.widgetWithText(FilterChip, '想去 (1)');
+        expect(chip, findsOneWidget);
+        await tester.tap(chip);
+        await tester.pumpAndSettle();
+        // Selected: the bookmark avatar is the only icon; no checkmark is
+        // painted over it (that stacking was the overlap bug).
+        expect(tester.widget<FilterChip>(chip).selected, isTrue);
+        expect(tester.widget<FilterChip>(chip).showCheckmark, isFalse);
+        expect(
+          find.descendant(of: chip, matching: find.byIcon(Icons.bookmark)),
+          findsOneWidget,
+        );
+        expect(find.text('光华化学论坛：氮杂短肽基β-转角'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('取消想去'));
+        await tester.pumpAndSettle();
+        expect(find.text('暂未标记想去的讲座'), findsOneWidget);
+        ResearchService.instance.bindApi(null);
       },
     );
 

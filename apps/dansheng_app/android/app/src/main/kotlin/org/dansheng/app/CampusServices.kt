@@ -32,7 +32,7 @@ internal class CampusServices(
         "canvas.quizzes.sync","canvas.quiz.read","canvas.discussions.sync","canvas.discussion.read","canvas.discussion.view",
         "canvas.assignment_groups.sync","canvas.submission.self","canvas.grades.self","fudan.catalog.syllabus",
         "fudan.cloud.roots","fudan.cloud.list","fudan.notice.attachments","webdav.servers","webdav.list",
-        "fudan.fdurop.topics","fudan.fdurop.topic.detail","fudan.fdurop.labels","fudan.fdurop.subjects",
+        "fudan.fdurop.topics","fudan.fdurop.topic.detail","fudan.fdurop.labels","fudan.fdurop.subjects","fudan.site.articles",
         "community.tea.divisions","community.tea.holes","community.tea.hole","community.tea.floors","community.tea.favorites","community.danke.search","community.danke.group","community.danke.reviews","community.danke.random",
     )
     /** Drive writes: run exactly once after a UI action, never cached or retried. */
@@ -51,6 +51,19 @@ internal class CampusServices(
             withContext(Dispatchers.Main){
                 try{activity.startActivity(Intent(Intent.ACTION_VIEW,uri))}
                 catch(_:android.content.ActivityNotFoundException){activity.startActivity(Intent(activity,CampusPortalActivity::class.java).putExtra("notice",url))}
+            }
+            return JSONObject().put("opened",true)
+        }
+        // Public department articles and the WeChat posts they link to open in the
+        // system browser only; no signed-in campus view ever receives these URLs.
+        if(method=="campus.openLink"){
+            val uri=android.net.Uri.parse(supplied.getString("url"))
+            val host=uri.host?:""
+            val trusted=host=="mp.weixin.qq.com" || (host.endsWith(".fudan.edu.cn") && host !in setOf("uis.fudan.edu.cn","id.fudan.edu.cn","webvpn.fudan.edu.cn"))
+            if(uri.scheme!="https" || !trusted || uri.userInfo!=null || uri.port !in setOf(-1,443))throw PortError("UntrustedOrigin")
+            withContext(Dispatchers.Main){
+                try{activity.startActivity(Intent(Intent.ACTION_VIEW,uri))}
+                catch(_:android.content.ActivityNotFoundException){throw PortError("NoBrowser")}
             }
             return JSONObject().put("opened",true)
         }

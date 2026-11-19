@@ -766,6 +766,7 @@ impl CoreService for CampusService {
             ("fudan.bus", "fudan.life.read"),
             ("fudan.notices", "fudan.notices.read"),
             ("fudan.notice.attachments", "fudan.notices.read"),
+            ("fudan.site.articles", "fudan.notices.read"),
             ("fudan.notice.attachment.download", "fudan.notices.read"),
             ("fudan.qr.status", "fudan.identity.read"),
             ("fudan.qr.present", "fudan.identity.present"),
@@ -2192,6 +2193,12 @@ impl CoreService for CampusService {
                         .await
                         .map_err(campus_error)?,
                 )?,
+                "fudan.site.articles" => serde_json::to_value(
+                    client
+                        .site_articles(&source, required_string(&params, "url")?)
+                        .await
+                        .map_err(campus_error)?,
+                )?,
                 "fudan.notice.attachments" => serde_json::to_value(
                     client
                         .notice_attachments(&source, required_string(&params, "url")?)
@@ -2292,7 +2299,9 @@ impl CoreService for CampusService {
             };
             // Attachment lists and FDUROP pages are transient views without
             // record ids; they are returned to the caller, not committed.
-            if method == "fudan.notice.attachments" || method.starts_with("fudan.fdurop.") {
+            if matches!(method, "fudan.notice.attachments" | "fudan.site.articles")
+                || method.starts_with("fudan.fdurop.")
+            {
                 return Ok(value);
             }
             publish_value(context.store, owner, &source, method, &value)?;

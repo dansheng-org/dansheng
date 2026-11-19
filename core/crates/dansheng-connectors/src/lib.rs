@@ -31,6 +31,7 @@ pub mod models;
 #[cfg(feature = "services")]
 mod page_transport;
 pub mod postgraduate_calendar;
+pub mod site_list;
 pub mod transport;
 #[cfg(feature = "services")]
 pub mod webdav_drive;

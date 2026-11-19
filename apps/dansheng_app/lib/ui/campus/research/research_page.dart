@@ -11,8 +11,8 @@ import '../campus_api.dart';
 import 'fdurop_notice_detail_sheet.dart';
 import 'fdurop_project_detail_sheet.dart';
 import 'research_group_detail_sheet.dart';
+import 'research_group_directory.dart';
 import 'research_models.dart';
-import 'research_news_detail_sheet.dart';
 import 'research_service.dart';
 
 /// Top-level Campus Research / 科研 Page.
@@ -42,14 +42,26 @@ class _ResearchPageState extends State<ResearchPage>
   final TextEditingController _lectureSearchCtrl = TextEditingController();
 
   String _selectedNewsCategory = '全部';
-  final List<String> _newsCategories = ['全部', '科研突破', '项目申报', '招募招生', '学术讲座'];
+  static const List<String> _newsCategories = [
+    '全部',
+    ...ResearchNewsItem.categories,
+  ];
+  String? _newsError;
 
   bool _groupFollowedOnly = false;
   String _selectedGroupDepartment = '全部';
 
   // Academic Lectures filter states
   String _selectedLectureCategory = '全部';
+  static const List<String> _lectureCategories = [
+    '全部',
+    '人文社科',
+    '物质前沿',
+    '信息技术',
+    '生命健康',
+  ];
   bool _lectureBookmarkedOnly = false;
+  String? _lectureError;
 
   // FDUROP Sub-tab state: 0: 开放课题, 1: 网站通知, 2: 文件下载
   int _fduropSubIndex = 0;
@@ -63,7 +75,6 @@ class _ResearchPageState extends State<ResearchPage>
   List<ResearchGroupItem> _groupList = [];
   List<ResearchLectureItem> _lectureList = [];
   List<FduropNoticeItem> _fduropNotices = [];
-  bool _localReady = false;
 
   // Official FDUROP files from jwc.fudan.edu.cn, loaded when first shown.
   List<FduropDocumentItem>? _fduropDocuments;
@@ -95,6 +106,11 @@ class _ResearchPageState extends State<ResearchPage>
     _service.addListener(_onServiceChanged);
     _fduropDocuments = _service.cachedFduropDocuments;
     _loadLocal();
+    _service.getFduropNotices().then((notices) {
+      if (mounted) setState(() => _fduropNotices = notices);
+    });
+    _loadNews();
+    _loadLectures();
     _loadFduropFilterOptions();
     _reloadFduropProjects();
   }
@@ -119,7 +135,8 @@ class _ResearchPageState extends State<ResearchPage>
 
   Future<void> _refreshAll() async {
     await Future.wait([
-      _loadLocal(),
+      _loadNews(refresh: true),
+      _loadLectures(refresh: true),
       _reloadFduropProjects(),
       if (_fduropDocuments != null || _fduropSubIndex == 2)
         _loadFduropDocuments(refresh: true),
@@ -171,31 +188,46 @@ class _ResearchPageState extends State<ResearchPage>
     }
   }
 
-  /// Recompute the bundled (in-memory) lists from the current filters.
-  Future<void> _loadLocal() async {
-    final news = await _service.getNews(
-      category: _selectedNewsCategory,
-      query: _newsSearchCtrl.text,
-    );
-    final groups = await _service.getGroups(
-      followedOnly: _groupFollowedOnly,
-      department: _selectedGroupDepartment,
-      query: _groupSearchCtrl.text,
-    );
-    final lectures = await _service.getLectures(
-      query: _lectureSearchCtrl.text,
-      category: _selectedLectureCategory,
-      bookmarkedOnly: _lectureBookmarkedOnly,
-    );
-    final notices = await _service.getFduropNotices();
+  /// Recompute the visible lists from what is loaded and the current filters.
+  void _loadLocal() {
     if (!mounted) return;
     setState(() {
-      _newsList = news;
-      _groupList = groups;
-      _lectureList = lectures;
-      _fduropNotices = notices;
-      _localReady = true;
+      _newsList = _service.getNews(
+        category: _selectedNewsCategory,
+        query: _newsSearchCtrl.text,
+      );
+      _groupList = _service.getGroups(
+        followedOnly: _groupFollowedOnly,
+        department: _selectedGroupDepartment,
+        query: _groupSearchCtrl.text,
+      );
+      _lectureList = _service.getLectures(
+        query: _lectureSearchCtrl.text,
+        category: _selectedLectureCategory,
+        bookmarkedOnly: _lectureBookmarkedOnly,
+      );
     });
+  }
+
+  /// The department 科研动态 columns, read once per session unless refreshed.
+  Future<void> _loadNews({bool refresh = false}) async {
+    setState(() => _newsError = null);
+    try {
+      await _service.fetchNews(refresh: refresh);
+    } catch (e) {
+      if (mounted) setState(() => _newsError = campusError(e));
+    }
+    _loadLocal();
+  }
+
+  Future<void> _loadLectures({bool refresh = false}) async {
+    setState(() => _lectureError = null);
+    try {
+      await _service.fetchLectures(refresh: refresh);
+    } catch (e) {
+      if (mounted) setState(() => _lectureError = campusError(e));
+    }
+    _loadLocal();
   }
 
   Future<void> _loadFduropFilterOptions() async {
@@ -324,106 +356,191 @@ class _ResearchPageState extends State<ResearchPage>
           ],
         ),
       ),
-      body: !_localReady
-          ? const Center(child: CircularProgressIndicator())
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                _buildNewsTab(theme, colorScheme),
-                _buildGroupsTab(theme, colorScheme),
-                _buildFduropTab(theme, colorScheme),
-                _buildLecturesTab(theme, colorScheme),
-              ],
-            ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildNewsTab(theme, colorScheme),
+          _buildGroupsTab(theme, colorScheme),
+          _buildFduropTab(theme, colorScheme),
+          _buildLecturesTab(theme, colorScheme),
+        ],
+      ),
     );
   }
 
   // -------------------------------------------------------------
-  // TAB 1: 科研动态 (Research News)
+  // Shared pieces of the live tabs
   // -------------------------------------------------------------
-  Widget _buildNewsTab(ThemeData theme, ColorScheme colorScheme) {
-    return RefreshIndicator(
-      onRefresh: _loadLocal,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+  Widget _searchField(TextEditingController controller, String hint) {
+    return TextField(
+      controller: controller,
+      decoration: InputDecoration(
+        hintText: hint,
+        prefixIcon: const Icon(Icons.search, size: 20),
+        suffixIcon: controller.text.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear, size: 18),
+                onPressed: () {
+                  controller.clear();
+                  _loadLocal();
+                },
+              )
+            : null,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 10,
+        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      onChanged: (_) => _loadLocal(),
+    );
+  }
+
+  Widget _sourceLine(ThemeData theme, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        text,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState(ThemeData theme, IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 48),
+      child: Column(
         children: [
-          // Search input
-          TextField(
-            controller: _newsSearchCtrl,
-            decoration: InputDecoration(
-              hintText: '搜索科研消息、突破进展、基金申报...',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              suffixIcon: _newsSearchCtrl.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
-                      onPressed: () {
-                        _newsSearchCtrl.clear();
-                        _loadLocal();
-                      },
-                    )
-                  : null,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 10,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+          Icon(icon, size: 48, color: theme.colorScheme.outline),
+          const SizedBox(height: 12),
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.outline,
             ),
-            onChanged: (_) => _loadLocal(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _loadError(ThemeData theme, String message, VoidCallback onRetry) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 40),
+      child: Column(
+        children: [
+          Icon(
+            Icons.cloud_off_outlined,
+            size: 44,
+            color: theme.colorScheme.error,
           ),
           const SizedBox(height: 10),
-
-          // Category filter chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final cat in _newsCategories) ...[
-                  FilterChip(
-                    label: Text(cat),
-                    selected: _selectedNewsCategory == cat,
-                    onSelected: (selected) {
-                      setState(() {
-                        _selectedNewsCategory = selected ? cat : '全部';
-                      });
-                      _loadLocal();
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // News list or empty
-          if (_newsList.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 48),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.feed_outlined,
-                      size: 48,
-                      color: colorScheme.outline,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      '暂无匹配的科研消息',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.outline,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            for (final news in _newsList)
-              _buildNewsCard(news, theme, colorScheme),
+          Text(message, textAlign: TextAlign.center),
+          const SizedBox(height: 10),
+          FilledButton.tonal(onPressed: onRetry, child: const Text('重试')),
         ],
+      ),
+    );
+  }
+
+  Widget _tag(ColorScheme colorScheme, String text, {bool strong = false}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: strong
+            ? colorScheme.primaryContainer
+            : colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: strong ? FontWeight.bold : FontWeight.normal,
+          color: strong
+              ? colorScheme.onPrimaryContainer
+              : colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+
+  static bool _isWeChat(String url) =>
+      url.startsWith('https://mp.weixin.qq.com/');
+
+  Future<void> _openArticle(String url) async {
+    try {
+      await _service.openLink(url);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(campusError(e))));
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // TAB 1: 科研动态 (Research News, live department columns)
+  // -------------------------------------------------------------
+  Widget _buildNewsTab(ThemeData theme, ColorScheme colorScheme) {
+    final header = <Widget>[
+      _searchField(_newsSearchCtrl, '搜索标题或院系...'),
+      const SizedBox(height: 10),
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final cat in _newsCategories) ...[
+              ChoiceChip(
+                label: Text(cat),
+                selected: _selectedNewsCategory == cat,
+                onSelected: (_) {
+                  setState(() => _selectedNewsCategory = cat);
+                  _loadLocal();
+                },
+              ),
+              const SizedBox(width: 8),
+            ],
+          ],
+        ),
+      ),
+      const SizedBox(height: 10),
+      _sourceLine(
+        theme,
+        '来源：复旦新闻网及 ${ResearchService.newsColumns.length - 1} 个院系的科研动态栏目，'
+        '含院系公众号文章'
+        '${_service.newsFailedColumns > 0 ? '（${_service.newsFailedColumns} 个栏目暂未读取）' : ''}',
+      ),
+    ];
+    final Widget? status = _newsError != null && !_service.hasNews
+        ? _loadError(theme, _newsError!, () => _loadNews(refresh: true))
+        : !_service.hasNews
+        ? const Padding(
+            padding: EdgeInsets.only(top: 48),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        : _newsList.isEmpty
+        ? _emptyState(theme, Icons.feed_outlined, '暂无匹配的科研动态')
+        : null;
+    return RefreshIndicator(
+      onRefresh: () => _loadNews(refresh: true),
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        itemCount: header.length + (status != null ? 1 : _newsList.length),
+        itemBuilder: (context, i) {
+          if (i < header.length) return header[i];
+          if (status != null) return status;
+          return _buildNewsCard(
+            _newsList[i - header.length],
+            theme,
+            colorScheme,
+          );
+        },
       ),
     );
   }
@@ -434,77 +551,36 @@ class _ResearchPageState extends State<ResearchPage>
     ColorScheme colorScheme,
   ) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       clipBehavior: Clip.antiAlias,
-      elevation: news.isPinned ? 2 : 0,
+      elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: news.isPinned
-              ? colorScheme.primary.withAlpha(160)
-              : colorScheme.outlineVariant,
-        ),
+        side: BorderSide(color: colorScheme.outlineVariant),
       ),
       child: InkWell(
-        onTap: () => showResearchNewsDetailSheet(context, news),
+        onTap: () => _openArticle(news.url),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top tags row
               Row(
                 children: [
-                  if (news.isPinned) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      margin: const EdgeInsets.only(right: 6),
-                      decoration: BoxDecoration(
-                        color: colorScheme.primary,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        '置顶',
-                        style: TextStyle(
-                          color: colorScheme.onPrimary,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
+                  _tag(colorScheme, news.category, strong: true),
+                  const SizedBox(width: 8),
+                  Expanded(
                     child: Text(
-                      news.category,
-                      style: TextStyle(
-                        color: colorScheme.onPrimaryContainer,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
+                      news.department,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      news.source,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
                   Text(
                     news.publishDate,
                     style: theme.textTheme.labelSmall?.copyWith(
@@ -514,58 +590,31 @@ class _ResearchPageState extends State<ResearchPage>
                 ],
               ),
               const SizedBox(height: 8),
-
-              // Title
               Text(
                 news.title,
-                style: theme.textTheme.titleMedium?.copyWith(
+                style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.bold,
-                  height: 1.3,
+                  height: 1.35,
                 ),
               ),
               const SizedBox(height: 6),
-
-              // Summary
-              Text(
-                news.summary,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                  height: 1.4,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 10),
-
-              // Footer row
               Row(
                 children: [
-                  Text(
-                    news.department,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: colorScheme.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
                   Icon(
-                    Icons.visibility_outlined,
+                    _isWeChat(news.url) ? Icons.chat_outlined : Icons.language,
                     size: 14,
                     color: colorScheme.outline,
                   ),
                   const SizedBox(width: 4),
-                  Text(
-                    '${news.readCount}',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: colorScheme.outline,
+                  Expanded(
+                    child: Text(
+                      _isWeChat(news.url) ? '院系公众号文章' : '院系网站',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: colorScheme.outline,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    Icons.chevron_right,
-                    size: 16,
-                    color: colorScheme.outline,
-                  ),
+                  Icon(Icons.open_in_new, size: 14, color: colorScheme.outline),
                 ],
               ),
             ],
@@ -576,123 +625,90 @@ class _ResearchPageState extends State<ResearchPage>
   }
 
   // -------------------------------------------------------------
-  // TAB 2: 课题组 (Research Groups / Labs)
+  // TAB 2: 课题组 (PI directory from the faculty homepage portal)
   // -------------------------------------------------------------
   Widget _buildGroupsTab(ThemeData theme, ColorScheme colorScheme) {
-    return RefreshIndicator(
-      onRefresh: _loadLocal,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+    final header = <Widget>[
+      _searchField(_groupSearchCtrl, '搜索课题组、导师姓名、院系或研究方向...'),
+      const SizedBox(height: 10),
+      Row(
         children: [
-          // Search input
-          TextField(
-            controller: _groupSearchCtrl,
-            decoration: InputDecoration(
-              hintText: '搜索课题组名称、导师姓名、研究方向...',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              suffixIcon: _groupSearchCtrl.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
-                      onPressed: () {
-                        _groupSearchCtrl.clear();
-                        _loadLocal();
-                      },
-                    )
-                  : null,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 10,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+          FilterChip(
+            // The avatar replaces the checkmark; showing both stacks them.
+            showCheckmark: false,
+            avatar: Icon(
+              _groupFollowedOnly ? Icons.star : Icons.star_border,
+              size: 16,
             ),
-            onChanged: (_) => _loadLocal(),
+            label: const Text('已关注'),
+            selected: _groupFollowedOnly,
+            onSelected: (val) {
+              setState(() => _groupFollowedOnly = val);
+              _loadLocal();
+            },
           ),
-          const SizedBox(height: 10),
-
-          // Filter row: [全部 vs 已关注] and Department dropdown
-          Row(
-            children: [
-              FilterChip(
-                avatar: Icon(
-                  _groupFollowedOnly ? Icons.star : Icons.star_border,
-                  size: 16,
+          const SizedBox(width: 10),
+          Expanded(
+            child: DropdownButtonFormField<String>(
+              initialValue: _selectedGroupDepartment,
+              isExpanded: true,
+              decoration: InputDecoration(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
                 ),
-                label: const Text('已关注课题组'),
-                selected: _groupFollowedOnly,
-                onSelected: (val) {
-                  setState(() => _groupFollowedOnly = val);
-                  _loadLocal();
-                },
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _selectedGroupDepartment,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+              items: [
+                for (final dept in _service.availableDepartments)
+                  DropdownMenuItem(
+                    value: dept,
+                    child: Text(
+                      dept == '全部' ? '全部院系' : dept,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13),
                     ),
                   ),
-                  items: [
-                    for (final dept in _service.availableDepartments)
-                      DropdownMenuItem(
-                        value: dept,
-                        child: Text(
-                          dept == '全部' ? '全部院系' : dept,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      ),
-                  ],
-                  onChanged: (dept) {
-                    if (dept != null) {
-                      setState(() => _selectedGroupDepartment = dept);
-                      _loadLocal();
-                    }
-                  },
-                ),
-              ),
-            ],
+              ],
+              onChanged: (dept) {
+                if (dept != null) {
+                  setState(() => _selectedGroupDepartment = dept);
+                  _loadLocal();
+                }
+              },
+            ),
           ),
-          const SizedBox(height: 14),
-
-          // Group list
-          if (_groupList.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 48),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.science_outlined,
-                      size: 48,
-                      color: colorScheme.outline,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      _groupFollowedOnly
-                          ? '暂未关注任何课题组，可在全部列表中点击「关注」'
-                          : '暂无匹配的课题组',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.outline,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            for (final group in _groupList)
-              _buildGroupCard(group, theme, colorScheme),
         ],
       ),
+      const SizedBox(height: 10),
+      _sourceLine(
+        theme,
+        '来源：复旦大学教师个人主页（faculty.fudan.edu.cn）按院系逐一整理，'
+        '共 ${researchGroupDirectory.length} 位导师，'
+        '更新于 $researchGroupDirectoryDate',
+      ),
+    ];
+    final empty = _groupList.isEmpty
+        ? _emptyState(
+            theme,
+            Icons.science_outlined,
+            _groupFollowedOnly ? '暂未关注任何课题组，可在全部列表中点击「关注」' : '暂无匹配的课题组',
+          )
+        : null;
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      itemCount: header.length + (empty != null ? 1 : _groupList.length),
+      itemBuilder: (context, i) {
+        if (i < header.length) return header[i];
+        if (empty != null) return empty;
+        return _buildGroupCard(
+          _groupList[i - header.length],
+          theme,
+          colorScheme,
+        );
+      },
     );
   }
 
@@ -702,8 +718,9 @@ class _ResearchPageState extends State<ResearchPage>
     ColorScheme colorScheme,
   ) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       clipBehavior: Clip.antiAlias,
+      elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
@@ -719,7 +736,6 @@ class _ResearchPageState extends State<ResearchPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header row: Group Name & Follow toggle button
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -729,13 +745,16 @@ class _ResearchPageState extends State<ResearchPage>
                       children: [
                         Text(
                           group.name,
-                          style: theme.textTheme.titleMedium?.copyWith(
+                          style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${group.leader} · ${group.leaderTitle}',
+                          [
+                            group.leader,
+                            if (group.leaderTitle.isNotEmpty) group.leaderTitle,
+                          ].join(' · '),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                           ),
@@ -744,161 +763,33 @@ class _ResearchPageState extends State<ResearchPage>
                     ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton.tonal(
-                    onPressed: () {
-                      _service.toggleFollowGroup(group.id);
-                    },
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      visualDensity: VisualDensity.compact,
+                  IconButton(
+                    tooltip: group.isFollowed ? '取消关注' : '关注',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      group.isFollowed ? Icons.star : Icons.star_border,
+                      color: group.isFollowed
+                          ? colorScheme.primary
+                          : colorScheme.outline,
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          group.isFollowed ? Icons.check : Icons.add,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(group.isFollowed ? '已关注' : '关注'),
-                      ],
-                    ),
+                    onPressed: () => _service.toggleFollowGroup(group.id),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-
-              // Badges: Department & Campus
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      group.department,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      group.campus,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  if (group.websiteUrl.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colorScheme.tertiaryContainer.withAlpha(140),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.language,
-                            size: 11,
-                            color: colorScheme.onTertiaryContainer,
-                          ),
-                          const SizedBox(width: 2),
-                          Text(
-                            '官网',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: colorScheme.onTertiaryContainer,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  if (group.recruitment != null) ...[
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colorScheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        '招生招募中',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: colorScheme.onSecondaryContainer,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 10),
-
-              // Direction chips
+              const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
                 runSpacing: 4,
                 children: [
+                  _tag(colorScheme, group.department),
                   for (final dir in group.researchDirections.take(3))
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colorScheme.primaryContainer.withAlpha(100),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        dir,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: colorScheme.onPrimaryContainer,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
+                    _tag(colorScheme, dir, strong: true),
                   if (group.researchDirections.length > 3)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Text(
-                        '+${group.researchDirections.length - 3}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: colorScheme.outline,
-                        ),
+                    Text(
+                      '+${group.researchDirections.length - 3}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: colorScheme.outline,
                       ),
                     ),
                 ],
@@ -1696,283 +1587,172 @@ class _ResearchPageState extends State<ResearchPage>
   }
 
   // -------------------------------------------------------------
-  // TAB 4: 学术讲座 (Lectures & Seminars)
+  // TAB 4: 学术讲座 (live department lecture columns)
   // -------------------------------------------------------------
   Widget _buildLecturesTab(ThemeData theme, ColorScheme colorScheme) {
+    final header = <Widget>[
+      _searchField(_lectureSearchCtrl, '搜索讲座标题或主办院系...'),
+      const SizedBox(height: 10),
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            FilterChip(
+              // The bookmark avatar replaces the checkmark; with both, a
+              // selected chip drew the check on top of the icon.
+              showCheckmark: false,
+              avatar: Icon(
+                _lectureBookmarkedOnly ? Icons.bookmark : Icons.bookmark_border,
+                size: 16,
+              ),
+              label: Text(
+                _service.bookmarkedLectureIds.isEmpty
+                    ? '想去'
+                    : '想去 (${_service.bookmarkedLectureIds.length})',
+              ),
+              selected: _lectureBookmarkedOnly,
+              onSelected: (val) {
+                setState(() => _lectureBookmarkedOnly = val);
+                _loadLocal();
+              },
+            ),
+            const SizedBox(width: 8),
+            for (final cat in _lectureCategories) ...[
+              ChoiceChip(
+                label: Text(cat),
+                selected: _selectedLectureCategory == cat,
+                onSelected: (_) {
+                  setState(() => _selectedLectureCategory = cat);
+                  _loadLocal();
+                },
+              ),
+              const SizedBox(width: 8),
+            ],
+          ],
+        ),
+      ),
+      const SizedBox(height: 10),
+      _sourceLine(
+        theme,
+        '来源：${ResearchService.lectureColumns.length} 个院系的讲座与学术活动栏目，按发布日期排列'
+        '${_service.lectureFailedColumns > 0 ? '（${_service.lectureFailedColumns} 个栏目暂未读取）' : ''}',
+      ),
+    ];
+    final Widget? status = _lectureError != null && !_service.hasLectures
+        ? _loadError(theme, _lectureError!, () => _loadLectures(refresh: true))
+        : !_service.hasLectures
+        ? const Padding(
+            padding: EdgeInsets.only(top: 48),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        : _lectureList.isEmpty
+        ? _emptyState(
+            theme,
+            Icons.event_busy_outlined,
+            _lectureBookmarkedOnly ? '暂未标记想去的讲座' : '暂无匹配的学术讲座',
+          )
+        : null;
     return RefreshIndicator(
-      onRefresh: _loadLocal,
-      child: ListView(
+      onRefresh: () => _loadLectures(refresh: true),
+      child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          // Search input
-          TextField(
-            controller: _lectureSearchCtrl,
-            decoration: InputDecoration(
-              hintText: '搜索讲座主题、主讲学者、报告地点或主办方...',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              suffixIcon: _lectureSearchCtrl.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
-                      onPressed: () {
-                        _lectureSearchCtrl.clear();
-                        _loadLocal();
-                      },
-                    )
-                  : null,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 10,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onChanged: (_) => _loadLocal(),
-          ),
-          const SizedBox(height: 10),
+        itemCount: header.length + (status != null ? 1 : _lectureList.length),
+        itemBuilder: (context, i) {
+          if (i < header.length) return header[i];
+          if (status != null) return status;
+          return _buildLectureCard(
+            _lectureList[i - header.length],
+            theme,
+            colorScheme,
+          );
+        },
+      ),
+    );
+  }
 
-          // Filters: [已标想去] + Category Chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                FilterChip(
-                  avatar: Icon(
-                    _lectureBookmarkedOnly
-                        ? Icons.bookmark
-                        : Icons.bookmark_border,
-                    size: 16,
-                  ),
-                  label: const Text('已标想去'),
-                  selected: _lectureBookmarkedOnly,
-                  onSelected: (val) {
-                    setState(() => _lectureBookmarkedOnly = val);
-                    _loadLocal();
-                  },
-                ),
-                const SizedBox(width: 8),
-                for (final cat in _service.availableLectureCategories) ...[
-                  FilterChip(
-                    label: Text(cat),
-                    selected: _selectedLectureCategory == cat,
-                    onSelected: (selected) {
-                      setState(() {
-                        _selectedLectureCategory = selected ? cat : '全部';
-                      });
-                      _loadLocal();
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          if (_lectureList.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 48),
+  Widget _buildLectureCard(
+    ResearchLectureItem lec,
+    ThemeData theme,
+    ColorScheme colorScheme,
+  ) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      clipBehavior: Clip.antiAlias,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: lec.isBookmarked
+              ? colorScheme.primary.withAlpha(120)
+              : colorScheme.outlineVariant,
+        ),
+      ),
+      child: InkWell(
+        onTap: () => _openArticle(lec.url),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 4, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.event_busy_outlined,
-                      size: 48,
-                      color: colorScheme.outline,
+                    Row(
+                      children: [
+                        _tag(colorScheme, lec.category, strong: true),
+                        const SizedBox(width: 6),
+                        Flexible(child: _tag(colorScheme, lec.organizer)),
+                      ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Text(
-                      _lectureBookmarkedOnly ? '暂未标记想去的讲座' : '暂无匹配的学术讲座与学术报告',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.outline,
+                      lec.title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        height: 1.35,
                       ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.event_outlined,
+                          size: 14,
+                          color: colorScheme.outline,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '发布于 ${lec.publishDate}',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: colorScheme.outline,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.open_in_new,
+                          size: 14,
+                          color: colorScheme.outline,
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-            )
-          else
-            for (final lec in _lectureList)
-              Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(
-                    color: lec.isBookmarked
-                        ? colorScheme.primary.withAlpha(120)
-                        : colorScheme.outlineVariant,
-                  ),
+              // Its own column, so the button never sits on top of the tags.
+              IconButton(
+                tooltip: lec.isBookmarked ? '取消想去' : '标记想去',
+                icon: Icon(
+                  lec.isBookmarked ? Icons.bookmark : Icons.bookmark_border,
+                  color: lec.isBookmarked
+                      ? colorScheme.primary
+                      : colorScheme.outline,
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Header Row: Category Badge & Bookmark
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: colorScheme.primaryContainer,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              lec.category,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: colorScheme.onPrimaryContainer,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              lec.campus,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                          const Spacer(),
-                          IconButton(
-                            tooltip: lec.isBookmarked ? '取消想去' : '标记想去',
-                            icon: Icon(
-                              lec.isBookmarked
-                                  ? Icons.bookmark
-                                  : Icons.bookmark_border,
-                              color: lec.isBookmarked
-                                  ? colorScheme.primary
-                                  : colorScheme.outline,
-                            ),
-                            onPressed: () {
-                              _service.toggleBookmarkLecture(lec.id);
-                            },
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-
-                      Text(
-                        lec.title,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          height: 1.3,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.person_outline,
-                            size: 16,
-                            color: colorScheme.primary,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              '${lec.speaker} (${lec.speakerTitle})',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.schedule_outlined,
-                            size: 16,
-                            color: colorScheme.outline,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            lec.time,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.place_outlined,
-                            size: 16,
-                            color: colorScheme.outline,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              lec.venue,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.account_balance_outlined,
-                            size: 16,
-                            color: colorScheme.outline,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              '主办：${lec.organizer}',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: colorScheme.surfaceContainerHighest.withAlpha(
-                            100,
-                          ),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          lec.description,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                onPressed: () => _service.toggleBookmarkLecture(lec.id),
               ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }

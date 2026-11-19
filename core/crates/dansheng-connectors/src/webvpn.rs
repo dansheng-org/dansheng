@@ -342,6 +342,16 @@ mod tests {
             "https://fudan.edu.cn",
             "http://fdjwgl.fudan.edu.cn",
             "http://xxb.fudan.edu.cn",
+            // Public department columns (site_list): read anonymously and
+            // directly, never through the account gateway.
+            "http://econ.fudan.edu.cn",
+            "http://math.fudan.edu.cn",
+            "https://ai.fudan.edu.cn",
+            "https://chemistry.fudan.edu.cn",
+            "https://econ.fudan.edu.cn",
+            "https://fit.fudan.edu.cn",
+            "https://law.fudan.edu.cn",
+            "https://math.fudan.edu.cn",
         ];
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut missing = std::collections::BTreeSet::new();
