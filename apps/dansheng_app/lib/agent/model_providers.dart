@@ -8,8 +8,12 @@ import 'dart:typed_data';
 
 import 'agent_types.dart';
 
-const _maxOutputTokens = 1024;
+part 'model_responses.dart';
+
+const _maxOutputTokens = 4096;
+const _maxReasoningOutputTokens = 32768;
 const _maxRequestBytes = 128 * 1024;
+const _maxReasoningReplayBytes = 2 * 1024 * 1024;
 // Allow for base64 expansion of a 2 MiB attachment and the JSON envelope.
 const _maxAttachmentRequestBytes = 3 * 1024 * 1024;
 // Campus PDF fallbacks can carry up to 8 MiB before base64 encoding.
@@ -20,7 +24,8 @@ const _textAttachmentMimeTypes = {
   'text/csv',
   'application/json',
 };
-const _maxStreamBytes = 512 * 1024;
+// SSE metadata often takes more space than the token carried in each frame.
+const _streamBytesPerOutputToken = 512;
 const _maxBlocks = 128;
 const _ioTimeout = Duration(seconds: 60);
 const _cancelled = AgentFailure('模型请求已取消。');
@@ -45,6 +50,8 @@ class StreamingAgentModel implements AgentModel {
   final _pending = <Completer<AgentMessage>>{};
   // The runner reuses the returned message on the same model for each tool round.
   final _anthropicBlocks = Expando<List<Json>>();
+  final _deepSeekReasoning = Expando<String>();
+  final _responsesOutput = Expando<List<Json>>();
   final _deepSeekFiles = Expando<Future<_DeepSeekFile>>();
   bool _closed = false;
 
@@ -87,20 +94,44 @@ class StreamingAgentModel implements AgentModel {
       final provider = _config.provider;
       final configuredUri = _endpoint(_config);
       final officialDeepSeek = configuredUri.origin == _deepSeekFilesUri.origin;
-      final deepSeekChat = officialDeepSeek
-          ? _deepSeekChatEndpoint(configuredUri, provider)
+      final deepSeekEndpoint = officialDeepSeek
+          ? _deepSeekEndpoint(configuredUri, provider)
           : null;
-      final uri = deepSeekChat ?? configuredUri;
+      final uri = deepSeekEndpoint ?? configuredUri;
+      final deepSeek = deepSeekEndpoint != null;
+      final reasoning = _reasoningOptions(_config, deepSeek: deepSeek);
+      final deepSeekToolThinking =
+          deepSeek &&
+          provider == ModelProvider.openAi &&
+          reasoning.isEnabled &&
+          tools.isNotEmpty;
+      final outputTokens = reasoning.isEnabled
+          ? _maxReasoningOutputTokens
+          : _maxOutputTokens;
       _validateRequest(_config, messages, tools);
+      final requestMessages = switch (provider) {
+        ModelProvider.openAiResponses => _responsesRequestMessages(
+          messages,
+          allowRetry: tools.isEmpty,
+          foldHistory: deepSeek && reasoning.isEnabled,
+        ),
+        ModelProvider.openAi when deepSeekToolThinking => _deepSeekCurrentTurn(
+          messages,
+        ),
+        _ => messages,
+      };
       final deepSeekPdfs = officialDeepSeek
           ? <AgentAttachment, Uint8List>{}
           : null;
-      final requestLimit = _attachmentRequestLimit(messages, deepSeekPdfs);
+      final requestLimit = _attachmentRequestLimit(
+        requestMessages,
+        deepSeekPdfs,
+      );
       final fileSources = <AgentAttachment, Json>{};
       if (deepSeekPdfs != null && deepSeekPdfs.isNotEmpty) {
-        if (deepSeekChat == null) {
+        if (deepSeekEndpoint == null) {
           throw const _ProviderFailure(
-            'DeepSeek PDF 需要使用官方聊天 API。请检查 API 地址和协议。',
+            'DeepSeek PDF 需要使用官方 API。请检查 API 地址和协议。',
           );
         }
         if (!_supportsDeepSeekPdf(_config)) {
@@ -109,17 +140,40 @@ class StreamingAgentModel implements AgentModel {
         // Validate the complete JSON envelope before starting a billable upload.
         final longestId = 'file-api-${'0' * 128}';
         for (final attachment in deepSeekPdfs.keys) {
-          fileSources[attachment] = {'type': 'file', 'file_id': longestId};
+          fileSources[attachment] = {
+            'type': provider == ModelProvider.openAiResponses
+                ? 'input_file'
+                : 'file',
+            'file_id': longestId,
+          };
+        }
+      }
+      final anthropicReplay = <AgentMessage, List<Json>>{};
+      final deepSeekReplay = <AgentMessage, String>{};
+      final responsesReplay = <AgentMessage, List<Json>>{};
+      for (final message in requestMessages) {
+        if (_anthropicBlocks[message] case final blocks?) {
+          anthropicReplay[message] = blocks;
+        }
+        if (deepSeekToolThinking && message.role == AgentRole.assistant) {
+          deepSeekReplay[message] = _deepSeekReasoning[message] ?? '';
+        }
+        if (_responsesOutput[message] case final items?) {
+          responsesReplay[message] = items;
         }
       }
       final body = await _requestBody(
         _config,
-        messages,
+        requestMessages,
         tools,
-        _anthropicBlocks,
+        anthropicReplay,
+        deepSeekReplay,
+        responsesReplay,
         requestLimit,
         fileSources,
-        deepSeek: deepSeekChat != null,
+        deepSeek: deepSeek,
+        reasoningFields: reasoning.fields,
+        outputTokens: outputTokens,
         uploadFiles: deepSeekPdfs == null || deepSeekPdfs.isEmpty
             ? null
             : () async {
@@ -141,6 +195,7 @@ class StreamingAgentModel implements AgentModel {
       request.headers.set(HttpHeaders.acceptHeader, 'text/event-stream');
       switch (provider) {
         case ModelProvider.openAi:
+        case ModelProvider.openAiResponses:
           request.headers.set(
             HttpHeaders.authorizationHeader,
             'Bearer ${_config.apiKey}',
@@ -185,9 +240,21 @@ class StreamingAgentModel implements AgentModel {
         }
       });
       readingStream = true;
-      final events = _sseEvents(response.timeout(_ioTimeout));
+      final events = _sseEvents(
+        response.timeout(_ioTimeout),
+        outputTokens * _streamBytesPerOutputToken,
+      );
       final result = await switch (provider) {
-        ModelProvider.openAi => _readOpenAi(events, turn),
+        ModelProvider.openAi => _readOpenAi(
+          events,
+          turn,
+          deepSeekToolThinking ? _deepSeekReasoning : null,
+        ),
+        ModelProvider.openAiResponses => _readResponses(
+          events,
+          turn,
+          _responsesOutput,
+        ),
         ModelProvider.anthropic => _readAnthropic(
           events,
           turn,
@@ -237,7 +304,7 @@ class StreamingAgentModel implements AgentModel {
 
   Future<_DeepSeekFile> _uploadDeepSeekPdf(Uint8List bytes) async {
     try {
-      // Both message protocols accept IDs from /files, which documents expiry.
+      // All DeepSeek model protocols accept IDs from /files.
       final expiresAt = _unixSeconds() + _deepSeekFileLifetime.inSeconds;
       final random = Random.secure();
       final boundary = base64UrlEncode(
@@ -337,21 +404,29 @@ Uri _endpoint(AgentModelConfig config) {
   while (prefix.isNotEmpty && prefix.last.isEmpty) {
     prefix.removeLast();
   }
+  if (config.provider == ModelProvider.openAiResponses &&
+      prefix.isNotEmpty &&
+      prefix.last == 'responses') {
+    return base.replace(pathSegments: prefix);
+  }
   return base.replace(
     pathSegments: [
       ...prefix,
       ...switch (config.provider) {
         ModelProvider.openAi => const ['chat', 'completions'],
+        ModelProvider.openAiResponses => const ['responses'],
         ModelProvider.anthropic => const ['messages'],
       },
     ],
   );
 }
 
-Uri? _deepSeekChatEndpoint(Uri uri, ModelProvider provider) =>
+Uri? _deepSeekEndpoint(Uri uri, ModelProvider provider) =>
     switch ((provider, uri.path)) {
       (ModelProvider.openAi, '/chat/completions' || '/v1/chat/completions') =>
         uri.replace(path: '/chat/completions'),
+      (ModelProvider.openAiResponses, '/responses' || '/v1/responses') =>
+        uri.replace(path: '/responses'),
       (
         ModelProvider.anthropic,
         '/anthropic/messages' || '/anthropic/v1/messages',
@@ -371,6 +446,135 @@ bool _supportsDeepSeekPdf(AgentModelConfig config) =>
         !config.model.startsWith('claude-opus'));
 
 int _unixSeconds() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+// A file returned by a tool is represented as a user message in the same turn.
+bool _isTurnStart(List<AgentMessage> messages, int index) {
+  final message = messages[index];
+  return message.role == AgentRole.user &&
+      (index == 0 ||
+          message.attachments.isEmpty ||
+          messages[index - 1].role != AgentRole.tool);
+}
+
+List<AgentMessage> _deepSeekCurrentTurn(
+  List<AgentMessage> messages, {
+  int? turnStart,
+}) {
+  final start = turnStart ?? _currentTurnStart(messages, messages.length - 1);
+  if (start <= 0) return messages;
+
+  // DeepSeek validates assistant reasoning on tool-enabled requests. Carry
+  // earlier visible dialogue as user context, without historical tool rows.
+  final history = [
+    for (var index = 0; index < start; index++)
+      if ((_isTurnStart(messages, index) ||
+              messages[index].role == AgentRole.assistant) &&
+          messages[index].text.trim().isNotEmpty)
+        {'role': messages[index].role.name, 'content': messages[index].text},
+  ];
+  if (history.isEmpty) return messages.sublist(start);
+
+  final transcript = utf8.decode(_encodeJson(history, _maxRequestBytes));
+  final user = messages[start];
+  return [
+    AgentMessage.user(
+      '以下 JSON 是先前对话，仅供参考。\n$transcript\n\n当前请求\n${user.text}',
+      attachments: user.attachments,
+    ),
+    ...messages.skip(start + 1),
+  ];
+}
+
+int _currentTurnStart(List<AgentMessage> messages, int index) {
+  while (index > 0 && !_isTurnStart(messages, index)) {
+    index--;
+  }
+  return index;
+}
+
+final _openAiReasoningModel = RegExp(
+  r'^(gpt-[56](?:[.-]|$)|o1(?:-\d|$)|o3(?:-|$)|o4-mini(?:-|$))',
+);
+final _anthropicAdaptiveModel = RegExp(
+  r'^claude-(opus-(4-[678]|5|5-5)|sonnet-(4-6|5|5-5)|haiku-5-5|'
+  r'fable-5(?:-[12])?|mythos-(5(?:-[12])?|preview))(?:-latest|-\d{8})?$',
+);
+final _anthropicExtendedModel = RegExp(
+  r'^claude-(opus-4(?:-[15])?|sonnet-4(?:-5)?|haiku-4-5|3-7-sonnet)'
+  r'(?:-latest|-\d{8})?$',
+);
+
+({Json fields, bool isEnabled}) _reasoningOptions(
+  AgentModelConfig config, {
+  required bool deepSeek,
+}) {
+  final effort = config.reasoningEffort;
+  final explicit = effort != AgentReasoningEffort.defaultEffort;
+  if (config.provider == ModelProvider.openAiResponses) {
+    return _responsesReasoning(config, deepSeek: deepSeek);
+  }
+  if (deepSeek) {
+    final level = switch (effort) {
+      AgentReasoningEffort.defaultEffort => null,
+      AgentReasoningEffort.low => 'low',
+      AgentReasoningEffort.medium => 'high',
+      AgentReasoningEffort.high => 'max',
+    };
+    return (
+      fields: {
+        'thinking': {'type': explicit ? 'enabled' : 'disabled'},
+        if (level != null)
+          if (config.provider == ModelProvider.openAi)
+            'reasoning_effort': level
+          else
+            'output_config': {'effort': level},
+      },
+      isEnabled: explicit,
+    );
+  }
+
+  final model = config.model.toLowerCase();
+  if (config.provider == ModelProvider.openAi) {
+    final supportsEffort =
+        _openAiReasoningModel.hasMatch(model) &&
+        !model.endsWith('-chat-latest');
+    final sendEffort =
+        explicit && (supportsEffort || config.baseUrl.host != 'api.openai.com');
+    return (
+      fields: {if (sendEffort) 'reasoning_effort': effort.name},
+      isEnabled: supportsEffort || sendEffort,
+    );
+  }
+
+  final adaptive = _anthropicAdaptiveModel.hasMatch(model);
+  if (!explicit) return (fields: {}, isEnabled: adaptive);
+  if (adaptive) {
+    return (
+      fields: {
+        'thinking': {'type': 'adaptive'},
+        'output_config': {'effort': effort.name},
+      },
+      isEnabled: true,
+    );
+  }
+  if (_anthropicExtendedModel.hasMatch(model)) {
+    final budget = switch (effort) {
+      AgentReasoningEffort.low => 1024,
+      AgentReasoningEffort.medium => 4096,
+      AgentReasoningEffort.high => 8192,
+      AgentReasoningEffort.defaultEffort => throw StateError('Expected effort'),
+    };
+    return (
+      fields: {
+        'thinking': {'type': 'enabled', 'budget_tokens': budget},
+        if (model.startsWith('claude-opus-4-5'))
+          'output_config': {'effort': effort.name},
+      },
+      isEnabled: true,
+    );
+  }
+  return (fields: {}, isEnabled: false);
+}
 
 void _validateRequest(
   AgentModelConfig config,
@@ -394,51 +598,81 @@ Future<Uint8List> _requestBody(
   AgentModelConfig config,
   List<AgentMessage> messages,
   List<AgentToolSpec> tools,
-  Expando<List<Json>> anthropicBlocks,
+  Map<AgentMessage, List<Json>> anthropicBlocks,
+  Map<AgentMessage, String> deepSeekReasoning,
+  Map<AgentMessage, List<Json>> responsesReplay,
   int requestLimit,
   Map<AgentAttachment, Json> fileSources, {
   required bool deepSeek,
+  required Json reasoningFields,
+  required int outputTokens,
   Future<void> Function()? uploadFiles,
 }) async {
   try {
     final openAi = config.provider == ModelProvider.openAi;
-    final payload = {
-      'model': config.model,
-      'stream': true,
-      if (openAi && !deepSeek)
-        'max_completion_tokens': _maxOutputTokens
-      else
-        'max_tokens': _maxOutputTokens,
-      // Thinking mode requires replaying all reasoning during tool rounds.
-      if (deepSeek) 'thinking': {'type': 'disabled'},
-      if (!openAi) 'system': agentSystemPrompt,
-      'messages': openAi
-          ? _openAiMessages(messages, fileSources)
-          : _anthropicMessages(messages, anthropicBlocks, fileSources),
-      if (tools.isNotEmpty)
-        'tools': [
-          for (final tool in tools)
-            if (openAi)
-              {
-                'type': 'function',
-                'function': {
-                  'name': tool.name,
-                  'description': tool.description,
-                  'parameters': tool.inputSchema,
-                },
-              }
+    final payload = config.provider == ModelProvider.openAiResponses
+        ? _responsesPayload(
+            config,
+            messages,
+            tools,
+            responsesReplay,
+            fileSources,
+            deepSeek: deepSeek,
+            reasoningFields: reasoningFields,
+            outputTokens: outputTokens,
+          )
+        : {
+            'model': config.model,
+            'stream': true,
+            if (openAi && !deepSeek)
+              'max_completion_tokens': outputTokens
             else
-              {
-                'name': tool.name,
-                'description': tool.description,
-                'input_schema': tool.inputSchema,
-              },
-        ],
-    };
-    final body = _encodeJson(payload, requestLimit);
+              'max_tokens': outputTokens,
+            ...reasoningFields,
+            if (!openAi) 'system': agentSystemPrompt,
+            'messages': openAi
+                ? _openAiMessages(messages, fileSources, deepSeekReasoning)
+                : _anthropicMessages(messages, anthropicBlocks, fileSources),
+            if (tools.isNotEmpty)
+              'tools': [
+                for (final tool in tools)
+                  if (openAi)
+                    {
+                      'type': 'function',
+                      'function': {
+                        'name': tool.name,
+                        'description': tool.description,
+                        'parameters': tool.inputSchema,
+                      },
+                    }
+                  else
+                    {
+                      'name': tool.name,
+                      'description': tool.description,
+                      'input_schema': tool.inputSchema,
+                    },
+              ],
+          };
+    final privateReplay = [
+      for (final reasoning in deepSeekReasoning.values)
+        {'reasoning_content': reasoning},
+      for (final blocks in anthropicBlocks.values)
+        for (final block in blocks)
+          if (block['type'] == 'thinking' ||
+              block['type'] == 'redacted_thinking')
+            block,
+      for (final items in responsesReplay.values)
+        for (final item in items)
+          if (item['type'] == 'reasoning') item,
+    ];
+    final replayBytes = privateReplay.isEmpty
+        ? 0
+        : _encodeJson(privateReplay, _maxReasoningReplayBytes).length;
+    final limit = requestLimit + replayBytes;
+    final body = _encodeJson(payload, limit);
     if (uploadFiles == null) return body;
     await uploadFiles();
-    return _encodeJson(payload, requestLimit);
+    return _encodeJson(payload, limit);
   } on _ProviderFailure {
     rethrow;
   } catch (_) {
@@ -539,10 +773,14 @@ List<Json> _userContentBlocks(
   ModelProvider provider,
   Map<AgentAttachment, Json> fileSources,
 ) => [
-  if (message.text.isNotEmpty) {'type': 'text', 'text': message.text},
+  if (message.text.isNotEmpty)
+    {'type': _userTextType(provider), 'text': message.text},
   for (final attachment in message.attachments)
     _attachmentBlock(attachment, provider, fileSources[attachment]),
 ];
+
+String _userTextType(ModelProvider provider) =>
+    provider == ModelProvider.openAiResponses ? 'input_text' : 'text';
 
 String _textAttachmentContent(AgentAttachment attachment) =>
     '文件数据 ${jsonEncode(attachment.name)}\n${attachment.text}';
@@ -554,13 +792,16 @@ Json _attachmentBlock(
 ) {
   if (fileSource != null) {
     return switch (provider) {
-      ModelProvider.openAi => fileSource,
+      ModelProvider.openAi || ModelProvider.openAiResponses => fileSource,
       ModelProvider.anthropic => {'type': 'document', 'source': fileSource},
     };
   }
   final mimeType = attachment.mimeType;
   if (_textAttachmentMimeTypes.contains(mimeType)) {
-    return {'type': 'text', 'text': _textAttachmentContent(attachment)};
+    return {
+      'type': _userTextType(provider),
+      'text': _textAttachmentContent(attachment),
+    };
   }
 
   final pdf = mimeType == 'application/pdf';
@@ -577,6 +818,15 @@ Json _attachmentBlock(
   }
 
   final dataUrl = 'data:$mimeType;base64,${attachment.base64Data}';
+  if (provider == ModelProvider.openAiResponses) {
+    return pdf
+        ? {
+            'type': 'input_file',
+            'filename': attachment.name,
+            'file_data': dataUrl,
+          }
+        : {'type': 'input_image', 'image_url': dataUrl, 'detail': 'auto'};
+  }
   return pdf
       ? {
           'type': 'file',
@@ -608,6 +858,7 @@ Object _openAiUserContent(
 List<Json> _openAiMessages(
   List<AgentMessage> messages,
   Map<AgentAttachment, Json> fileSources,
+  Map<AgentMessage, String> reasoning,
 ) {
   var remainingArgumentBytes = _maxRequestBytes;
 
@@ -634,6 +885,7 @@ List<Json> _openAiMessages(
           'content': message.text.isEmpty && message.calls.isNotEmpty
               ? null
               : message.text,
+          'reasoning_content': ?reasoning[message],
           if (message.calls.isNotEmpty)
             'tool_calls': [
               for (final call in message.calls)
@@ -655,7 +907,7 @@ List<Json> _openAiMessages(
 
 List<Json> _anthropicMessages(
   List<AgentMessage> messages,
-  Expando<List<Json>> replayBlocks,
+  Map<AgentMessage, List<Json>> replayBlocks,
   Map<AgentAttachment, Json> fileSources,
 ) {
   final history = <Json>[];
@@ -750,12 +1002,12 @@ class _RequestBytes implements Sink<List<int>> {
 
 typedef _SseEvent = ({String? name, String data});
 
-Stream<_SseEvent> _sseEvents(Stream<List<int>> stream) async* {
+Stream<_SseEvent> _sseEvents(Stream<List<int>> stream, int byteLimit) async* {
   var received = 0;
   final lines = stream
       .map((chunk) {
         received += chunk.length;
-        if (received > _maxStreamBytes) {
+        if (received > byteLimit) {
           throw const _ProviderFailure('模型响应流超过大小上限。');
         }
         return chunk;
@@ -794,7 +1046,9 @@ Stream<_SseEvent> _sseEvents(Stream<List<int>> stream) async* {
 Future<AgentMessage> _readOpenAi(
   Stream<_SseEvent> events,
   _AssistantTurn turn,
+  Expando<String>? replayReasoning,
 ) async {
+  final reasoning = replayReasoning == null ? null : StringBuffer();
   String? finish;
   var done = false;
   var refused = false;
@@ -819,6 +1073,10 @@ Future<AgentMessage> _readOpenAi(
       throw const _ProviderFailure('模型使用了旧版函数调用协议。');
     }
     turn.addText(_optionalString(delta['content']));
+    if (reasoning != null) {
+      final fragment = _optionalString(delta['reasoning_content']);
+      if (fragment != null) reasoning.write(fragment);
+    }
     refused |= _optionalString(delta['refusal'])?.isNotEmpty ?? false;
     if (delta['tool_calls'] case final Object calls) {
       for (final value in _array(calls)) {
@@ -836,9 +1094,9 @@ Future<AgentMessage> _readOpenAi(
     finish = _optionalString(choice['finish_reason']);
   }
   if (!done) throw _truncatedStream;
-  return switch (finish) {
+  final reply = switch (finish) {
     null => throw _truncatedStream,
-    'length' => throw _tokenLimit,
+    'length' => AgentMessage.assistantTruncated(turn.text.toString()),
     'content_filter' => throw _refusal,
     'function_call' => throw const _ProviderFailure('模型使用了旧版函数调用协议。'),
     'stop' || 'tool_calls' =>
@@ -847,6 +1105,10 @@ Future<AgentMessage> _readOpenAi(
           : turn.finish(expectsTools: finish == 'tool_calls'),
     _ => throw _unsupportedStop,
   };
+  if (replayReasoning != null && reply.calls.isNotEmpty) {
+    replayReasoning[reply] = reasoning!.toString();
+  }
+  return reply;
 }
 
 Future<AgentMessage> _readAnthropic(
@@ -933,7 +1195,7 @@ Future<AgentMessage> _readAnthropic(
         final reply = switch (finish) {
           'end_turn' || 'stop_sequence' => turn.finish(expectsTools: false),
           'tool_use' => turn.finish(expectsTools: true),
-          'max_tokens' => throw _tokenLimit,
+          'max_tokens' => AgentMessage.assistantTruncated(turn.text.toString()),
           'model_context_window_exceeded' => throw const _ProviderFailure(
             '模型达到上下文上限，响应不完整。',
           ),
@@ -1081,7 +1343,6 @@ const _invalidAttachment = _ProviderFailure('附件格式无效或不受支持�
 const _invalidDeepSeekFile = _ProviderFailure('DeepSeek 返回的 PDF 文件信息无效或已过期。');
 const _invalidStream = _ProviderFailure('模型服务返回的流格式无效。');
 const _truncatedStream = _ProviderFailure('模型响应流在完整结束前中断。');
-const _tokenLimit = _ProviderFailure('模型达到输出长度上限，响应不完整。');
 const _refusal = _ProviderFailure('模型拒绝生成或过滤了响应。');
 const _unsupportedStop = _ProviderFailure('模型返回了无法处理的结束原因。');
 

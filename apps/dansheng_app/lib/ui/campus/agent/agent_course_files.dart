@@ -3,6 +3,7 @@
 import '../../../agent/agent_campus_link.dart';
 import '../../../agent/agent_session.dart';
 import '../../../agent/agent_types.dart';
+import '../../../agent/campus_tools.dart';
 import '../campus_api.dart';
 import '../learning/models/canvas_models.dart';
 import 'agent_remote_files.dart';
@@ -15,7 +16,8 @@ Iterable<AgentTool> courseFileAgentTools(CampusApi api) => [
   AgentTool(
     spec: const AgentToolSpec(
       'campus_file_context',
-      '按名称查找文件所属的 Canvas 课程。提供课程 ID 后可按作业名称查找作业 ID。',
+      '按名称查找文件所属的 Canvas 课程。提供课程 ID 后可按作业名称查找作业 ID；'
+          '作业名称唯一匹配时附作业说明，包括已截止作业。',
       {
         'type': 'object',
         'properties': {'course_id': _idField, 'query': agentFileQueryField},
@@ -83,6 +85,7 @@ Future<Json> _fileContext(CampusApi api, Json args) async {
   if (result is! List) throw const AgentFailure('无法读取 Canvas 课程或作业列表。');
   final records = <Json>[];
   final links = <Json>[];
+  CanvasAssignment? matchedAssignment;
   for (final row in rowsOf(result)) {
     late final Json record;
     late final String title;
@@ -102,9 +105,10 @@ Future<Json> _fileContext(CampusApi api, Json args) async {
           assignment.courseId != courseId ||
           assignment.lockedForUser ||
           payloadOf(row)['published'] == false ||
-          !agentFileMatches(query, [assignment.name])) {
+          !agentCanvasNameMatches(assignment.name, query)) {
         continue;
       }
+      matchedAssignment = assignment;
       title = agentFileLabel(assignment.name);
       path = 'assignment/$courseId/${assignment.id}';
       record = {
@@ -117,6 +121,9 @@ Future<Json> _fileContext(CampusApi api, Json args) async {
     records.add({...record, 'url': url});
     links.add({'url': url, 'title': title});
     if (records.length == 20) break;
+  }
+  if (query.isNotEmpty && records.length == 1 && matchedAssignment != null) {
+    records.single.addAll(agentAssignmentDetails(matchedAssignment));
   }
   return {'source': _source, 'records': records, 'campus_links': links};
 }

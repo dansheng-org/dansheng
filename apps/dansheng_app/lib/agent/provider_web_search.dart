@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'agent_session.dart';
 import 'agent_types.dart';
+import 'model_catalog.dart';
 import 'web_search.dart' show agentWebQueryLimit;
 
 const _deepSeekQueryLimit = 128;
@@ -60,7 +61,10 @@ class ProviderWebSearch {
 
     HttpClient? client;
     try {
-      final base = AgentModelConfig.parseBaseUrl(_config.baseUrl.toString());
+      final base = normalizeModelApiPrefix(
+        AgentModelConfig.parseBaseUrl(_config.baseUrl.toString()),
+        provider: _config.provider,
+      );
       final endpoint = _endpoint(base, api);
       final key = _config.apiKey;
       if (key.isEmpty ||
@@ -262,11 +266,7 @@ bool _validQuery(String query, {required bool deepSeek}) =>
 
 Uri _endpoint(Uri base, _SearchApi api) {
   if (api == _SearchApi.deepSeek) return base.replace(pathSegments: api.path);
-  final prefix = base.pathSegments.toList();
-  while (prefix.isNotEmpty && prefix.last.isEmpty) {
-    prefix.removeLast();
-  }
-  return base.replace(pathSegments: [...prefix, ...api.path]);
+  return base.replace(pathSegments: [...base.pathSegments, ...api.path]);
 }
 
 Iterable<Json> _responsesResults(Json body) {

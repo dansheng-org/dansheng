@@ -37,6 +37,31 @@ class _Controller extends DanshengController {
   String get activeAccountId => 'fixture-account';
 }
 
+class _ConversationModel implements AgentModel {
+  _ConversationModel(this.replies);
+
+  final List<AgentMessage> replies;
+  final requests = <List<AgentMessage>>[];
+
+  @override
+  Future<AgentMessage> complete({
+    required List<AgentMessage> messages,
+    required List<AgentToolSpec> tools,
+    required void Function(String) onText,
+  }) async {
+    final reply = replies[requests.length];
+    requests.add(messages);
+    for (final call in reply.calls) {
+      expect(tools.map((tool) => tool.name), contains(call.name));
+    }
+    if (reply.text.isNotEmpty) onText(reply.text);
+    return reply;
+  }
+
+  @override
+  void close() {}
+}
+
 Json _cloudItem(String name, String path, {bool folder = false}) => {
   'name': name,
   'path': path,
@@ -73,6 +98,125 @@ void main() {
         tool.spec.name: tool,
     };
   });
+
+  test(
+    'answers Assignment 1 from its PDF and continues the conversation',
+    () async {
+      const question = '检查我芯片导论的assignment1的第一题，给出解答';
+      const firstQuestion = '第 1 题（合成夹具）：求给定模块的输出。';
+      const firstPart = '第一题的解法如下。先列出题设关系。';
+      const secondPart = '代入题设数值后得到结果，再做一次核对。';
+      bridge.respond = (method, params) => switch (method) {
+        'canvas.courses.sync' => [
+          {'id': '42', 'name': '芯片导论'},
+          {'id': '50', 'name': '其他课程'},
+        ],
+        'canvas.assignments.sync' => [
+          {
+            'id': '7',
+            'course_id': '42',
+            'name': 'Assignment 1',
+            'due_at': '2020-01-01T00:00:00Z',
+            'description':
+                '<p>题目见附件。</p>'
+                '<a href="/courses/42/files/20?verifier=fixture-secret">说明.pdf</a>',
+          },
+          {
+            'id': '70',
+            'course_id': '42',
+            'name': 'Assignment 10',
+            'description': '错误匹配',
+          },
+        ],
+        'canvas.materials.sync' => [],
+        'agent.remoteFile.read' => {
+          'name': '说明.pdf.txt',
+          'mime_type': 'text/plain',
+          'data': base64Encode(utf8.encode(firstQuestion)),
+          'extracted': true,
+        },
+        _ => throw StateError('Unexpected route: $method'),
+      };
+      final registry = campusAgentTools(
+        api,
+        activeAccount: () => api.accountScope!.accountId,
+        forumEnabled: () => true,
+      );
+      final model = _ConversationModel([
+        const AgentMessage.assistant('', [
+          AgentToolCall('course', 'campus_courses', {'query': '芯片导论'}),
+        ]),
+        const AgentMessage.assistant('', [
+          AgentToolCall('assignment', 'campus_assignments', {
+            'course_id': '42',
+            'query': 'Assignment1',
+          }),
+        ]),
+        const AgentMessage.assistant('', [
+          AgentToolCall('list', 'campus_course_files', {
+            'course_id': '42',
+            'assignment_id': '7',
+          }),
+        ]),
+        const AgentMessage.assistant('', [
+          AgentToolCall('read', 'campus_read_course_file', {
+            'course_id': '42',
+            'assignment_id': '7',
+            'file_id': '20',
+          }),
+        ]),
+        const AgentMessage.assistant('', [
+          AgentToolCall('page', 'campus_read_course_file', {
+            'course_id': '42',
+            'assignment_id': '7',
+            'file_id': '20',
+            'page': 1,
+          }),
+        ]),
+        const AgentMessage.assistantTruncated(firstPart),
+        const AgentMessage.assistant(secondPart),
+        const AgentMessage.assistant('沿用上一题的推导。'),
+      ]);
+      final session = AgentSession(model: model, registry: registry);
+      addTearDown(session.close);
+      final approvals = <AgentSourceKind>[];
+      Future<String> send(String question) => session.send(
+        question,
+        sources: {AgentSourceKind.learning, AgentSourceKind.files},
+        approve: (source) async {
+          approvals.add(source);
+          return true;
+        },
+        onText: (_) {},
+        onTool: (_) {},
+      );
+      expect(await send(question), '$firstPart\n\n$secondPart');
+      expect(approvals, [AgentSourceKind.learning, AgentSourceKind.files]);
+      final outgoing = model.requests[5];
+      final toolText = outgoing
+          .where((entry) => entry.role == AgentRole.tool)
+          .map((entry) => entry.text)
+          .join();
+      expect(toolText, contains('题目见附件'));
+      expect(toolText, isNot(contains('Assignment 10')));
+      expect(toolText, isNot(contains('fixture-secret')));
+      expect(outgoing.last.attachments.single.text, firstQuestion);
+      expect(model.requests[6].any((entry) => entry.text == firstPart), isTrue);
+      expect(await send('为什么用刚才那个公式？'), '沿用上一题的推导。');
+      final followup = model.requests.last;
+      expect(followup.map((entry) => entry.text), [
+        question,
+        '$firstPart\n\n$secondPart',
+        '为什么用刚才那个公式？',
+      ]);
+      expect(
+        followup.every(
+          (entry) => entry.attachments.isEmpty && entry.role != AgentRole.tool,
+        ),
+        isTrue,
+      );
+    },
+  );
 
   test(
     'enabling course files alone can resolve course and assignment names',

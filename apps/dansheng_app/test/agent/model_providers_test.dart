@@ -29,8 +29,339 @@ const _attachedUser = AgentMessage.user(
 );
 const _tool = AgentToolSpec('courses', 'List courses', {'type': 'object'});
 const _done = 'data: [DONE]\n\n';
+const _messageProviders = [ModelProvider.openAi, ModelProvider.anthropic];
 
 void main() {
+  group('Responses', () {
+    test(
+      'replays exact current output in order and folds earlier dialogue',
+      () async {
+        final thinking = {
+          'type': 'reasoning',
+          'id': 'rs-1',
+          'summary': [],
+          'content': [
+            {'type': 'reasoning_text', 'text': 'private reasoning'},
+          ],
+        };
+        final visible = _responsesMessage('我先查课程。');
+        final first = _responsesCall('call-first', '{ "page": 1 }');
+        final second = _responsesCall('call-second', '{invalid');
+        final output = [thinking, visible, first, second];
+        final nextCall = _responsesCall('call-next', '{}');
+        final client = _Client([
+          _Response.sse(
+            '${_event('response.reasoning_text.delta', {'delta': 'private'})}'
+            '${_responsesItemDone(0, thinking)}'
+            '${_responsesDelta('我先', output: 1)}'
+            '${_responsesDelta('查课程。', output: 1)}'
+            '${_responsesItemDone(1, visible)}'
+            '${_responsesItemDone(3, second)}'
+            '${_responsesItemDone(2, first)}'
+            '${_responsesTerminal(output)}',
+          ),
+          _Response.sse(_responsesTerminal([nextCall])),
+          _Response.sse(_responsesTerminal([_responsesMessage('完成')])),
+          _Response.sse(_responsesTerminal([_responsesMessage('新问题')])),
+        ]);
+        final model = _model(
+          ModelProvider.openAiResponses,
+          client,
+          base: 'https://api.deepseek.com/v1/',
+          name: 'deepseek-flash',
+          effort: AgentReasoningEffort.high,
+        );
+        addTearDown(model.close);
+        const oldUser = AgentMessage.user('older question');
+        const oldIntermediate = AgentMessage.assistant('older interim', [
+          AgentToolCall('old-call', 'courses', {}),
+        ]);
+        const oldResult = AgentMessage.tool(
+          'old-call',
+          'old structured result',
+        );
+        const oldAnswer = AgentMessage.assistant('older visible answer');
+        final messages = [
+          oldUser,
+          oldIntermediate,
+          oldResult,
+          oldAnswer,
+          _user,
+        ];
+        final deltas = <String>[];
+
+        Future<AgentMessage> complete([
+          List<AgentToolSpec> tools = const [_tool],
+        ]) => model.complete(
+          messages: [...messages],
+          tools: tools,
+          onText: deltas.add,
+        );
+
+        final reply = await complete();
+        expect(deltas, ['我先', '查课程。']);
+        expect(reply.text, '我先查课程。');
+        expect(reply.calls.map((call) => call.id), [
+          'call-first',
+          'call-second',
+        ]);
+        expect(reply.calls.first.arguments, {'page': 1});
+        expect(reply.calls.last.arguments, isNull);
+        final initial = client.requests.first;
+        expect(
+          client.urls.first,
+          Uri.parse('https://api.deepseek.com/responses'),
+        );
+        expect(initial.followRedirects, isFalse);
+        expect(initial.headers.value('authorization'), 'Bearer $_key');
+        expect(initial.headers.value('accept'), 'text/event-stream');
+        expect(initial.json, {
+          'model': 'deepseek-flash',
+          'stream': true,
+          'instructions': agentSystemPrompt,
+          'max_output_tokens': 32768,
+          'reasoning': {'effort': 'max'},
+          'input': [
+            {
+              'type': 'message',
+              'role': 'user',
+              'content': [
+                {
+                  'type': 'input_text',
+                  'text': allOf(
+                    contains('older question'),
+                    contains('older interim'),
+                    contains('older visible answer'),
+                    contains(_user.text),
+                    isNot(contains('old structured result')),
+                  ),
+                },
+              ],
+            },
+          ],
+          'tools': [
+            {
+              'type': 'function',
+              'name': _tool.name,
+              'description': _tool.description,
+              'parameters': _tool.inputSchema,
+            },
+          ],
+        });
+
+        messages.addAll([
+          reply,
+          const AgentMessage.tool('call-first', '{"ok":true}'),
+          const AgentMessage.tool('call-second', '{"error":"invalid"}'),
+        ]);
+        final continuation = await complete();
+        final secondInput = client.requests[1].json['input'] as List<dynamic>;
+        expect(secondInput, [
+          initial.json['input'][0],
+          ...output,
+          {
+            'type': 'function_call_output',
+            'call_id': 'call-first',
+            'output': '{"ok":true}',
+          },
+          {
+            'type': 'function_call_output',
+            'call_id': 'call-second',
+            'output': '{"error":"invalid"}',
+          },
+        ]);
+        messages.addAll([
+          continuation,
+          const AgentMessage.tool('call-next', '{}'),
+          _attachedUser,
+        ]);
+        final answer = await complete([]);
+        final thirdInput = client.requests[2].json['input'] as List<dynamic>;
+        expect(thirdInput.take(secondInput.length), secondInput);
+        expect(thirdInput[secondInput.length], nextCall);
+        expect(
+          thirdInput.last['content'],
+          contains(
+            equals({
+              'type': 'input_image',
+              'image_url': 'data:image/png;base64,${_png.base64Data}',
+              'detail': 'auto',
+            }),
+          ),
+        );
+        expect(answer.text, '完成');
+
+        messages.addAll([answer, const AgentMessage.user('current follow-up')]);
+        await complete();
+        final nextWire = jsonEncode(client.requests[3].json['input']);
+        expect(nextWire, contains('current follow-up'));
+        expect(nextWire, contains('完成'));
+        expect(nextWire, isNot(contains('private reasoning')));
+        expect(nextWire, isNot(contains('function_call')));
+        expect(deltas, ['我先', '查课程。', '完成', '新问题']);
+      },
+    );
+
+    for (final (effort, level) in [
+      (AgentReasoningEffort.defaultEffort, null),
+      (AgentReasoningEffort.low, 'low'),
+      (AgentReasoningEffort.medium, 'high'),
+    ]) {
+      test('uses DeepSeek Responses effort ${effort.name}', () async {
+        final client = _Client([_Response.sse(_responsesTerminal([]))]);
+        final model = _model(
+          ModelProvider.openAiResponses,
+          client,
+          base: 'https://api.deepseek.com/responses',
+          name: 'deepseek-v4-pro',
+          effort: effort,
+        );
+        addTearDown(model.close);
+        await _complete(model);
+        expect(client.urls.single.path, '/responses');
+        final json = client.requests.single.json;
+        expect(json['reasoning'], level == null ? null : {'effort': level});
+        expect(json['max_output_tokens'], 32768);
+      });
+    }
+
+    test('uploads DeepSeek PDFs once and sends the actual file ID', () async {
+      final client = _Client([
+        _Response.json('{"id":"file-api-test-pdf"}'),
+        _Response.sse(_responsesTerminal([_responsesMessage('Read.')])),
+        _Response.sse(_responsesTerminal([_responsesMessage('Read again.')])),
+      ]);
+      final model = _model(
+        ModelProvider.openAiResponses,
+        client,
+        base: 'https://api.deepseek.com',
+        name: 'deepseek-flash',
+      );
+      addTearDown(model.close);
+      const attachment = AgentAttachment(
+        name: 'notes.txt',
+        mimeType: 'text/plain',
+        base64Data: '',
+        text: 'synthetic notes',
+      );
+      const message = AgentMessage.user(
+        '',
+        attachments: [_pdf, attachment, _png],
+      );
+      for (var index = 0; index < 2; index++) {
+        await model.complete(messages: [message], tools: [], onText: (_) {});
+      }
+      expect(client.urls.map((url) => url.path), [
+        '/files',
+        '/responses',
+        '/responses',
+      ]);
+      final upload = client.requests.first;
+      expect(upload.headers.value('authorization'), 'Bearer $_key');
+      expect(utf8.decode(upload.body), contains('text_recognition'));
+      expect(utf8.decode(upload.body), contains('%PDF-'));
+      for (final request in client.requests.skip(1)) {
+        expect(request.json['input'][0]['content'], [
+          {'type': 'input_file', 'file_id': 'file-api-test-pdf'},
+          {'type': 'input_text', 'text': '文件数据 "notes.txt"\nsynthetic notes'},
+          {
+            'type': 'input_image',
+            'image_url': 'data:image/png;base64,${_png.base64Data}',
+            'detail': 'auto',
+          },
+        ]);
+      }
+    });
+
+    test('streams text immediately and returns at the terminal event', () async {
+      final stream = StreamController<List<int>>();
+      final client = _Client([_Response(stream.stream)]);
+      final model = _model(ModelProvider.openAiResponses, client);
+      addTearDown(model.close);
+      final streamed = Completer<void>();
+      final deltas = <String>[];
+      final result = model.complete(
+        messages: [_user],
+        tools: [],
+        onText: (delta) {
+          deltas.add(delta);
+          if (!streamed.isCompleted) streamed.complete();
+        },
+      );
+      await client.requestSent.future;
+      stream.add(utf8.encode(_responsesDelta('first')));
+      await streamed.future;
+      expect(deltas, ['first']);
+      stream.add(
+        utf8.encode(
+          '${_event('response.output_text.done', {'output_index': 0, 'content_index': 0, 'text': 'first'})}'
+          '${_responsesTerminal([_responsesMessage('first')])}',
+        ),
+      );
+      try {
+        expect((await result).text, 'first');
+        expect(deltas, ['first']);
+      } finally {
+        await stream.close();
+      }
+    });
+
+    test('reports incomplete visible output and discards unfinished calls', () async {
+      final client = _Client([
+        _Response.sse(
+          '${_responsesDelta('First')}'
+          '${_responsesDelta('Later', output: 1)}'
+          '${_responsesTerminal([_responsesMessage('First finished'), _responsesMessage('Later'), _responsesCall('partial-call', '{')], status: 'incomplete', reason: 'max_output_tokens')}',
+        ),
+      ]);
+      final model = _model(ModelProvider.openAiResponses, client);
+      addTearDown(model.close);
+      final deltas = <String>[];
+      final reply = await model.complete(
+        messages: [_user],
+        tools: [_tool],
+        onText: deltas.add,
+      );
+      expect(reply.outputTruncated, isTrue);
+      expect(reply.calls, isEmpty);
+      expect(reply.text, 'First finishedLater');
+      expect(deltas, ['First', ' finishedLater']);
+    });
+
+    for (final (wire, failure) in [
+      (
+        _event('error', {'code': 'rate_limit_exceeded', 'message': _key}),
+        '速率或配额',
+      ),
+      (
+        _responsesTerminal(
+          [],
+          status: 'failed',
+          error: {'code': 'server_error', 'message': _key},
+        ),
+        '繁忙',
+      ),
+      (
+        _responsesTerminal([], status: 'incomplete', reason: 'content_filter'),
+        '过滤',
+      ),
+      (_responsesDelta('partial'), '完整结束前中断'),
+      (_done, '完整结束前中断'),
+    ]) {
+      test(
+        'handles early or terminal Responses error $failure (${wire.length})',
+        () async {
+          final model = _model(
+            ModelProvider.openAiResponses,
+            _Client([_Response.sse(wire)]),
+          );
+          addTearDown(model.close);
+          await expectLater(_complete(model), _failsWith(failure));
+        },
+      );
+    }
+  });
+
   test(
     'OpenAI streams UTF-8 and indexed calls, then replays tool outputs',
     () async {
@@ -93,7 +424,8 @@ void main() {
       expect(request.headers.value('x-api-key'), isNull);
       expect(request.headers.value('accept'), 'text/event-stream');
       expect(request.json, containsPair('stream', true));
-      expect(request.json, containsPair('max_completion_tokens', 1024));
+      expect(request.json, containsPair('max_completion_tokens', 4096));
+      expect(request.json, isNot(contains('reasoning_effort')));
       expect(request.json['messages'], [
         {'role': 'system', 'content': agentSystemPrompt},
         {
@@ -214,7 +546,8 @@ void main() {
     expect(request.headers.value('anthropic-version'), '2023-06-01');
     expect(request.headers.value('authorization'), isNull);
     expect(request.json, containsPair('system', agentSystemPrompt));
-    expect(request.json, containsPair('max_tokens', 1024));
+    expect(request.json, containsPair('max_tokens', 4096));
+    expect(request.json, isNot(contains('thinking')));
     expect(request.json['tools'], [
       {
         'name': 'courses',
@@ -338,7 +671,7 @@ void main() {
       },
     );
 
-    for (final provider in ModelProvider.values) {
+    for (final provider in _messageProviders) {
       test('${provider.name} encodes mixed files and attachment-only input', () async {
         final openAi = provider == ModelProvider.openAi;
         final client = _Client([
@@ -572,7 +905,7 @@ void main() {
     const fileId = 'file-api-pdf-test';
     final filesUri = Uri.parse('https://api.deepseek.com/files');
 
-    for (final provider in ModelProvider.values) {
+    for (final provider in _messageProviders) {
       test('${provider.name} uploads and reuses a PDF across tool calls', () async {
         final openAi = provider == ModelProvider.openAi;
         final client = _Client([
@@ -665,7 +998,7 @@ void main() {
             request.headers.value('anthropic-beta'),
             openAi ? null : 'files-api-2025-04-14',
           );
-          expect(request.json, containsPair('max_tokens', 1024));
+          expect(request.json, containsPair('max_tokens', 4096));
           expect(request.json, isNot(contains('max_completion_tokens')));
           expect(request.json, containsPair('thinking', {'type': 'disabled'}));
           final messages = (request.json['messages'] as List).cast<Json>();
@@ -925,7 +1258,274 @@ void main() {
     );
   });
 
+  group('reasoning effort', () {
+    for (final effort in AgentReasoningEffort.values.skip(1)) {
+      test('OpenAI sends ${effort.name} with a larger output budget', () async {
+        final client = _Client([
+          _Response.sse('${_chat({'content': 'Done.'}, finish: 'stop')}$_done'),
+        ]);
+        final model = _model(
+          ModelProvider.openAi,
+          client,
+          base: 'https://api.openai.com/v1',
+          name: 'gpt-5.5',
+          effort: effort,
+        );
+        addTearDown(model.close);
+        final reply = await _complete(model);
+        expect(reply.outputTruncated, isFalse);
+        expect(
+          client.requests.single.json,
+          containsPair('reasoning_effort', effort.name),
+        );
+        expect(
+          client.requests.single.json,
+          containsPair('max_completion_tokens', 32768),
+        );
+      });
+    }
+
+    test('OpenAI omits effort for an official non-reasoning model', () async {
+      final client = _Client([_deepSeekAnswer(ModelProvider.openAi)]);
+      final model = _model(
+        ModelProvider.openAi,
+        client,
+        base: 'https://api.openai.com/v1',
+        name: 'gpt-4.1',
+        effort: AgentReasoningEffort.high,
+      );
+      addTearDown(model.close);
+      await _complete(model);
+      expect(client.requests.single.json, isNot(contains('reasoning_effort')));
+      expect(
+        client.requests.single.json,
+        containsPair('max_completion_tokens', 4096),
+      );
+    });
+
+    for (final (name, thinking, outputConfig) in [
+      ('claude-sonnet-4-6', {'type': 'adaptive'}, {'effort': 'medium'}),
+      (
+        'claude-opus-4-5-20251101',
+        {'type': 'enabled', 'budget_tokens': 4096},
+        {'effort': 'medium'},
+      ),
+      (
+        'claude-haiku-4-5-20251001',
+        {'type': 'enabled', 'budget_tokens': 4096},
+        null,
+      ),
+      ('claude-3-haiku-20240307', null, null),
+    ]) {
+      test('Anthropic selects supported fields for $name', () async {
+        final client = _Client([_deepSeekAnswer(ModelProvider.anthropic)]);
+        final model = _model(
+          ModelProvider.anthropic,
+          client,
+          base: 'https://api.anthropic.com/v1',
+          name: name,
+          effort: AgentReasoningEffort.medium,
+        );
+        addTearDown(model.close);
+        await _complete(model);
+        final body = client.requests.single.json;
+        expect(body['thinking'], thinking);
+        expect(body['output_config'], outputConfig);
+        expect(body['max_tokens'], thinking == null ? 4096 : 32768);
+        expect(body, isNot(contains('reasoning_effort')));
+      });
+    }
+
+    for (final provider in _messageProviders) {
+      for (final (effort, level) in [
+        (AgentReasoningEffort.low, 'low'),
+        (AgentReasoningEffort.medium, 'high'),
+        (AgentReasoningEffort.high, 'max'),
+      ]) {
+        test(
+          'DeepSeek ${provider.name} maps ${effort.name} to $level',
+          () async {
+            final client = _Client([_deepSeekAnswer(provider)]);
+            final model = _model(
+              provider,
+              client,
+              base: provider == ModelProvider.openAi
+                  ? 'https://api.deepseek.com/v1'
+                  : 'https://api.deepseek.com/anthropic',
+              name: 'deepseek-flash',
+              effort: effort,
+            );
+            addTearDown(model.close);
+            await _complete(model);
+            final body = client.requests.single.json;
+            expect(body, containsPair('thinking', {'type': 'enabled'}));
+            expect(body, containsPair('max_tokens', 32768));
+            expect(body, isNot(contains('max_completion_tokens')));
+            if (provider == ModelProvider.openAi) {
+              expect(body, containsPair('reasoning_effort', level));
+            } else {
+              expect(body, containsPair('output_config', {'effort': level}));
+            }
+          },
+        );
+      }
+    }
+
+    test('DeepSeek folds saved answers and replays reasoning only for current tools', () async {
+      String toolRound(String id) =>
+          '${_chat({'reasoning_content': 'hidden $id '})}'
+          '${_chat({'reasoning_content': 'tail'})}'
+          '${_chat({
+            'tool_calls': [
+              {
+                'index': 0,
+                'id': id,
+                'type': 'function',
+                'function': {'name': 'courses', 'arguments': '{}'},
+              },
+            ],
+          }, finish: 'tool_calls')}$_done';
+      final client = _Client([
+        _Response.sse(toolRound('first')),
+        _Response.sse(toolRound('second')),
+        _Response.sse(
+          '${_chat({'reasoning_content': 'hidden final'})}'
+          '${_chat({'content': 'Done.'}, finish: 'stop')}$_done',
+        ),
+        _deepSeekAnswer(ModelProvider.openAi),
+      ]);
+      final model = _model(
+        ModelProvider.openAi,
+        client,
+        base: 'https://api.deepseek.com',
+        name: 'deepseek-flash',
+        effort: AgentReasoningEffort.medium,
+      );
+      addTearDown(model.close);
+      final messages = <AgentMessage>[
+        const AgentMessage.user('Earlier question.'),
+        const AgentMessage.assistant('Saved answer.'),
+        _user,
+      ];
+      final deltas = <String>[];
+      Future<AgentMessage> run() => model.complete(
+        messages: messages,
+        tools: [_tool],
+        onText: deltas.add,
+      );
+
+      final first = await run();
+      expect(first.text, isEmpty);
+      expect(first.calls.single.id, 'first');
+      messages.addAll([
+        first,
+        const AgentMessage.tool('first', '[]'),
+        _attachedUser,
+      ]);
+      final second = await run();
+      expect(second.text, isEmpty);
+      expect(second.calls.single.id, 'second');
+      messages.addAll([second, const AgentMessage.tool('second', '[]')]);
+      final reply = await run();
+      expect(reply.text, 'Done.');
+      expect(deltas, ['Done.']);
+
+      List<Json> sent(int index) =>
+          (client.requests[index].json['messages'] as List).cast<Json>();
+      Iterable<Object?> replayed(int index) =>
+          sent(index)
+              .where((message) => message.containsKey('reasoning_content'))
+              .map((message) => message['reasoning_content']);
+      expect(sent(0).map((message) => message['role']), ['system', 'user']);
+      final context = sent(0).last['content'];
+      expect(context, contains('Earlier question.'));
+      expect(context, contains('Saved answer.'));
+      expect(context, endsWith(_user.text));
+      expect(replayed(0), isEmpty);
+      expect(replayed(1), ['hidden first tail']);
+      expect(replayed(2), ['hidden first tail', 'hidden second tail']);
+      expect(sent(2).map((message) => message['role']), [
+        'system',
+        'user',
+        'assistant',
+        'tool',
+        'user',
+        'assistant',
+        'tool',
+      ]);
+      expect(sent(2)[1]['content'], context);
+
+      messages.addAll([
+        reply,
+        const AgentMessage.user('Next question.', attachments: [_png]),
+      ]);
+      await run();
+      expect(replayed(3), isEmpty);
+      expect(sent(3).map((message) => message['role']), ['system', 'user']);
+      final nextContent = (sent(3).last['content'] as List).cast<Json>();
+      expect(nextContent.first['text'], contains('Saved answer.'));
+      expect(nextContent.first['text'], contains('Done.'));
+      expect(nextContent.first['text'], endsWith('Next question.'));
+      expect(nextContent.first['text'], isNot(contains('hidden')));
+      expect(nextContent.last['type'], 'image_url');
+    });
+  });
+
   group('terminal events and sanitized failures', () {
+    test(
+      'OpenAI length preserves streamed text and discards unfinished calls',
+      () async {
+        final client = _Client([
+          _Response.sse(
+            '${_chat({'content': 'Partial answer.'})}'
+            '${_chat({
+              'tool_calls': [
+                {
+                  'index': 0,
+                  'function': {'arguments': '{'},
+                },
+              ],
+            }, finish: 'length')}$_done',
+          ),
+        ]);
+        final model = _model(ModelProvider.openAi, client);
+        addTearDown(model.close);
+        final deltas = <String>[];
+        final reply = await model.complete(
+          messages: [_user],
+          tools: [_tool],
+          onText: deltas.add,
+        );
+        expect(reply.outputTruncated, isTrue);
+        expect(reply.text, 'Partial answer.');
+        expect(reply.calls, isEmpty);
+        expect(deltas, ['Partial answer.']);
+      },
+    );
+
+    test('Anthropic max_tokens reports a reasoning-only response as truncated', () async {
+      final client = _Client([
+        _Response.sse(
+          '$_messageStart'
+          '${_blockStart(0, {'type': 'thinking', 'thinking': ''})}'
+          '${_blockDelta(0, {'type': 'thinking_delta', 'thinking': 'Hidden.'})}'
+          '${_blockStop(0)}${_anthropicFinish('max_tokens')}${_event('message_stop')}',
+        ),
+      ]);
+      final model = _model(ModelProvider.anthropic, client);
+      addTearDown(model.close);
+      final deltas = <String>[];
+      final reply = await model.complete(
+        messages: [_user],
+        tools: [],
+        onText: deltas.add,
+      );
+      expect(reply.outputTruncated, isTrue);
+      expect(reply.text, isEmpty);
+      expect(reply.calls, isEmpty);
+      expect(deltas, isEmpty);
+    });
+
     final cases = <({String name, ModelProvider provider, String wire, String error})>[
       (
         name: 'OpenAI EOF after finish',
@@ -944,12 +1544,6 @@ void main() {
         provider: ModelProvider.openAi,
         wire: '${_chat({}, finish: 'stop')}data: [DONE]\n',
         error: '中断',
-      ),
-      (
-        name: 'OpenAI output limit',
-        provider: ModelProvider.openAi,
-        wire: '${_chat({}, finish: 'length')}$_done',
-        error: '输出长度上限',
       ),
       (
         name: 'OpenAI refusal delta',
@@ -1076,7 +1670,7 @@ void main() {
 
   test('bounds the stream even when an SSE line has no newline', () async {
     final client = _Client([
-      _Response(Stream.value(List.filled(512 * 1024 + 1, 97))),
+      _Response(Stream.value(Uint8List(2 * 1024 * 1024 + 1))),
     ]);
     final model = _model(ModelProvider.openAi, client);
     addTearDown(model.close);
@@ -1145,12 +1739,14 @@ StreamingAgentModel _model(
   _Client client, {
   String? base,
   String name = 'test-model',
+  AgentReasoningEffort effort = AgentReasoningEffort.defaultEffort,
 }) => StreamingAgentModel(
   AgentModelConfig(
     provider: provider,
     baseUrl: Uri.parse(base ?? 'https://provider.invalid/prefix/v1/'),
     model: name,
     apiKey: _key,
+    reasoningEffort: effort,
   ),
   client: client,
 );
@@ -1175,6 +1771,46 @@ String _chat(Json delta, {String? finish}) =>
 
 String _event(String type, [Json fields = const {}]) =>
     'event: $type\ndata: ${jsonEncode({'type': type, ...fields})}\n\n';
+
+Json _responsesMessage(String text) => {
+  'type': 'message',
+  'role': 'assistant',
+  'status': 'completed',
+  'content': [
+    {'type': 'output_text', 'text': text},
+  ],
+};
+
+Json _responsesCall(String id, String arguments) => {
+  'type': 'function_call',
+  'id': 'item-$id',
+  'call_id': id,
+  'status': 'completed',
+  'name': _tool.name,
+  'arguments': arguments,
+};
+
+String _responsesDelta(String delta, {int output = 0}) => _event(
+  'response.output_text.delta',
+  {'output_index': output, 'content_index': 0, 'delta': delta},
+);
+
+String _responsesItemDone(int output, Json item) =>
+    _event('response.output_item.done', {'output_index': output, 'item': item});
+
+String _responsesTerminal(
+  List<Json> output, {
+  String status = 'completed',
+  String? reason,
+  Json? error,
+}) => _event('response.$status', {
+  'response': {
+    'status': status,
+    'output': output,
+    if (reason != null) 'incomplete_details': {'reason': reason},
+    'error': ?error,
+  },
+});
 
 String get _messageStart => _event('message_start', {
   'message': {'content': <Object>[], 'stop_reason': null},

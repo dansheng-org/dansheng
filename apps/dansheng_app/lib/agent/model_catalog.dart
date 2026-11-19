@@ -24,9 +24,13 @@ typedef ModelCatalogLoader = Future<List<ModelCatalogEntry>> Function({
 
 // Like the model client, append the protocol path after stripping trailing
 // slashes from the configured prefix.
-Uri normalizeModelApiPrefix(Uri address) {
+Uri normalizeModelApiPrefix(Uri address, {ModelProvider? provider}) {
   final segments = address.pathSegments.toList();
   while (segments.isNotEmpty && segments.last.isEmpty) {
+    segments.removeLast();
+  }
+  if (provider == ModelProvider.openAiResponses &&
+      segments.lastOrNull == 'responses') {
     segments.removeLast();
   }
   return address.replace(pathSegments: segments);
@@ -56,6 +60,7 @@ class ModelCatalog {
     try {
       final prefix = normalizeModelApiPrefix(
         AgentModelConfig.parseBaseUrl(baseUrl.toString()),
+        provider: provider,
       );
       final endpoint = prefix.replace(
         pathSegments: [...prefix.pathSegments, 'models'],
@@ -149,6 +154,7 @@ class ModelCatalog {
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     switch (provider) {
       case ModelProvider.openAi:
+      case ModelProvider.openAiResponses:
         request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $apiKey');
       case ModelProvider.anthropic:
         request.headers.set('x-api-key', apiKey);

@@ -29,22 +29,27 @@ AgentToolRegistry campusToolRegistry({
     _tool(
       'campus_courses',
       '查阅当前账号的 Canvas 课程，返回课程 ID、名称、学期。默认只看本学期。'
-          '若找不到目标课程，可设置 include_archive。',
+          '用户给出课程名称时传 query，按名称搜索包括历史课程。',
       AgentSourceKind.learning,
       '查询 Canvas 课程',
       {
         'include_archive': {'type': 'boolean'},
+        'query': _query,
       },
       read: (args) async {
         final (raw, cached) = await read('canvas.courses.sync', {});
         final today = _campusToday();
+        final query = (args['query'] as String?)?.trim() ?? '';
         final courses = rowsOf(raw)
             .map(CanvasCourse.fromJson)
             .where(
               (course) =>
                   AgentCampusLink.isCanvasId(course.id) &&
                   (args['include_archive'] == true ||
-                      course.belongsToTerm(today)),
+                      query.isNotEmpty ||
+                      course.belongsToTerm(today)) &&
+                  (agentCanvasNameMatches(course.name, query) ||
+                      agentCanvasNameMatches(course.courseCode ?? '', query)),
             );
         return _rows(
           'Canvas 课程',
@@ -71,18 +76,27 @@ AgentToolRegistry campusToolRegistry({
     _tool(
       'campus_assignments',
       '按课程 ID 查 Canvas 作业。默认只看尚未到截止时间的作业，包含截止时间未知的项目。'
-          '需要历史作业时设置 include_past。',
+          '按名称查找（例如 Assignment 1）时传 query，会搜索已截止作业；'
+          '匹配唯一时附作业说明。已知 assignment_id 时可直接查询详情。',
       AgentSourceKind.learning,
       '查询 Canvas 作业',
       {
         'course_id': _courseId,
         'include_past': {'type': 'boolean'},
+        'query': _query,
+        'assignment_id': _courseId,
       },
       requiredFields: ['course_id'],
       read: (args) async {
         final courseId = args['course_id'] as String;
         if (!AgentCampusLink.isCanvasId(courseId)) {
           throw const AgentFailure('请提供 Canvas 课程列表返回的有效课程 ID。');
+        }
+        final query = (args['query'] as String?)?.trim() ?? '';
+        final assignmentId = args['assignment_id'] as String?;
+        final targeted = query.isNotEmpty || assignmentId != null;
+        if (assignmentId != null && !AgentCampusLink.isCanvasId(assignmentId)) {
+          throw const AgentFailure('请提供 Canvas 作业列表返回的有效作业 ID。');
         }
         final (raw, cached) = await read('canvas.assignments.sync', {
           'course_id': courseId,
@@ -94,8 +108,12 @@ AgentToolRegistry campusToolRegistry({
                 .map((row) => CanvasAssignment.fromJson(row, courseId))
                 .where(
                   (item) =>
-                      args['include_past'] == true ||
-                      !(item.dueAt?.isBefore(now) ?? false),
+                      (!targeted || item.courseId == courseId) &&
+                      (assignmentId == null || item.id == assignmentId) &&
+                      agentCanvasNameMatches(item.name, query) &&
+                      (args['include_past'] == true ||
+                          targeted ||
+                          !(item.dueAt?.isBefore(now) ?? false)),
                 )
                 .toList()
               ..sort((a, b) {
@@ -116,6 +134,8 @@ AgentToolRegistry campusToolRegistry({
                 if (AgentCampusLink.isCanvasId(item.id))
                   'assignment_id': item.id,
                 'due_at': item.dueAt == null ? null : _campusIso(item.dueAt!),
+                if (targeted && assignments.length == 1)
+                  ...agentAssignmentDetails(item),
               },
               item.courseId == courseId
                   ? _link(
@@ -236,6 +256,35 @@ AgentCampusLink? _link(String title, String path) =>
 
 final _links = RegExp(r'https?://[^\s<>()]+', caseSensitive: false);
 final _whitespace = RegExp(r'\s+');
+final _nameSeparators = RegExp(r'[\s\p{P}]+', unicode: true);
+final _visibleAssignmentFile = RegExp(
+  r'<a\b[^>]*(?:href|data-api-endpoint)\s*=\s*[^>]*?/files/[0-9]+',
+  caseSensitive: false,
+);
+
+bool agentCanvasNameMatches(String title, String query) {
+  final normalized = query.toLowerCase().replaceAll(_nameSeparators, '');
+  if (normalized.isEmpty) return true;
+  final numberSuffix = RegExp(r'[0-9]$').hasMatch(normalized)
+      ? '(?![0-9])'
+      : '';
+  return RegExp('${RegExp.escape(normalized)}$numberSuffix')
+      .hasMatch(title.toLowerCase().replaceAll(_nameSeparators, ''));
+}
+
+Json agentAssignmentDetails(CanvasAssignment item) {
+  if (item.lockedForUser) return {'locked': true};
+  final markup = item.description;
+  if (markup == null || markup.isEmpty) return {};
+  final text = plainText(markup).replaceAll(_links, '').trim();
+  const limit = 3000;
+  final excerpt = String.fromCharCodes(text.runes.take(limit));
+  return {
+    if (excerpt.isNotEmpty) 'description': excerpt,
+    if (excerpt.length < text.length) 'description_truncated': true,
+    if (_visibleAssignmentFile.hasMatch(markup)) 'has_file_links': true,
+  };
+}
 
 String _excerpt(Object? value, {int limit = 140}) {
   if (value is! String) return '';

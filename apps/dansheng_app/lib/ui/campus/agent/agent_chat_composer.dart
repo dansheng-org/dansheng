@@ -290,7 +290,7 @@ class AgentComposerOptions extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    hasAccount ? '校园查询结果仅用于当前这一轮。' : '选择活动账号后可使用校园信息源。',
+                    hasAccount ? '读取作业附件时请启用「课程文件」。' : '选择活动账号后可使用校园信息源。',
                     style: textTheme.bodySmall,
                   ),
                   const SizedBox(height: 4),

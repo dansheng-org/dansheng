@@ -1,8 +1,8 @@
 # 应用内校园 Agent
 
-Android 在 Agent 栏提供流式聊天。打开「模型设置」，选择 OpenAI 兼容 Chat Completions 或 Anthropic Messages，填写 HTTPS API 前缀和密钥。应用会读取服务提供的模型 ID 列表，也可以手动填写模型 ID。官方前缀分别为 `https://api.openai.com/v1` 和 `https://api.anthropic.com/v1`。兼容服务需支持相应协议的 SSE 和工具调用。模型及搜索密钥保存在由 Android Keystore 保护的加密存储中。
+Android 在 Agent 栏提供流式聊天。打开「模型设置」，选择 OpenAI 兼容 Chat Completions、OpenAI Responses 或 Anthropic Messages，再填写 HTTPS API 前缀和密钥。OpenAI 官方前缀为 `https://api.openai.com/v1`，Anthropic 官方前缀为 `https://api.anthropic.com/v1`。DeepSeek 官方 Responses 使用 `https://api.deepseek.com`，可选模型 `deepseek-flash`。应用会读取模型列表，也可以手动填写模型 ID。兼容服务需支持对应协议的 SSE 和工具调用。模型及搜索密钥保存在由 Android Keystore 保护的加密存储中。
 
-消息框旁的模型按钮可以直接切换模型。显示名称取自服务商返回的 `name` 或 `display_name`，实际请求使用原始 ID。右上角「对话历史」支持按标题搜索、恢复、重命名和删除。历史按校园账号加密保存，未登录时使用独立的访客空间。每个账号最多保存 100 个对话，单个对话最多 220 KiB。
+消息框旁的模型按钮可以直接切换模型。显示名称取自服务商返回的 `name` 或 `display_name`，实际请求使用原始 ID。在「模型设置」中可为支持的模型选择默认、低、中、高推理强度。输出达到模型上限时，Agent 会自动尝试接续一次。右上角「对话历史」支持按标题搜索、恢复、重命名和删除。历史按校园账号加密保存，未登录时使用独立的访客空间。每个账号最多保存 100 个对话，单个对话最多 220 KiB。
 
 在输入框内点「+」添加本地附件、打开信息源或管理授权。用「课程文件」读取 eLearning 资料，包括作业说明中的文件链接。用「复旦云盘」按目录和文件名查找，再读取匹配的文件。支持 PDF、PNG、JPEG、WebP 和 UTF-8 文本（含 Markdown、CSV、JSON）。模型需要支持工具调用。
 
@@ -15,7 +15,8 @@ Core 先验证课程文件的访问范围或云盘目录权限，再使用同一
 - [会话和工具注册表](../../apps/dansheng_app/lib/agent/agent_session.dart)使用纯 Dart。模型适配器把工具名称、说明及 JSON Schema 转为对应协议的函数声明，收集完整的流式调用后交由会话执行。会话限制输入、查询次数和工具响应大小，按照当前账号、信息源选择与用户授权决定可用工具。
 - [校园工具](../../apps/dansheng_app/lib/agent/campus_tools.dart)定义固定的 Core 方法与返回字段，覆盖 Canvas 课程与作业、复旦树洞（旦挞茶楼）、教务公告和图书馆客流。院系通知和科研动态使用 App 接入的复旦公开官网列表。帖子、课程和作业链接打开对应页面，返回后继续原对话。
 - [Android 接入](../../apps/dansheng_app/lib/ui/campus/agent/agent_tools.dart)通过 `CampusApi`、Pigeon 和原生校园服务调用 Core，复用账号绑定、认证恢复、树洞同意状态与缓存。校园工具在当前账号下执行固定的读操作。
-- 信息源默认关闭。确认提示提供本次允许和始终允许。长期授权绑定账号、模型地址和信息源，可在输入框「+」菜单的「管理授权」撤销。历史保留消息、附件名和来源链接。恢复会话或切换模型时，只沿用发送至同一服务的普通对话上下文。工具结果和附件内容仅用于原轮次。
+- 信息源默认关闭。确认提示提供本次允许和始终允许。长期授权绑定账号、模型地址和信息源，可在输入框「+」菜单的「管理授权」撤销。历史保留消息、附件名和来源链接。同一账号和模型服务的后续对话沿用已显示的问答，原始工具结果、附件和模型内部推理仅用于原轮次。
+- 按作业名称可以检索已截止的 Canvas 作业。唯一匹配时会读取说明，题目在附件中可通过「课程文件」接着读取。
 
 ## 桌面与 MCP
 

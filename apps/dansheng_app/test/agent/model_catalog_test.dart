@@ -54,6 +54,28 @@ void _testCatalog() {
   });
 
   test(
+    'Responses accepts a full endpoint and shares the model catalog',
+    () async {
+      final client = _Client(
+        (_) async => _Response({
+          'data': [
+            {'id': 'deepseek-flash'},
+          ],
+        }),
+      );
+      final models = await ModelCatalog(client: client).load(
+        provider: ModelProvider.openAiResponses,
+        baseUrl: Uri.parse('https://api.deepseek.com/responses/'),
+        apiKey: _key,
+      );
+      final request = client.requests.single;
+      expect(request.url, Uri.parse('https://api.deepseek.com/models'));
+      expect(request.headers.value('authorization'), 'Bearer $_key');
+      expect(models.single.id, 'deepseek-flash');
+    },
+  );
+
+  test(
     'display labels are sanitized and capped at Unicode code points',
     () async {
       final label = List.filled(130, '😀').join();

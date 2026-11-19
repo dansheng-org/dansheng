@@ -134,7 +134,7 @@ void main() {
     expect(bridge.config?['api_key'], 'typed-for-anthropic');
   });
 
-  testWidgets('tool results need per-source consent and stay in their turn', (
+  testWidgets('retains visible answers in the conversation context', (
     tester,
   ) async {
     final bridge = _Bridge.configured();
@@ -179,6 +179,8 @@ void main() {
 
     await _send(tester, '继续聊天');
     expect(model.requests.last.messages.map((message) => message.text), [
+      '查询图书馆',
+      '图书馆查询结果',
       '继续聊天',
     ]);
     expect(find.text('图书馆查询结果'), findsOneWidget);
@@ -186,6 +188,8 @@ void main() {
     await tester.pumpAndSettle();
     await _send(tester, '再聊一轮');
     expect(model.requests.last.messages.map((message) => message.text), [
+      '查询图书馆',
+      '图书馆查询结果',
       '继续聊天',
       '普通回答',
       '再聊一轮',
@@ -306,8 +310,17 @@ void main() {
       );
       await tester.pumpAndSettle();
       await _send(tester, '下一轮');
-      expect(model.requests.last.messages.single.text, '下一轮');
-      expect(model.requests.last.messages.single.attachments, isEmpty);
+      expect(model.requests.last.messages.map((message) => message.text), [
+        '请分析所附文件。',
+        '文件摘要',
+        '下一轮',
+      ]);
+      expect(
+        model.requests.last.messages.every(
+          (message) => message.attachments.isEmpty,
+        ),
+        isTrue,
+      );
       model.requests.last.reply.complete(const AgentMessage.assistant('完成'));
       await tester.pumpAndSettle();
     },
@@ -425,6 +438,7 @@ void main() {
     'narrow composer picks a friendly model name and keeps the raw ID',
     (tester) async {
       final bridge = _Bridge.configured();
+      bridge.config!['reasoning_effort'] = 'medium';
       final configs = <AgentModelConfig>[];
       final models = await _pumpChat(
         tester,
@@ -463,8 +477,10 @@ void main() {
       expect(find.text('上一条回答'), findsOneWidget);
       expect(bridge.config!['model'], 'next-model');
       expect(bridge.config!['model_label'], 'Next Generation Flash');
+      expect(bridge.config!['reasoning_effort'], 'medium');
       await _send(tester, '下一条消息');
       expect(configs.last.model, 'next-model');
+      expect(configs.last.reasoningEffort, AgentReasoningEffort.medium);
       expect(
         models.last.requests.single.messages.map((message) => message.text),
         ['上一条消息', '上一条回答', '下一条消息'],

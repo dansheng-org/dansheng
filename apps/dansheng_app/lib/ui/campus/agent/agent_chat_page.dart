@@ -455,7 +455,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
   }
 
   String _destination(AgentModelConfig config) =>
-      '${config.provider.name}:${normalizeModelApiPrefix(config.baseUrl)}';
+      '${config.provider.name}:${normalizeModelApiPrefix(config.baseUrl, provider: config.provider)}';
 
   Future<void> _pickModel() async {
     final config = _config;
@@ -504,6 +504,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
       modelLabel: label,
       apiKey: config.apiKey,
       searchApiKey: config.searchApiKey,
+      reasoningEffort: config.reasoningEffort,
     );
     setState(() => _savingModel = true);
     try {
@@ -598,7 +599,12 @@ class _AgentChatPageState extends State<AgentChatPage> {
                   turn.answer != null &&
                   turn.destination == _destination(config),
             )
-            .map((turn) => (question: turn.question, answer: turn.answer!)),
+            .map(
+              (turn) => (
+                question: turn.question.isEmpty ? '请分析所附文件。' : turn.question,
+                answer: turn.answer!,
+              ),
+            ),
       );
       _session = session;
       _sessionApi = api;
@@ -794,15 +800,15 @@ class _AgentChatPageState extends State<AgentChatPage> {
     AgentModelConfig config,
   ) async {
     if (!_isActive(session, turn) || !_sourceAvailable(source)) return false;
+    final disclosure = switch (source) {
+      AgentSourceKind.files => '允许查找课程、作业及其文件。相关名称和文件内容会发送至 ${config.baseUrl}。',
+      AgentSourceKind.cloudFiles =>
+        '允许列出和读取${source.label}。相关文件名及内容会发送至 ${config.baseUrl}。',
+      _ => '查询结果将发送至 ${config.baseUrl}。',
+    };
     final approved = await _confirmShare(
       '允许查询${source.label}？',
-      switch (source) {
-        AgentSourceKind.files =>
-          '允许查找课程、作业及其文件。相关名称和文件内容会发送至 ${config.baseUrl}，用于当前这一轮。',
-        AgentSourceKind.cloudFiles =>
-          '允许列出和读取${source.label}。相关文件名及内容会发送至 ${config.baseUrl}，用于当前这一轮。',
-        _ => '查询结果将发送至 ${config.baseUrl}。校园查询结果仅用于当前这一轮。',
-      },
+      '$disclosure\n\n原始资料仅发送本轮。已显示的问答可作为同一模型服务的后续对话上下文。',
       '仅本轮允许',
       config: config,
       permission: source.name,
@@ -912,7 +918,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
       final generation = _draftGeneration;
       final approved = await _confirmShare(
         '发送附件？',
-        '以下文件将随本轮对话发送至 ${config.baseUrl}。\n\n${names.join('\n')}',
+        '以下文件将随本轮对话发送至 ${config.baseUrl}。已显示的问答可作为该服务的后续上下文。\n\n${names.join('\n')}',
         '发送附件',
         config: config,
         permission: 'attachment',

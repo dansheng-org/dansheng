@@ -24,6 +24,7 @@ class AgentSettingsStore {
     }
     final provider = switch (result['provider']) {
       'openAi' => ModelProvider.openAi,
+      'openAiResponses' => ModelProvider.openAiResponses,
       'anthropic' => ModelProvider.anthropic,
       _ => throw const AgentFailure('模型配置的协议不受支持。'),
     };
@@ -34,6 +35,9 @@ class AgentSettingsStore {
       modelLabel: result['model_label'] as String?,
       apiKey: result['api_key'] as String,
       searchApiKey: result['search_api_key'] as String?,
+      reasoningEffort: AgentReasoningEffort.fromSetting(
+        result['reasoning_effort'],
+      ),
     );
   }
 
@@ -45,6 +49,8 @@ class AgentSettingsStore {
       if (config.modelLabel case final String name) 'model_label': name,
       'api_key': config.apiKey,
       if (config.searchApiKey case final String key) 'search_api_key': key,
+      if (config.reasoningEffort != AgentReasoningEffort.defaultEffort)
+        'reasoning_effort': config.reasoningEffort.name,
     });
   }
 
