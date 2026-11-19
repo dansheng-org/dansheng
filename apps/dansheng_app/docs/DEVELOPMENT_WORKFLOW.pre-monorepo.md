@@ -173,7 +173,7 @@ runtime；审阅签名身份在该 runtime 内创建／复用，保留旧工件�
 - Native SDK：Core 的 `Test-DanshengCoreDependency.ps1` 核对 lock、AAR/resources、source/ABI、Pub锁；稳定发布加 `-ForRelease`。
 - 已准备 SDK 的环境回归：`scripts/tests/native-environment.integration.ps1` 使用显式 Core/CoreTools/runtime/artifact 参数，检查无预置任务和不同任务环境、失败后的恢复及既存构建副本保留；需要真实 SDK 和已初始化的离线缓存，普通源码 CI 不执行它。
 - Android：得到正确 SDK 后才构建；模拟器与真实设备分别授权/记录。现有 `verify-*` 脚本可能操作资源或读取本机凭据，不能作为 CI 中自动可执行的只读脚本。
-- `.github/workflows/app-ci.yml` 执行源码、脚本和绑定检查。2026-11-14 查询到 App `2cb195318b481c3ba18ebe16c7e742d270a6c51a` 的[远程源码检查成功](https://github.com/dansheng-org/dansheng/actions/runs/43562826533)；这不代表后续变更已远程执行。
+- `.github/workflows/app-ci.yml` 执行源码、脚本和绑定检查。2026-11-14 查询到 App `2cb195318b481c3ba18ebe16c7e742d270a6c51a` 的[远程源码检查成功](https://github.com/DANSHENG/dansheng/actions/runs/43562826533)；这不代表后续变更已远程执行。
 - `.github/workflows/app-prerelease.yml` 在 main 的 push 源码检查成功后构建 ARM64 签名包并发布 Pre-release，也可在 main 手动触发。SDK 快照镜像、固定签名 Secrets、不可覆盖的逐提交标签和首次启用步骤见 [PRERELEASE.md](PRERELEASE.md)。开发快照依赖不通过稳定发布门槛；新增 workflow 必须实际运行后才能声称远程构建成功。
 
 清理需先确认任务已接收且没有 dirty/untracked 内容，保留可恢复记录。不执行 force remove、强制删分支、reset/clean、retag 或覆盖 remote。

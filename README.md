@@ -28,7 +28,7 @@ Core 实际位于 core/；App 业务界面主要在 lib/ui/campus/。目录以�
 
 ## 安装、构建与运行
 
-Android 审阅包从 [GitHub Releases](https://github.com/dansheng-org/dansheng/releases) 获取，核对该版本的 SHA256SUMS、ABI 和发布说明。当前发布为开发快照的 Pre-release；账号连接与插件启用由用户在应用中操作，见 [App 使用说明](apps/dansheng_app/README.md)。
+Android 审阅包从 [GitHub Releases](https://github.com/DANSHENG/dansheng/releases) 获取，核对该版本的 SHA256SUMS、ABI 和发布说明。当前发布为开发快照的 Pre-release；账号连接与插件启用由用户在应用中操作，见 [App 使用说明](apps/dansheng_app/README.md)。
 
 首次 clone 先按 [本地配置](docs/development/local-agent-setup.md#git-本地保护)保护生成的本机文件；该本地设置不会随 clone 复制。随后从仓库根准备 PowerShell 7 环境并检查源码：
 
