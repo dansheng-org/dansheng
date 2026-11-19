@@ -116,7 +116,7 @@ enum AgentSourceKind {
 const agentMaxAttachments = 3;
 const agentMaxAttachmentBytes = 2 * 1024 * 1024;
 const agentMaxCampusPdfBytes = 8 * 1024 * 1024;
-const agentMaxCampusFileBytes = 200 * 1024 * 1024;
+const agentMaxDeepSeekPdfBytes = 100 * 1024 * 1024;
 const agentMaxTextAttachmentBytes = 24 * 1024;
 
 const agentTextAttachmentTypes = {
@@ -137,6 +137,14 @@ final _unsafeAttachmentName = RegExp(
 );
 final _nonTextControls = RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]');
 
+bool isAgentAttachmentName(String name) =>
+    name.isNotEmpty &&
+    name.length <= 120 &&
+    name.trim() == name &&
+    name != '.' &&
+    name != '..' &&
+    !_unsafeAttachmentName.hasMatch(name);
+
 bool isAgentAttachmentType(String mimeType) =>
     agentTextAttachmentTypes.contains(mimeType) ||
     _attachmentSignatures.containsKey(mimeType);
@@ -148,7 +156,30 @@ class AgentAttachment {
     required this.base64Data,
     this.text,
     this.isCampusFile = false,
-  });
+  }) : openCachedPdf = null,
+       _cachedSize = null;
+
+  const AgentAttachment._cachedPdf(
+    this.name,
+    this._cachedSize,
+    this.openCachedPdf,
+  ) : mimeType = 'application/pdf',
+      base64Data = '',
+      text = null,
+      isCampusFile = true;
+
+  factory AgentAttachment.cachedPdf({
+    required String name,
+    required int size,
+    required Stream<List<int>> Function() openRead,
+  }) {
+    if (!isAgentAttachmentName(name) ||
+        size <= agentMaxCampusPdfBytes ||
+        size > agentMaxDeepSeekPdfBytes) {
+      throw const FormatException();
+    }
+    return AgentAttachment._cachedPdf(name, size, openRead);
+  }
 
   factory AgentAttachment.fromHost({
     required String name,
@@ -156,13 +187,7 @@ class AgentAttachment {
     required String data,
     bool isCampusFile = false,
   }) {
-    if (!isAgentAttachmentType(mimeType) ||
-        name.isEmpty ||
-        name.length > 120 ||
-        name.trim() != name ||
-        name == '.' ||
-        name == '..' ||
-        _unsafeAttachmentName.hasMatch(name)) {
+    if (!isAgentAttachmentType(mimeType) || !isAgentAttachmentName(name)) {
       throw const FormatException();
     }
     final isText = agentTextAttachmentTypes.contains(mimeType);
@@ -198,13 +223,18 @@ class AgentAttachment {
   final String base64Data;
   final String? text;
   final bool isCampusFile;
+  final int? _cachedSize;
+  final Stream<List<int>> Function()? openCachedPdf;
 
   bool get isText => agentTextAttachmentTypes.contains(mimeType);
-  int get maxBytes => _attachmentLimit(mimeType, isCampusFile);
+  int get maxBytes => openCachedPdf == null
+      ? _attachmentLimit(mimeType, isCampusFile)
+      : agentMaxDeepSeekPdfBytes;
 
   int get byteLength =>
-      base64Data.length * 3 ~/ 4 -
-      (base64Data.endsWith('==') ? 2 : (base64Data.endsWith('=') ? 1 : 0));
+      _cachedSize ??
+      (base64Data.length * 3 ~/ 4 -
+          (base64Data.endsWith('==') ? 2 : (base64Data.endsWith('=') ? 1 : 0)));
 }
 
 int _attachmentLimit(String mimeType, bool isCampusFile) => switch (mimeType) {
@@ -324,6 +354,6 @@ const agentSystemPrompt = '''
 当工具提供链接时，用 Markdown 链接引用对应的实际帖子、课程、作业或通知。保留返回的完整链接，不要编造链接。
 阅读 Canvas 文件时，可以先用 campus_file_context 按名字找到课程或作业 ID，再查询课程资料。读取时使用同一条结果的课程 ID 和文件 ID。来自作业说明的文件同时传入作业 ID。
 查找复旦云盘文件时，根据用户要求确定目录，优先使用关键词缩小范围。读取时原样传入列表或搜索返回的文件 path。在没有收到文件内容时说明读取失败。
-文件读取结果的 extracted 表示内容是提取的文本。truncated 表示只返回了部分内容。读取大 PDF 时可指定 page，从第 1 页开始计数。结果中的 page 和 page_count 表示当前页和总页数。不要把单页或节选当作整份文件。
+校园文件工具提供原始附件。用户要求解答某一题或阅读某一页时，读取原始文件，再回答指定部分。若接口拒绝该格式或文件过大，说明限制。
 不要编造帖子、课程、作业或截止日期，不要要求用户提供凭据。用户未启用需要的资料来源时，提示他们可以选择启用。
 ''';

@@ -16,7 +16,7 @@ const _maxRequestBytes = 128 * 1024;
 const _maxReasoningReplayBytes = 2 * 1024 * 1024;
 // Allow for base64 expansion of a 2 MiB attachment and the JSON envelope.
 const _maxAttachmentRequestBytes = 3 * 1024 * 1024;
-// Campus PDF fallbacks can carry up to 8 MiB before base64 encoding.
+// Inline campus PDF originals can carry up to 8 MiB before base64 encoding.
 const _maxCampusPdfRequestBytes = 12 * 1024 * 1024;
 const _textAttachmentMimeTypes = {
   'text/plain',
@@ -121,7 +121,7 @@ class StreamingAgentModel implements AgentModel {
         _ => messages,
       };
       final deepSeekPdfs = officialDeepSeek
-          ? <AgentAttachment, Uint8List>{}
+          ? <AgentAttachment, Stream<List<int>> Function()>{}
           : null;
       final requestLimit = _attachmentRequestLimit(
         requestMessages,
@@ -279,7 +279,7 @@ class StreamingAgentModel implements AgentModel {
 
   Future<String> _deepSeekFileId(
     AgentAttachment attachment,
-    Uint8List bytes,
+    Stream<List<int>> Function() openRead,
   ) async {
     var pending = _deepSeekFiles[attachment];
     while (pending != null) {
@@ -292,7 +292,7 @@ class StreamingAgentModel implements AgentModel {
     }
 
     if (_closed) throw _cancelled;
-    final upload = _uploadDeepSeekPdf(bytes);
+    final upload = _uploadDeepSeekPdf(attachment, openRead);
     _deepSeekFiles[attachment] = upload;
     try {
       return (await upload).id;
@@ -302,7 +302,10 @@ class StreamingAgentModel implements AgentModel {
     }
   }
 
-  Future<_DeepSeekFile> _uploadDeepSeekPdf(Uint8List bytes) async {
+  Future<_DeepSeekFile> _uploadDeepSeekPdf(
+    AgentAttachment attachment,
+    Stream<List<int>> Function() openRead,
+  ) async {
     try {
       // All DeepSeek model protocols accept IDs from /files.
       final expiresAt = _unixSeconds() + _deepSeekFileLifetime.inSeconds;
@@ -310,10 +313,10 @@ class StreamingAgentModel implements AgentModel {
       final boundary = base64UrlEncode(
         List.generate(24, (_) => random.nextInt(256)),
       );
-      final prefix = ascii.encode(
+      final prefix = utf8.encode(
         '--$boundary\r\n'
         'Content-Disposition: form-data; name="purpose"\r\n\r\n'
-        'text_recognition\r\n'
+        'rich_layout_recognition\r\n'
         '--$boundary\r\n'
         'Content-Disposition: form-data; name="expires_after[anchor]"\r\n\r\n'
         'created_at\r\n'
@@ -321,7 +324,7 @@ class StreamingAgentModel implements AgentModel {
         'Content-Disposition: form-data; name="expires_after[seconds]"\r\n\r\n'
         '${_deepSeekFileLifetime.inSeconds}\r\n'
         '--$boundary\r\n'
-        'Content-Disposition: form-data; name="file"; filename="document.pdf"\r\n'
+        'Content-Disposition: form-data; name="file"; filename="${attachment.name}"\r\n'
         'Content-Type: application/pdf\r\n\r\n',
       );
       final suffix = ascii.encode('\r\n--$boundary--\r\n');
@@ -341,10 +344,16 @@ class StreamingAgentModel implements AgentModel {
         'form-data',
         parameters: {'boundary': boundary},
       );
-      request.contentLength = prefix.length + bytes.length + suffix.length;
-      request.add(prefix);
-      request.add(bytes);
-      request.add(suffix);
+      request.contentLength =
+          prefix.length + attachment.byteLength + suffix.length;
+      try {
+        await request
+            .addStream(_pdfUploadBody(prefix, attachment, openRead, suffix))
+            .timeout(const Duration(seconds: 120));
+      } catch (_) {
+        request.abort();
+        rethrow;
+      }
       final response = await request.close().timeout(
         _deepSeekUploadTimeout,
         onTimeout: () {
@@ -382,10 +391,33 @@ class StreamingAgentModel implements AgentModel {
       throw const _ProviderFailure('等待 DeepSeek 上传或解析 PDF 超时。');
     } on FormatException {
       throw _invalidDeepSeekFile;
+    } on FileSystemException {
+      throw const _ProviderFailure('校园 PDF 缓存已不可用，请重新读取文件。');
     } catch (_) {
       throw const _ProviderFailure('无法连接 DeepSeek PDF 文件服务。');
     }
   }
+}
+
+Stream<List<int>> _pdfUploadBody(
+  List<int> prefix,
+  AgentAttachment attachment,
+  Stream<List<int>> Function() openRead,
+  List<int> suffix,
+) async* {
+  const signature = [0x25, 0x50, 0x44, 0x46, 0x2d];
+  var sent = 0;
+  yield prefix;
+  await for (final chunk in openRead()) {
+    if (sent + chunk.length > attachment.byteLength) throw _invalidAttachment;
+    for (var i = 0; i < chunk.length && sent + i < signature.length; i++) {
+      if (chunk[i] != signature[sent + i]) throw _invalidAttachment;
+    }
+    sent += chunk.length;
+    yield chunk;
+  }
+  if (sent != attachment.byteLength) throw _invalidAttachment;
+  yield suffix;
 }
 
 Uri _endpoint(AgentModelConfig config) {
@@ -682,7 +714,7 @@ Future<Uint8List> _requestBody(
 
 int _attachmentRequestLimit(
   List<AgentMessage> messages,
-  Map<AgentAttachment, Uint8List>? deepSeekPdfs,
+  Map<AgentAttachment, Stream<List<int>> Function()>? deepSeekPdfs,
 ) {
   var attachmentCount = 0;
   var deepSeekPdfCount = 0;
@@ -716,9 +748,16 @@ int _attachmentRequestLimit(
 int _validateAttachment(
   AgentAttachment attachment,
   int remainingBytes,
-  Map<AgentAttachment, Uint8List>? deepSeekPdfs,
+  Map<AgentAttachment, Stream<List<int>> Function()>? deepSeekPdfs,
 ) {
-  if (attachment.name.trim().isEmpty) throw _invalidAttachment;
+  if (!isAgentAttachmentName(attachment.name)) throw _invalidAttachment;
+  if (attachment.openCachedPdf case final openRead?) {
+    if (deepSeekPdfs == null) {
+      throw const _ProviderFailure('8 MiB 以上的校园 PDF 原件需使用 DeepSeek 官方文件接口。');
+    }
+    deepSeekPdfs[attachment] = openRead;
+    return 0;
+  }
   final mimeType = attachment.mimeType;
   if (_textAttachmentMimeTypes.contains(mimeType)) {
     final text = attachment.text;
@@ -756,7 +795,9 @@ int _validateAttachment(
           !_matchesSignature(bytes, const [0x57, 0x45, 0x42, 0x50], 8))) {
     throw _invalidAttachment;
   }
-  if (mimeType == 'application/pdf') deepSeekPdfs?[attachment] = bytes;
+  if (mimeType == 'application/pdf') {
+    deepSeekPdfs?[attachment] = () => Stream.value(bytes);
+  }
   return data.length;
 }
 
@@ -1350,6 +1391,7 @@ _ProviderFailure _deepSeekUploadFailure(int status) =>
     _ProviderFailure(switch (status) {
       400 => 'DeepSeek 无法解析 PDF。请检查文件是否损坏或受密码保护 (HTTP 400)。',
       401 || 403 => 'DeepSeek PDF 文件服务认证失败或权限不足 (HTTP $status)。',
+      413 => 'DeepSeek 拒绝了过大的 PDF 原件 (HTTP 413)。',
       >= 300 && < 400 => 'DeepSeek PDF 文件服务尝试重定向 (HTTP $status)。',
       _ => 'DeepSeek PDF 上传或解析失败 (HTTP $status)。',
     });

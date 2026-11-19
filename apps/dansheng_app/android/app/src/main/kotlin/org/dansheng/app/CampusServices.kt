@@ -23,7 +23,7 @@ internal class CampusServices(
 ) {
     private val venues=CampusVenueHost(activity,rt,sheet)
     private val agentHistory=AgentHistoryStore(rt.vault)
-    private val agentRemoteFiles=AgentRemoteFiles(AgentPdfPreview(rt.coreDataDir)::readPage)
+    private val agentRemoteFiles=AgentRemoteFiles(rt.coreDataDir)
     private val reads=setOf(
         "fudan.ecard.statement","fudan.ecard.statistics","fudan.electricity.statistics",
         "fudan.rooms","fudan.electricity","fudan.electricity.history","fudan.ecard.transactions","fudan.library.occupancy","fudan.dining.occupancy","fudan.bus","fudan.notices",
