@@ -473,6 +473,34 @@ void main() {
       expect(client.urls, isEmpty);
     });
 
+    test('sends a campus PDF larger than the local attachment limit', () async {
+      final client = _Client([
+        _Response.sse('${_chat({}, finish: 'stop')}$_done'),
+      ]);
+      final model = _model(ModelProvider.openAi, client);
+      addTearDown(model.close);
+      final data = Uint8List(5 * 1024 * 1024 ~/ 2)
+        ..setAll(0, ascii.encode('%PDF-'));
+      final file = AgentAttachment.fromHost(
+        name: '课程讲义.pdf',
+        mimeType: 'application/pdf',
+        data: base64Encode(data),
+        isCampusFile: true,
+      );
+      await model.complete(
+        messages: [
+          AgentMessage.user('', attachments: [file]),
+        ],
+        tools: [],
+        onText: (_) {},
+      );
+      expect(
+        client.requests.single.contentLength,
+        greaterThan(3 * 1024 * 1024),
+      );
+      expect(client.requests.single.contentLength, lessThan(12 * 1024 * 1024));
+    });
+
     test(
       'caps raw files, UTF-8 text and the complete attachment request',
       () async {

@@ -7,10 +7,10 @@ try {
     $noticeCargoHome=$env:CARGO_HOME
     . ./scripts/dev.ps1
     if($noticeCargoHome){$env:CARGO_HOME=$noticeCargoHome}
-    $tree=& cargo tree -p dansheng-ffi --features campus-webvpn --target aarch64-linux-android --edges normal,build --prefix none --format '{p}' --locked --offline
+    $tree=& cargo tree -p dansheng-ffi --features campus-webvpn,document-text --target aarch64-linux-android --edges normal,build --prefix none --format '{p}' --locked --offline
     if($LASTEXITCODE -ne 0){throw 'Native dependency inventory failed'}
     $pkgs=@{}; foreach($line in $tree){ if($line -match '^([^ ]+) v([^ ]+)'){ $pkgs[$Matches[1]+' '+$Matches[2]]=$true } }
-    $meta=(& cargo metadata --format-version 1 --locked --offline) | ConvertFrom-Json
+    $meta=(& cargo metadata --format-version 1 --filter-platform aarch64-linux-android --features dansheng-ffi/campus-webvpn,dansheng-ffi/document-text --locked --offline) | ConvertFrom-Json
     if($LASTEXITCODE -ne 0){throw 'Cannot resolve locked dependency licenses'}
 } finally {Pop-Location}
 $out=[Text.StringBuilder]::new()

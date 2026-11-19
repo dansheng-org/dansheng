@@ -23,7 +23,7 @@ internal class CampusServices(
 ) {
     private val venues=CampusVenueHost(activity,rt,sheet)
     private val agentHistory=AgentHistoryStore(rt.vault)
-    private val agentCourseFiles=AgentCourseFiles()
+    private val agentRemoteFiles=AgentRemoteFiles(AgentPdfPreview(rt.coreDataDir)::readPage)
     private val reads=setOf(
         "fudan.ecard.statement","fudan.ecard.statistics","fudan.electricity.statistics",
         "fudan.rooms","fudan.electricity","fudan.electricity.history","fudan.ecard.transactions","fudan.library.occupancy","fudan.dining.occupancy","fudan.bus","fudan.notices",
@@ -70,18 +70,18 @@ internal class CampusServices(
             else AgentApprovalStore.call(rt.vault,account,method,supplied)
         }
         if(method=="agent.attachment.pick")return AgentAttachmentPicker.read(activity.contentResolver,pickDocument())
-        if(method=="agent.courseFile.read" || method=="agent.courseFile.clear"){
+        if(method=="agent.remoteFile.read" || method=="agent.remoteFile.clear"){
             val (account,epoch)=synchronized(rt.authGuard) {
                 val active=rt.account() ?: throw PortError("AccountRequired")
                 requireAgentAccount(active,supplied)
                 active to rt.accountEpoch
             }
             val checkAccount={checked(account,epoch)}
-            return if(method=="agent.courseFile.read") {
-                agentCourseFiles.read(account,supplied,checkAccount,
+            return if(method=="agent.remoteFile.read") {
+                agentRemoteFiles.read(account,supplied,checkAccount,
                     { name,params -> read(name,params,account,epoch) },rt::request)
             } else {
-                agentCourseFiles.clear(account,checkAccount) { name,params ->
+                agentRemoteFiles.clear(account,checkAccount) { name,params ->
                     synchronized(rt.authGuard) {
                         checked(account,epoch)
                         rt.request(name,params)

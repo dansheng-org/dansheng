@@ -177,6 +177,7 @@ impl Engine {
             "files.download",
             "files.list",
             "files.read",
+            "files.text",
             "files.delete",
             "files.index",
             "todo.read",

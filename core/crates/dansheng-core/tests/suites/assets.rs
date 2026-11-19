@@ -163,6 +163,7 @@ impl Harness {
                 "files.download",
                 "files.list",
                 "files.read",
+                "files.text",
                 "files.delete",
                 "files.index",
                 "files.export",
@@ -202,6 +203,64 @@ impl Harness {
     fn db(&self) -> Connection {
         Connection::open(self.dir.path().join("dansheng.db")).unwrap()
     }
+}
+
+#[tokio::test]
+async fn text_read_is_bounded_and_does_not_index_private_files() {
+    let content = format!("a{}", "课".repeat(assets::MAX_INDEX_BYTES as usize / 3 + 1));
+    let server = Server::new(
+        content.as_bytes().to_vec(),
+        "application/octet-stream",
+        Mode::Normal,
+        true,
+    )
+    .await;
+    let h = Harness::new(&server);
+    let asset = h
+        .call(
+            "files.download",
+            json!({"url":format!("{}/text",server.origin),"name":"large.txt","max_bytes":200*1024*1024}),
+        )
+        .await
+        .unwrap();
+    let input = json!({"asset_id":asset["asset_id"]});
+    let mut restricted = h.grant.clone();
+    restricted.capabilities.remove("sources.write");
+    let result = assets::dispatch(
+        &h.store,
+        &h.network,
+        &h.principal,
+        &restricted,
+        "files.text",
+        input.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["truncated"], true);
+    let text = result["text"].as_str().unwrap();
+    assert!(text.len() <= 24 * 1024 && content.starts_with(text));
+    assert!(
+        h.store
+            .records(&h.principal, &h.grant, &json!({}), None)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(h.items().await[0]["indexed_at"].is_null());
+    restricted.capabilities.remove("files.text");
+    assert_eq!(
+        assets::dispatch(
+            &h.store,
+            &h.network,
+            &h.principal,
+            &restricted,
+            "files.text",
+            input
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "PermissionDenied"
+    );
 }
 
 #[tokio::test]

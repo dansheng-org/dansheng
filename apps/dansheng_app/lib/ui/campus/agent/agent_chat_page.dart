@@ -20,6 +20,7 @@ import 'agent_approval_store.dart';
 import 'agent_approvals_dialog.dart';
 import 'agent_attachment_picker.dart';
 import 'agent_campus_navigation.dart';
+import 'agent_chat_composer.dart';
 import 'agent_chat_settings.dart';
 import 'agent_course_files.dart';
 import 'agent_history_dialog.dart';
@@ -115,6 +116,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
   int _historyLoadRequest = 0;
   DialogRoute<ModelCatalogEntry>? _modelRoute;
   DialogRoute<void>? _grantsRoute;
+  ModalBottomSheetRoute<AgentComposerAction>? _composerRoute;
   bool _savingModel = false;
   late _AccountState _account;
   AgentModelConfig? _config;
@@ -235,9 +237,11 @@ class _AgentChatPageState extends State<AgentChatPage> {
     _dismissRoute(_historyRoute);
     _dismissRoute(_modelRoute);
     _dismissRoute(_grantsRoute);
+    _dismissRoute(_composerRoute);
     _historyRoute = null;
     _modelRoute = null;
     _grantsRoute = null;
+    _composerRoute = null;
   }
 
   void _closeSession() {
@@ -552,7 +556,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
         onSave: update,
         onClear: () => update(null),
         loadModels: widget.loadModels,
-        onClearCourseFiles: scope.id == null
+        onClearRemoteFiles: scope.id == null
             ? null
             : () async {
                 if (!mounted || _currentAccount != scope) {
@@ -560,7 +564,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
                 }
                 final api = CampusApi.forAccount(widget.controller);
                 try {
-                  return await clearAgentCourseFiles(api);
+                  return await clearAgentRemoteFiles(api);
                 } finally {
                   api.accountScope!.dispose();
                 }
@@ -619,6 +623,75 @@ class _AgentChatPageState extends State<AgentChatPage> {
                 (source != AgentSourceKind.forum ||
                     widget.controller.forumEnabled)
           : _config != null);
+
+  bool get _canEditComposer =>
+      _activeTurn == null &&
+      !_account.changing &&
+      !_pickingAttachment &&
+      !_savingModel;
+
+  Future<void> _openComposerOptions(AgentModelConfig config) async {
+    if (!_canEditComposer || _composerRoute != null) return;
+    final scope = _account;
+    final generation = _draftGeneration;
+    bool isCurrent() =>
+        mounted &&
+        scope == _currentAccount &&
+        generation == _draftGeneration &&
+        identical(config, _config) &&
+        _canEditComposer;
+
+    if (!isCurrent()) return;
+    FocusScope.of(context).unfocus();
+    final navigator = Navigator.of(context);
+    final route = ModalBottomSheetRoute<AgentComposerAction>(
+      capturedThemes: InheritedTheme.capture(
+        from: context,
+        to: navigator.context,
+      ),
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => ListenableBuilder(
+        listenable: widget.controller,
+        builder: (_, _) => StatefulBuilder(
+          builder: (_, refreshSheet) => AgentComposerOptions(
+            config: config,
+            hasAccount: scope.id?.isNotEmpty ?? false,
+            canAttach: isCurrent() && _attachments.length < agentMaxAttachments,
+            sources: _sources,
+            sourceAvailable: (source) =>
+                isCurrent() && _sourceAvailable(source),
+            onSourceChanged: (source, enabled) {
+              if (!isCurrent() || !_sourceAvailable(source)) return;
+              setState(() {
+                if (enabled) {
+                  _sources.add(source);
+                } else {
+                  _sources.remove(source);
+                }
+              });
+              refreshSheet(() {});
+            },
+          ),
+        ),
+      ),
+    );
+    _composerRoute = route;
+    final action = await navigator.push(route);
+    if (!identical(_composerRoute, route)) return;
+    _composerRoute = null;
+    if (!isCurrent()) return;
+    switch (action) {
+      case AgentComposerAction.attach:
+        if (_attachments.length < agentMaxAttachments) await _pickAttachment();
+      case AgentComposerAction.manageApprovals:
+        await _manageApprovals();
+      case null:
+        break;
+    }
+  }
 
   Future<void> _manageApprovals() async {
     final config = _config;
@@ -723,9 +796,13 @@ class _AgentChatPageState extends State<AgentChatPage> {
     if (!_isActive(session, turn) || !_sourceAvailable(source)) return false;
     final approved = await _confirmShare(
       '允许查询${source.label}？',
-      source == AgentSourceKind.files
-          ? '允许读取课程资料及下载相关 PDF。文件内容将发送至 ${config.baseUrl}，用于当前这一轮。'
-          : '查询结果将发送至 ${config.baseUrl}。校园查询结果仅用于当前这一轮。',
+      switch (source) {
+        AgentSourceKind.files =>
+          '允许查找课程、作业及其文件。相关名称和文件内容会发送至 ${config.baseUrl}，用于当前这一轮。',
+        AgentSourceKind.cloudFiles =>
+          '允许列出和读取${source.label}。相关文件名及内容会发送至 ${config.baseUrl}，用于当前这一轮。',
+        _ => '查询结果将发送至 ${config.baseUrl}。校园查询结果仅用于当前这一轮。',
+      },
       '仅本轮允许',
       config: config,
       permission: source.name,
@@ -904,7 +981,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
             }
           });
         },
-        onCourseAttachment: (file) {
+        onRemoteAttachment: (file) {
           if (_isActive(session, turn)) {
             setState(() => turn.attachmentNames.add(file.name));
           }
@@ -1196,156 +1273,27 @@ class _AgentChatPageState extends State<AgentChatPage> {
     );
   }
 
-  Widget _buildComposer(AgentModelConfig config) {
-    final theme = Theme.of(context);
-    final busy = _activeTurn != null;
-    final canEdit =
-        !busy && !_account.changing && !_pickingAttachment && !_savingModel;
-    return Material(
-      color: theme.colorScheme.surfaceContainerLow,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_historySaveError case final String error)
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      error,
-                      style: TextStyle(color: theme.colorScheme.error),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _saveConversation,
-                    child: const Text('重试保存'),
-                  ),
-                ],
-              ),
-            Text(
-              '发送会将消息和对话上下文发往 ${config.baseUrl}。',
-              style: theme.textTheme.bodySmall,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-            if (_account.changing)
-              Text('正在切换账号…', style: theme.textTheme.bodySmall)
-            else if (_account.id?.isNotEmpty ?? false)
-              Text('校园查询结果仅用于当前这一轮。', style: theme.textTheme.bodySmall)
-            else
-              Text('选择活动账号后可使用校园信息源。', style: theme.textTheme.bodySmall),
-            Semantics(
-              label: '信息源',
-              child: Wrap(
-                spacing: 8,
-                children: [
-                  for (final source in AgentSourceKind.values)
-                    FilterChip(
-                      label: Text(source.label),
-                      tooltip: source == AgentSourceKind.web
-                          ? (config.searchApiKey?.isNotEmpty ?? false
-                                ? '通过 Brave Search 搜索'
-                                : '通过模型服务搜索')
-                          : null,
-                      selected: _sources.contains(source),
-                      onSelected: canEdit && _sourceAvailable(source)
-                          ? (selected) {
-                              setState(() {
-                                if (selected) {
-                                  _sources.add(source);
-                                } else {
-                                  _sources.remove(source);
-                                }
-                              });
-                            }
-                          : null,
-                    ),
-                ],
-              ),
-            ),
-            if (_attachments.isNotEmpty)
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final file in _attachments)
-                    InputChip(
-                      avatar: const Icon(Icons.insert_drive_file_outlined),
-                      label: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 160),
-                        child: Text(file.name, overflow: TextOverflow.ellipsis),
-                      ),
-                      onDeleted: canEdit
-                          ? () => setState(() => _attachments.remove(file))
-                          : null,
-                    ),
-                ],
-              ),
-            Row(
-              children: [
-                Flexible(
-                  child: TextButton.icon(
-                    key: const Key('chat-model-picker'),
-                    onPressed: canEdit ? _pickModel : null,
-                    icon: const Icon(Icons.expand_more, size: 18),
-                    label: Text(
-                      _savingModel ? '正在切换模型…' : '模型 · ${config.displayModel}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: '管理授权',
-                  onPressed: canEdit ? _manageApprovals : null,
-                  icon: const Icon(Icons.verified_user_outlined, size: 18),
-                ),
-              ],
-            ),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                IconButton(
-                  tooltip: _pickingAttachment ? '正在读取附件' : '添加附件',
-                  onPressed:
-                      canEdit && _attachments.length < agentMaxAttachments
-                      ? _pickAttachment
-                      : null,
-                  icon: const Icon(Icons.attach_file),
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _draft,
-                    enabled: canEdit,
-                    minLines: 1,
-                    maxLines: 3,
-                    maxLength: 4000,
-                    keyboardType: TextInputType.multiline,
-                    decoration: const InputDecoration(
-                      labelText: '消息',
-                      border: OutlineInputBorder(),
-                      counterText: '',
-                    ),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  tooltip: busy ? '停止生成' : '发送',
-                  onPressed: busy
-                      ? _stop
-                      : canEdit &&
-                            (_draft.text.trim().isNotEmpty ||
-                                _attachments.isNotEmpty)
-                      ? _send
-                      : null,
-                  icon: Icon(busy ? Icons.stop_rounded : Icons.arrow_upward),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _buildComposer(AgentModelConfig config) => AgentChatComposer(
+    controller: _draft,
+    config: config,
+    attachments: _attachments,
+    sourceCount: _sources.length,
+    canEdit: _canEditComposer,
+    generating: _activeTurn != null,
+    switchingAccount: _account.changing,
+    savingModel: _savingModel,
+    pickingAttachment: _pickingAttachment,
+    onChanged: () => setState(() {}),
+    onOptions: () => _openComposerOptions(config),
+    onModel: _pickModel,
+    onDeleteAttachment: (file) => setState(() => _attachments.remove(file)),
+    onSend:
+        _canEditComposer &&
+            (_draft.text.trim().isNotEmpty || _attachments.isNotEmpty)
+        ? _send
+        : null,
+    onStop: _stop,
+    historySaveError: _historySaveError,
+    onRetrySave: _saveConversation,
+  );
 }

@@ -1,104 +1,212 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import 'dart:convert';
-
-import 'package:flutter/services.dart';
-
 import '../../../agent/agent_campus_link.dart';
 import '../../../agent/agent_session.dart';
 import '../../../agent/agent_types.dart';
 import '../campus_api.dart';
 import '../learning/models/canvas_models.dart';
+import 'agent_remote_files.dart';
 
 const _source = 'Canvas 课程文件';
-const _pdfMime = 'application/pdf';
 const _canvasHost = 'elearning.fudan.edu.cn';
 const _idField = {'type': 'string', 'maxLength': 24};
-const _pdfHeader = [0x25, 0x50, 0x44, 0x46, 0x2d];
-final _unsafeName = RegExp(r'[\p{Cc}\p{Cf}<>:"/\\|?*]', unicode: true);
 
 Iterable<AgentTool> courseFileAgentTools(CampusApi api) => [
   AgentTool(
     spec: const AgentToolSpec(
-      'campus_course_files',
-      '按 Canvas 课程 ID 列出可读取的 PDF。提供作业 ID 时，只列出该作业说明中的课程文件链接所指向的 PDF。',
+      'campus_file_context',
+      '按名称查找文件所属的 Canvas 课程。提供课程 ID 后可按作业名称查找作业 ID。',
       {
         'type': 'object',
-        'properties': {'course_id': _idField, 'assignment_id': _idField},
+        'properties': {'course_id': _idField, 'query': agentFileQueryField},
+        'additionalProperties': false,
+      },
+    ),
+    source: AgentSourceKind.files,
+    label: '查找文件所属课程或作业',
+    read: (args) => _fileContext(api, args),
+  ),
+  AgentTool(
+    spec: const AgentToolSpec(
+      'campus_course_files',
+      '按 Canvas 课程 ID 列出可读取的 PDF、图片和 UTF-8 文本。'
+          '可按文件名关键词筛选。提供作业 ID 时，只查该作业说明直接链接的文件，包括课程文件列表未收录的链接。',
+      {
+        'type': 'object',
+        'properties': {
+          'course_id': _idField,
+          'assignment_id': _idField,
+          'query': agentFileQueryField,
+        },
         'required': ['course_id'],
         'additionalProperties': false,
       },
     ),
     source: AgentSourceKind.files,
-    label: '查询 Canvas 课程 PDF',
+    label: '查询 Canvas 课程文件',
     read: (args) => _listCourseFiles(api, args),
   ),
   AgentTool(
     spec: const AgentToolSpec(
-      'campus_read_course_pdf',
-      '读取 Canvas 课程文件列表返回的 PDF，最大 2 MiB。请提供同一课程的课程 ID 和文件 ID。',
+      'campus_read_course_file',
+      '读取 Canvas 课程文件列表返回的文件。请使用同一条结果的课程 ID、文件 ID 及作业 ID（如果有）。'
+          'PDF 和 UTF-8 文本最多 200 MiB。指定 page 可读 PDF 某一页，大 PDF 按页返回，长文本返回节选。图片最多 2 MiB。',
       {
         'type': 'object',
-        'properties': {'course_id': _idField, 'file_id': _idField},
+        'properties': {
+          'course_id': _idField,
+          'file_id': _idField,
+          'assignment_id': _idField,
+          'page': agentFilePageField,
+        },
         'required': ['course_id', 'file_id'],
         'additionalProperties': false,
       },
     ),
     source: AgentSourceKind.files,
-    label: '读取 Canvas 课程 PDF',
-    read: (args) => _readCoursePdf(api, args),
+    label: '读取 Canvas 课程文件',
+    timeout: agentFileReadTimeout,
+    read: (args) => _readCourseFile(api, args),
   ),
 ];
 
-Future<int> clearAgentCourseFiles(CampusApi api) async {
-  final result = await _call(api, 'agent.courseFile.clear');
+Future<Json> _fileContext(CampusApi api, Json args) async {
+  final query = agentFileQuery(args);
+  final courseId = args.containsKey('course_id')
+      ? _canvasId(args['course_id'])
+      : null;
+  final result = await callAgentFileApi(
+    api,
+    courseId == null ? 'canvas.courses.sync' : 'canvas.assignments.sync',
+    {'course_id': ?courseId},
+  );
+  if (result is! List) throw const AgentFailure('无法读取 Canvas 课程或作业列表。');
+  final records = <Json>[];
+  final links = <Json>[];
+  for (final row in rowsOf(result)) {
+    late final Json record;
+    late final String title;
+    late final String path;
+    if (courseId == null) {
+      final course = CanvasCourse.fromJson(row);
+      if (!AgentCampusLink.isCanvasId(course.id) ||
+          !agentFileMatches(query, [course.name, course.courseCode ?? ''])) {
+        continue;
+      }
+      title = agentFileLabel(course.name);
+      path = 'course/${course.id}';
+      record = {'course_id': course.id, 'name': title};
+    } else {
+      final assignment = CanvasAssignment.fromJson(row, courseId);
+      if (!AgentCampusLink.isCanvasId(assignment.id) ||
+          assignment.courseId != courseId ||
+          assignment.lockedForUser ||
+          payloadOf(row)['published'] == false ||
+          !agentFileMatches(query, [assignment.name])) {
+        continue;
+      }
+      title = agentFileLabel(assignment.name);
+      path = 'assignment/$courseId/${assignment.id}';
+      record = {
+        'course_id': courseId,
+        'assignment_id': assignment.id,
+        'name': title,
+      };
+    }
+    final url = 'dansheng://agent/$path';
+    records.add({...record, 'url': url});
+    links.add({'url': url, 'title': title});
+    if (records.length == 20) break;
+  }
+  return {'source': _source, 'records': records, 'campus_links': links};
+}
+
+Future<int> clearAgentRemoteFiles(CampusApi api) async {
+  final result = await callAgentFileApi(api, 'agent.remoteFile.clear');
   if (result case {'deleted': final int deleted} when deleted >= 0) {
     return deleted;
   }
-  throw const AgentFailure('无法确认已清理的课程文件数量。');
+  throw const AgentFailure('无法确认已清理的文件数量。');
 }
 
 Future<Json> _listCourseFiles(CampusApi api, Json args) async {
   final courseId = _canvasId(args['course_id']);
-  final assignmentId = args.containsKey('assignment_id')
-      ? _canvasId(args['assignment_id'])
-      : null;
+  final assignmentId = _optionalAssignmentId(args);
+  final query = agentFileQuery(args);
   final params = {'course_id': courseId};
-  final linkedIds = assignmentId == null
+  final linked = assignmentId == null
       ? null
-      : await _assignmentFileIds(api, courseId, assignmentId, params);
+      : await _assignmentFiles(api, courseId, assignmentId, params);
   final records = <Json>[];
-  const limit = 25;
   var truncated = false;
-  if (linkedIds == null || linkedIds.isNotEmpty) {
-    final result = await _call(api, 'canvas.materials.sync', params);
+  void addRecord(String id, String name, String? mime, int? size) {
+    if (records.length == 25) {
+      truncated = true;
+      return;
+    }
+    records.add({
+      'file_id': id,
+      'assignment_id': ?assignmentId,
+      'name': agentFileLabel(name),
+      'mime_type': ?mime,
+      'size': ?size,
+    });
+  }
+
+  if (linked == null || linked.isNotEmpty) {
+    final result = await callAgentFileApi(api, 'canvas.materials.sync', params);
     if (result is! List) {
       throw const AgentFailure('无法读取这门课程的文件列表。');
     }
+    final listedIds = <String>{};
     for (final row in rowsOf(result)) {
       final file = CanvasMaterial.fromJson(row, courseId);
-      final size = file.size;
-      if (file.courseId != courseId ||
-          !AgentCampusLink.isCanvasId(file.id) ||
-          (linkedIds != null && !linkedIds.contains(file.id)) ||
-          file.lockedForUser ||
-          payloadOf(row)['hidden_for_user'] == true ||
-          size == null ||
-          size < _pdfHeader.length ||
-          size > agentMaxAttachmentBytes ||
-          !_isPdf(file)) {
+      if (!AgentCampusLink.isCanvasId(file.id) ||
+          (linked != null && !linked.containsKey(file.id)) ||
+          !listedIds.add(file.id)) {
         continue;
       }
-      if (records.length == limit) {
-        truncated = true;
-        break;
+      final size = file.size;
+      final linkedName = linked?[file.id] ?? '';
+      final mime = agentFileMimeType(file.contentType, [
+        file.filename,
+        file.displayName,
+        linkedName,
+      ]);
+      if (file.courseId != courseId ||
+          file.lockedForUser ||
+          payloadOf(row)['hidden_for_user'] == true ||
+          mime == null ||
+          !agentFileSizeSupported(mime, size) ||
+          !agentFileMatches(query, [
+            file.filename,
+            file.displayName,
+            linkedName,
+          ])) {
+        continue;
       }
-      records.add({
-        'file_id': file.id,
-        'name': _fileLabel(file.displayName),
-        'mime_type': _pdfMime,
-        'size': size,
-      });
+      addRecord(
+        file.id,
+        file.displayName,
+        mime,
+        size != null && size >= 0 ? size : null,
+      );
+      if (truncated) break;
+    }
+    if (linked != null && !truncated) {
+      for (final entry in linked.entries) {
+        if (listedIds.contains(entry.key) ||
+            !agentFileMatches(query, [entry.value])) {
+          continue;
+        }
+        addRecord(
+          entry.key,
+          entry.value.isEmpty ? '作业附件' : entry.value,
+          agentFileMimeType(null, [entry.value]),
+          null,
+        );
+        if (truncated) break;
+      }
     }
   }
   return {
@@ -110,61 +218,26 @@ Future<Json> _listCourseFiles(CampusApi api, Json args) async {
   };
 }
 
-Future<Json> _readCoursePdf(CampusApi api, Json args) async {
+Future<Json> _readCourseFile(CampusApi api, Json args) {
   final courseId = _canvasId(args['course_id']);
   final fileId = _canvasId(args['file_id']);
-  final result = await _call(api, 'agent.courseFile.read', {
+  final assignmentId = _optionalAssignmentId(args);
+  return readAgentRemoteFile(api, _source, {
+    'source': 'canvas',
     'course_id': courseId,
     'file_id': fileId,
+    'assignment_id': ?assignmentId,
+    'page': ?args['page'],
   });
-  if (result
-      case {
-        'name': final String name,
-        'mime_type': _pdfMime,
-        'data': final String data,
-      }
-      when name.length <= 120 &&
-          name.trim() == name &&
-          name.toLowerCase().endsWith('.pdf') &&
-          !_unsafeName.hasMatch(name)) {
-    if (data.length > ((agentMaxAttachmentBytes + 2) ~/ 3) * 4) {
-      throw const AgentFailure('课程 PDF 不能超过 2 MiB。');
-    }
-    try {
-      final bytes = base64Decode(data);
-      if (bytes.length > agentMaxAttachmentBytes) {
-        throw const AgentFailure('课程 PDF 不能超过 2 MiB。');
-      }
-      if (bytes.length >= _pdfHeader.length &&
-          _pdfHeader.indexed.every((entry) => bytes[entry.$1] == entry.$2)) {
-        return {
-          'source': _source,
-          'course_id': courseId,
-          'file_id': fileId,
-          'name': name,
-          'mime_type': _pdfMime,
-          'size': bytes.length,
-          'attachment': AgentAttachment(
-            name: name,
-            mimeType: _pdfMime,
-            base64Data: data,
-          ),
-        };
-      }
-    } on FormatException {
-      throw const AgentFailure('无法读取课程 PDF，返回的文件数据无效。');
-    }
-  }
-  throw const AgentFailure('无法读取课程 PDF，返回的文件数据无效。');
 }
 
-Future<Set<String>> _assignmentFileIds(
+Future<Map<String, String>> _assignmentFiles(
   CampusApi api,
   String courseId,
   String assignmentId,
   Json params,
 ) async {
-  final result = await _call(api, 'canvas.assignments.sync', params);
+  final result = await callAgentFileApi(api, 'canvas.assignments.sync', params);
   if (result is! List) {
     throw const AgentFailure('无法读取这门课程的作业。');
   }
@@ -176,17 +249,59 @@ Future<Set<String>> _assignmentFileIds(
     }
     if (assignment.lockedForUser) break;
     final description = assignment.description ?? '';
-    return {
-      for (final tag in _markup.allMatches(description))
-        if (tag[2] case final String attributes)
-          for (final attr in _htmlAttribute.allMatches(attributes))
-            if (_canvasFileLink(attr, courseId) case final String id) id,
-    };
+    final files = <String, String>{};
+    for (final tag in _markup.allMatches(description)) {
+      final attributes = tag[2];
+      if (attributes == null) continue;
+      final attrs = _htmlAttribute.allMatches(attributes).toList();
+      final ids = attrs
+          .map((attr) => _canvasFileLink(attr, courseId))
+          .whereType<String>();
+      if (ids.isEmpty) continue;
+      final label = _assignmentFileLabel(description, tag.end, attrs);
+      for (final id in ids) {
+        files.update(
+          id,
+          (old) => old.isEmpty ? label : old,
+          ifAbsent: () => label,
+        );
+      }
+    }
+    return files;
   }
   throw const AgentFailure('这门课程中没有找到可查看的指定作业。');
 }
 
+String _assignmentFileLabel(
+  String description,
+  int start,
+  List<RegExpMatch> attributes,
+) {
+  final end = description.length < start + 512
+      ? description.length
+      : start + 512;
+  final tail = description.substring(start, end);
+  final boundary = _anchorBoundary.firstMatch(tail);
+  final names =
+      [
+            for (final attr in attributes)
+              if (const {'title', 'download'}.contains(attr[1]?.toLowerCase()))
+                attr[2] ?? attr[3] ?? attr[4] ?? '',
+            if (boundary != null && boundary[1] != null)
+              tail.substring(0, boundary.start),
+          ]
+          .map(plainText)
+          .where(
+            (name) => name.isNotEmpty && !agentUnsafeFileName.hasMatch(name),
+          );
+  return names.firstWhere(
+    (name) => agentFileMimeType(null, [name]) != null,
+    orElse: () => names.firstOrNull ?? '',
+  );
+}
+
 // Ignore comments and raw script/style bodies when finding assignment links.
+final _anchorBoundary = RegExp(r'(</a\s*>)|<a\s', caseSensitive: false);
 final _markup = RegExp(
   r'''<!--[\s\S]*?(?:-->|$)|<(script|style)\b[^>]*>[\s\S]*?(?:</\1\s*>|$)|<a\s+((?:"[^"]*"|'[^']*'|[^"'<>])*)>|</?[a-z][\w:-]*\b(?:"[^"]*"|'[^']*'|[^"'<>])*>''',
   caseSensitive: false,
@@ -227,47 +342,10 @@ String? _canvasFileLink(RegExpMatch attribute, String courseId) {
   return _filePath.firstMatch(path)?[1];
 }
 
-bool _isPdf(CanvasMaterial file) {
-  final mime = file.contentType?.split(';').first.trim().toLowerCase() ?? '';
-  if (mime == _pdfMime) return true;
-  const genericTypes = {
-    '',
-    'application/octet-stream',
-    'binary/octet-stream',
-    '*/*',
-  };
-  final filename = file.filename.isEmpty ? file.displayName : file.filename;
-  return genericTypes.contains(mime) && filename.toLowerCase().endsWith('.pdf');
-}
-
-String _fileLabel(String name) {
-  final clean = name.replaceAll(_unsafeName, '_').trim();
-  return clean.isEmpty ? '课程文件' : String.fromCharCodes(clean.runes.take(120));
-}
-
 String _canvasId(Object? value) {
   if (value is String && AgentCampusLink.isCanvasId(value)) return value;
   throw const AgentFailure('请使用 Canvas 列表返回的有效课程、作业和文件 ID。');
 }
 
-Future<Object?> _call(
-  CampusApi api,
-  String method, [
-  Json params = const {},
-]) async {
-  try {
-    final scope = api.accountScope;
-    if (scope == null) throw PlatformException(code: 'AccountRequired');
-    scope.check();
-    return await api.call(method, params);
-  } on PlatformException catch (error) {
-    throw AgentFailure(switch (error.code) {
-      'AttachmentTooLarge' => '课程 PDF 不能超过 2 MiB。',
-      'AttachmentUnsupportedType' => '只能读取 Canvas 课程 PDF。',
-      'AttachmentInvalidContent' => '课程 PDF 的内容无效或大小未知。',
-      'AssetBusy' => '课程文件正在使用，请稍后重试。',
-      'AssetMissing' || 'NotFound' => '课程文件缓存已失效，请重新读取。',
-      _ => campusError(error),
-    });
-  }
-}
+String? _optionalAssignmentId(Json args) =>
+    args.containsKey('assignment_id') ? _canvasId(args['assignment_id']) : null;

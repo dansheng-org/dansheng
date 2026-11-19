@@ -12,6 +12,8 @@ const _maxOutputTokens = 1024;
 const _maxRequestBytes = 128 * 1024;
 // Allow for base64 expansion of a 2 MiB attachment and the JSON envelope.
 const _maxAttachmentRequestBytes = 3 * 1024 * 1024;
+// Campus PDF fallbacks can carry up to 8 MiB before base64 encoding.
+const _maxCampusPdfRequestBytes = 12 * 1024 * 1024;
 const _textAttachmentMimeTypes = {
   'text/plain',
   'text/markdown',
@@ -93,10 +95,7 @@ class StreamingAgentModel implements AgentModel {
       final deepSeekPdfs = officialDeepSeek
           ? <AgentAttachment, Uint8List>{}
           : null;
-      final hasAttachments = _validateRequestAttachments(
-        messages,
-        deepSeekPdfs,
-      );
+      final requestLimit = _attachmentRequestLimit(messages, deepSeekPdfs);
       final fileSources = <AgentAttachment, Json>{};
       if (deepSeekPdfs != null && deepSeekPdfs.isNotEmpty) {
         if (deepSeekChat == null) {
@@ -118,7 +117,7 @@ class StreamingAgentModel implements AgentModel {
         messages,
         tools,
         _anthropicBlocks,
-        hasAttachments ? _maxAttachmentRequestBytes : _maxRequestBytes,
+        requestLimit,
         fileSources,
         deepSeek: deepSeekChat != null,
         uploadFiles: deepSeekPdfs == null || deepSeekPdfs.isEmpty
@@ -447,13 +446,21 @@ Future<Uint8List> _requestBody(
   }
 }
 
-bool _validateRequestAttachments(
+int _attachmentRequestLimit(
   List<AgentMessage> messages,
   Map<AgentAttachment, Uint8List>? deepSeekPdfs,
 ) {
   var attachmentCount = 0;
   var deepSeekPdfCount = 0;
-  var remainingBytes = _maxAttachmentRequestBytes;
+  final limit =
+      messages.any(
+        (message) => message.attachments.any(
+          (file) => file.maxBytes == agentMaxCampusPdfBytes,
+        ),
+      )
+      ? _maxCampusPdfRequestBytes
+      : _maxAttachmentRequestBytes;
+  var remainingBytes = limit;
   for (final message in messages) {
     attachmentCount += message.attachments.length;
     if (attachmentCount > _maxBlocks) throw _requestTooLarge;
@@ -469,7 +476,7 @@ bool _validateRequestAttachments(
       );
     }
   }
-  return attachmentCount != 0;
+  return attachmentCount == 0 ? _maxRequestBytes : limit;
 }
 
 int _validateAttachment(
@@ -499,7 +506,7 @@ int _validateAttachment(
   if (signature == null) throw _invalidAttachment;
 
   final data = attachment.base64Data;
-  const maxEncodedLength = (agentMaxAttachmentBytes + 2) ~/ 3 * 4;
+  final maxEncodedLength = (attachment.maxBytes + 2) ~/ 3 * 4;
   if (data.length > maxEncodedLength) throw _attachmentTooLarge;
   if (data.length > remainingBytes) throw _requestTooLarge;
   final Uint8List bytes;
@@ -509,7 +516,7 @@ int _validateAttachment(
   } on FormatException {
     throw _invalidAttachment;
   }
-  if (bytes.length > agentMaxAttachmentBytes) throw _attachmentTooLarge;
+  if (bytes.length > attachment.maxBytes) throw _attachmentTooLarge;
   if (!_matchesSignature(bytes, signature) ||
       (mimeType == 'image/webp' &&
           !_matchesSignature(bytes, const [0x57, 0x45, 0x42, 0x50], 8))) {

@@ -21,11 +21,12 @@ use std::{
 };
 use uuid::Uuid;
 
-pub const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
+pub const MAX_FILE_BYTES: u64 = 200 * 1024 * 1024;
 pub const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_READ_BYTES: u64 = 1024 * 1024;
 pub const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_TEXT_BYTES: usize = 256 * 1024;
+const MAX_TEXT_READ_BYTES: usize = 24 * 1024;
 pub const MAX_PDF_PAGES: usize = 128;
 pub const MAX_PDF_OBJECTS: usize = 4096;
 // Retain the permit inside the blocking task: dropping its caller cannot admit
@@ -146,6 +147,7 @@ pub async fn dispatch(
         "files.download"
             | "files.list"
             | "files.read"
+            | "files.text"
             | "files.delete"
             | "files.index"
             | "files.export"
@@ -193,6 +195,17 @@ pub async fn dispatch(
             input.offset.unwrap_or(0),
             input.length.unwrap_or(64 * 1024),
         ),
+        "files.text" => {
+            let preview_mime = (asset.size > MAX_TEXT_READ_BYTES as u64)
+                .then(|| plain_text_mime(&asset))
+                .flatten();
+            let mut text = extract_managed_text(&root, &asset, preview_mime).await?;
+            let truncated = preview_mime.is_some() || text.len() > MAX_TEXT_READ_BYTES;
+            if text.len() > MAX_TEXT_READ_BYTES {
+                text.truncate(text.floor_char_boundary(MAX_TEXT_READ_BYTES));
+            }
+            Ok(json!({"asset_id":asset.id,"text":text,"truncated":truncated}))
+        }
         "files.delete" => delete(store, &root, &asset),
         "files.index" => {
             grant.check(principal, "sources.write")?;
@@ -546,7 +559,7 @@ async fn download(
         .or_else(|| existing.as_ref().map(|a| a.max_bytes))
         .unwrap_or(MAX_FILE_BYTES);
     if max_bytes == 0 || max_bytes > MAX_FILE_BYTES {
-        return Err(CoreError::new("QuotaExceeded", "per-file quota is 100 MiB"));
+        return Err(CoreError::new("QuotaExceeded", "per-file quota is 200 MiB"));
     }
     let source = input
         .source_id
@@ -766,12 +779,32 @@ fn finish_delete(store: &Store, root: &Path, id: &str) -> CoreResult<()> {
     })
 }
 
-async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
+fn plain_text_mime(asset: &Asset) -> Option<&'static str> {
+    match asset.mime.as_str() {
+        "text/plain" | "text/markdown" | "text/x-markdown" | "text/csv" | "application/csv"
+        | "application/json" | "text/json" => Some("text/plain"),
+        "application/octet-stream" | "binary/octet-stream" => {
+            let ext = asset.name.rsplit_once('.')?.1.to_ascii_lowercase();
+            matches!(
+                ext.as_str(),
+                "txt" | "text" | "log" | "md" | "markdown" | "mdown" | "mkd" | "csv" | "json"
+            )
+            .then_some("text/plain")
+        }
+        _ => None,
+    }
+}
+
+async fn extract_managed_text(
+    root: &Path,
+    asset: &Asset,
+    preview_mime: Option<&'static str>,
+) -> CoreResult<String> {
     ready(asset)?;
-    if asset.size > MAX_INDEX_BYTES {
+    if preview_mime.is_none() && asset.size > MAX_INDEX_BYTES {
         return Err(CoreError::new(
             "DocumentTooLarge",
-            "index input exceeds 8 MiB",
+            "document extraction input exceeds 8 MiB",
         ));
     }
     let path = root.join(&asset.id);
@@ -789,8 +822,41 @@ async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
         INDEX_WORKERS.clone().acquire_owned().await.map_err(|_| {
             CoreError::new("Shutdown", "document extraction workers are unavailable")
         })?;
-    let text = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let _permit = permit;
+        if let Some(mime) = preview_mime {
+            let mut file = File::open(&path)?;
+            let mut prefix = Vec::with_capacity(MAX_TEXT_READ_BYTES);
+            (&mut file)
+                .take(MAX_TEXT_READ_BYTES as u64)
+                .read_to_end(&mut prefix)?;
+            let mut digest = Sha256::new();
+            digest.update(&prefix);
+            update_file_hash(
+                file.take(MAX_FILE_BYTES + 1 - prefix.len() as u64),
+                &mut digest,
+            )?;
+            if expected.as_deref() != Some(hex::encode(digest.finalize()).as_str()) {
+                return Err(CoreError::new(
+                    "IntegrityMismatch",
+                    "managed document SHA-256 changed",
+                ));
+            }
+            // A byte limit can land in the middle of the final UTF-8 character.
+            // Embedded invalid UTF-8 still fails the ordinary extractor.
+            if let Err(error) = std::str::from_utf8(&prefix)
+                && error.error_len().is_none()
+            {
+                prefix.truncate(error.valid_up_to());
+            }
+            if prefix.starts_with(b"%PDF-") {
+                return Err(CoreError::new(
+                    "UnsupportedContent",
+                    "text excerpt requires a UTF-8 document",
+                ));
+            }
+            return extract(&prefix, mime);
+        }
         let mut bytes = Vec::new();
         File::open(path)?
             .take(MAX_INDEX_BYTES + 1)
@@ -798,7 +864,7 @@ async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
         if bytes.len() as u64 > MAX_INDEX_BYTES {
             return Err(CoreError::new(
                 "DocumentTooLarge",
-                "index input exceeds 8 MiB",
+                "document extraction input exceeds 8 MiB",
             ));
         }
         if expected.as_deref() != Some(hash(&bytes).as_str()) {
@@ -810,7 +876,11 @@ async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
         extract(&bytes, &mime)
     })
     .await
-    .map_err(|_| CoreError::new("DocumentParseError", "document extraction stopped"))??;
+    .map_err(|_| CoreError::new("DocumentParseError", "document extraction stopped"))?
+}
+
+async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
+    let text = extract_managed_text(root, asset, None).await?;
     // The Store creates the search record with its standard FTS triggers and size checks.
     let external = format!("asset:{}", asset.id);
     let data = json!({"asset_id":asset.id,"name":asset.name,"mime_type":asset.mime,"sha256":asset.sha256,"text":text});
@@ -1325,8 +1395,11 @@ fn hash(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 fn file_hash(path: &Path) -> CoreResult<String> {
-    let mut input = File::open(path)?.take(MAX_FILE_BYTES + 1);
     let mut digest = Sha256::new();
+    update_file_hash(File::open(path)?.take(MAX_FILE_BYTES + 1), &mut digest)?;
+    Ok(hex::encode(digest.finalize()))
+}
+fn update_file_hash(mut input: impl Read, digest: &mut Sha256) -> CoreResult<()> {
     let mut buffer = [0u8; 65536];
     loop {
         let n = input.read(&mut buffer)?;
@@ -1335,7 +1408,7 @@ fn file_hash(path: &Path) -> CoreResult<String> {
         }
         digest.update(&buffer[..n]);
     }
-    Ok(hex::encode(digest.finalize()))
+    Ok(())
 }
 fn now() -> String {
     Utc::now().to_rfc3339()

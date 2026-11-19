@@ -1769,8 +1769,28 @@ impl CoreService for CampusService {
                     // surface as sign-in, not as a saved login page.
                     let session = DriveDownloadSession::capture(context.network, account)?;
                     client.user_root(&source).await.map_err(source_error)?;
+                    let mut file_params = params.clone();
+                    if params["verify_listing"] == true {
+                        let path = required_string(&params, "path")?;
+                        let parent = crate::fudan_cloud::parent_path(path).map_err(source_error)?;
+                        let listing = client.list(&source, &parent).await.map_err(source_error)?;
+                        let item = listing
+                            .items
+                            .into_iter()
+                            .find(|item| item.path == path && !item.is_folder && item.downloadable)
+                            .ok_or_else(|| {
+                                CoreError::new(
+                                    "FileUnavailable",
+                                    "cloud file is unavailable in its folder",
+                                )
+                            })?;
+                        file_params["size"] = json!(item.size);
+                        file_params["modified_at"] = json!(item.modified_at);
+                        file_params["content_type"] = json!(item.content_type);
+                    }
                     session.check()?;
-                    download_cloud_file(context, principal, grant, account, &params, &session).await
+                    download_cloud_file(context, principal, grant, account, &file_params, &session)
+                        .await
                 }
                 "fudan.cloud.mkdir" => Ok(json!({"path": client
                     .create_folder(
@@ -3350,8 +3370,140 @@ fn dated_occurrences(table: &crate::models::Timetable) -> CoreResult<Vec<(String
     }
     Ok(rows)
 }
-// Canvas's metadata -> same-origin download -> approved storage redirect follows
-// Dela e82da12f src/main/canvas/api.ts. Signed URLs never leave this trusted bridge.
+/// The shared cache policy for authenticated campus downloads. Only Core
+/// constructs the URL and origin policy. Callers receive an asset, never a URL.
+struct CampusFile<'a> {
+    source: &'a str,
+    capability: &'a str,
+    url: url::Url,
+    revision: Value,
+    name: &'a str,
+    mime: &'a str,
+    size: Option<u64>,
+    max_bytes: u64,
+}
+
+fn campus_file_limit(params: &Value) -> CoreResult<u64> {
+    match params.get("max_bytes") {
+        None => Ok(dansheng_core::assets::MAX_FILE_BYTES),
+        Some(value) => value
+            .as_u64()
+            .filter(|n| (1..=dansheng_core::assets::MAX_FILE_BYTES).contains(n))
+            .ok_or_else(|| CoreError::invalid("invalid campus download byte limit")),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn download_cached_campus_file(
+    context: &ServiceContext<'_>,
+    principal: &Principal,
+    service: &Principal,
+    grant: &Grant,
+    delegated: &Grant,
+    session: &DriveDownloadSession<'_>,
+    private_origin: Option<&str>,
+    file: CampusFile<'_>,
+) -> CoreResult<Value> {
+    use dansheng_core::assets;
+    use sha2::{Digest, Sha256};
+    use std::sync::LazyLock;
+    use tokio::sync::Mutex;
+
+    static TRANSFERS: LazyLock<[Mutex<()>; 32]> =
+        LazyLock::new(|| std::array::from_fn(|_| Mutex::new(())));
+    let account = session.account;
+    let digest = Sha256::digest(serde_json::to_vec(&file.revision)?);
+    // A fixed set of locks serializes competing requests for the same revision
+    // without retaining a process-wide map of private filenames or handles.
+    let _transfer = TRANSFERS[usize::from(digest[0]) % TRANSFERS.len()]
+        .lock()
+        .await;
+    session.check()?;
+    if file.size.is_some_and(|size| size > file.max_bytes) {
+        return Err(CoreError::new(
+            "AssetTooLarge",
+            "campus file exceeds the requested limit",
+        ));
+    }
+    let key = hex_string(&digest);
+    let namespace = format!("{}:files:{account}", service.id);
+    context.store.require_source_capabilities(
+        &service.id,
+        file.source,
+        &[file.capability.to_owned()].into_iter().collect(),
+    )?;
+    let cached = context.store.kv_get(&namespace, &key)?;
+    if let Some(id) = cached["asset_id"].as_str()
+        && let Ok(asset) = assets::export_descriptor(
+            context.store,
+            service,
+            delegated,
+            json!({"asset_id":id,"account_id":account}),
+        )
+    {
+        session.check()?;
+        if asset["size"]
+            .as_u64()
+            .is_none_or(|size| size > file.max_bytes)
+        {
+            return Err(CoreError::new(
+                "AssetTooLarge",
+                "campus file exceeds the requested limit",
+            ));
+        }
+        return Ok(cached);
+    }
+    let request = assets::dispatch(
+        context.store,
+        context.network,
+        service,
+        delegated,
+        "files.download",
+        json!({
+            "url": file.url.to_string(),
+            "account_id": account,
+            "source_id": file.source,
+            "name": file.name,
+            "mime_type": file.mime,
+            "max_bytes": file.size.unwrap_or(file.max_bytes).max(1),
+            "timeout_ms": 300_000,
+        }),
+    );
+    let downloaded = if let Some(origin) = private_origin {
+        context
+            .network
+            .with_owner_private_origin_read(principal, grant, service, account, origin, request)
+            .await
+    } else {
+        request.await
+    };
+    let downloaded = session
+        .finish(context, service, delegated, downloaded)
+        .await?;
+    if file
+        .size
+        .is_some_and(|size| downloaded["size"].as_u64() != Some(size))
+    {
+        let _ = assets::dispatch(
+            context.store,
+            context.network,
+            service,
+            delegated,
+            "files.delete",
+            json!({"asset_id":downloaded["asset_id"],"account_id":account}),
+        )
+        .await;
+        return Err(CoreError::new(
+            "IntegrityMismatch",
+            "download differs from its source metadata",
+        ));
+    }
+    context.store.kv_set(&namespace, &key, &downloaded)?;
+    session.check()?;
+    Ok(downloaded)
+}
+
+// Signed URLs stay inside Core, including direct URLs on approved storage hosts.
 async fn download_canvas_material(
     context: ServiceContext<'_>,
     principal: &Principal,
@@ -3360,9 +3512,10 @@ async fn download_canvas_material(
     config: &Value,
     params: &Value,
 ) -> CoreResult<Value> {
-    use dansheng_core::{PrincipalKind, assets};
-    use sha2::{Digest, Sha256};
+    use dansheng_core::PrincipalKind;
     grant.check(principal, "files.download")?;
+    let max_bytes = campus_file_limit(params)?;
+    let session = DriveDownloadSession::capture(context.network, account)?;
     let origin = required_string(config, "origin")?;
     let base = url::Url::parse(origin).map_err(|_| CoreError::invalid("invalid Canvas origin"))?;
     if base.scheme() != "https" || base.origin().ascii_serialization() != origin {
@@ -3374,10 +3527,16 @@ async fn download_canvas_material(
             "browser-only Canvas downloads require a browser provider",
         ));
     }
-    let file_id = required_string(params, "file_id")?;
-    if file_id.len() > 32 || !file_id.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(CoreError::invalid("invalid Canvas file id"));
-    }
+    let file_id = canvas_download_id(params, "file_id")?;
+    let course = params
+        .get("course_id")
+        .map(|_| canvas_download_id(params, "course_id"))
+        .transpose()?;
+    let path = if let Some(course) = course {
+        format!("/api/v1/courses/{course}/files/{file_id}")
+    } else {
+        format!("/api/v1/files/{file_id}")
+    };
     let mut delegated = grant.clone();
     delegated.account_ids.insert(account.into());
     delegated.origins = std::collections::BTreeSet::from([origin.into()]);
@@ -3410,39 +3569,63 @@ async fn download_canvas_material(
         Some("host_token") => CredentialKind::Bearer,
         _ => CredentialKind::Cookie,
     };
-    let metadata_response = context
-        .network
-        .request_with_credentials(
-            &service,
-            &delegated,
-            HttpRequest {
-                url: base
-                    .join(&format!("/api/v1/files/{file_id}"))
-                    .map_err(|_| CoreError::invalid("invalid Canvas file path"))?
-                    .to_string(),
-                account_id: Some(account.into()),
-                follow_redirects: false,
-                ..Default::default()
-            },
-            credential_kind,
-        )
+    let request = |path: &str| -> CoreResult<HttpRequest> {
+        Ok(HttpRequest {
+            url: base
+                .join(path)
+                .map_err(|_| CoreError::invalid("invalid Canvas file path"))?
+                .to_string(),
+            account_id: Some(account.into()),
+            follow_redirects: false,
+            ..Default::default()
+        })
+    };
+    let get = |request| {
+        context
+            .network
+            .request_with_credentials(&service, &delegated, request, credential_kind)
+    };
+    let assignment_link = if params.get("assignment_id").is_some() {
+        let course =
+            course.ok_or_else(|| CoreError::invalid("assignment file requires a course id"))?;
+        let assignment = canvas_download_id(params, "assignment_id")?;
+        let response = get(request(&format!(
+            "/api/v1/courses/{course}/assignments/{assignment}"
+        ))?)
         .await?;
-    if metadata_response.status == 401 || (300..400).contains(&metadata_response.status) {
-        return Err(CoreError::new(
-            "AuthenticationRequired",
-            "Canvas file authentication is required",
-        ));
+        check_canvas_file_status(response.status)?;
+        let data: Value = serde_json::from_str(&response.body)?;
+        if data["published"] == false
+            || data["locked_for_user"] == true
+            || !data["description"].as_str().is_some_and(|description| {
+                canvas_assignment_references_file(&base, course, file_id, description)
+            })
+        {
+            return Err(CoreError::new(
+                "FileUnavailable",
+                "file is not linked from the specified Canvas assignment",
+            ));
+        }
+        true
+    } else {
+        false
+    };
+    let mut metadata_response = get(request(&path)?).await?;
+    if assignment_link && matches!(metadata_response.status, 403 | 404) {
+        // Some assignments link files that the course files endpoint does not list.
+        // The server must still authorize the global metadata and actual download.
+        metadata_response = get(request(&format!("/api/v1/files/{file_id}"))?).await?;
     }
-    if metadata_response.status != 200 {
-        return Err(CoreError::new(
-            "SourceError",
-            format!(
-                "Canvas file metadata returned HTTP {}",
-                metadata_response.status
-            ),
-        ));
-    }
+    check_canvas_file_status(metadata_response.status)?;
     let mut metadata: Value = serde_json::from_str(&metadata_response.body)?;
+    if metadata["locked_for_user"] == true
+        || (!assignment_link && metadata["hidden_for_user"] == true)
+    {
+        return Err(CoreError::new(
+            "FileUnavailable",
+            "Canvas file is unavailable in this course",
+        ));
+    }
     if let Some(value) = metadata["url"].as_str() {
         let candidate = base
             .join(value)
@@ -3454,69 +3637,119 @@ async fn download_canvas_material(
                 .to_string()
         );
     }
-    let url = canvas_download_url(&base, file_id, &metadata)?;
+    let url = canvas_download_url(&base, &delegated.origins, file_id, &metadata)?;
     let expected = metadata["size"].as_u64();
-    if expected.is_some_and(|n| n > assets::MAX_FILE_BYTES) {
-        return Err(CoreError::new(
-            "AssetTooLarge",
-            "Canvas file exceeds the managed file limit",
-        ));
-    }
-    let key = hex_string(&Sha256::digest(serde_json::to_vec(&json!([
-        account,
-        origin,
-        file_id,
-        metadata["updated_at"],
-        metadata["size"]
-    ]))?));
-    let namespace = format!("service:canvas:files:{account}");
-    context.store.require_source_capabilities(
-        "service:canvas",
-        "official.canvas.materials",
-        &["canvas.read".to_owned()].into_iter().collect(),
-    )?;
-    let cached = context.store.kv_get(&namespace, &key)?;
-    if let Some(id) = cached["asset_id"].as_str()
-        && assets::export_descriptor(
-            context.store,
-            &service,
-            &delegated,
-            json!({"asset_id":id,"account_id":account}),
-        )
-        .is_ok()
-    {
-        return Ok(cached);
-    }
     let name = metadata["display_name"]
         .as_str()
         .or(metadata["filename"].as_str())
         .unwrap_or("course-material")
         .chars()
         .filter(|c| !c.is_control())
-        .take(64)
+        .take(96)
         .collect::<String>();
-    let mime = metadata["content-type"]
-        .as_str()
-        .unwrap_or("application/octet-stream");
-    let downloaded=assets::dispatch(context.store,context.network,&service,&delegated,"files.download",json!({"url":url.to_string(),"account_id":account,"source_id":"official.canvas.materials","name":if name.is_empty(){"course-material"}else{&name},"mime_type":mime,"max_bytes":assets::MAX_FILE_BYTES})).await?;
-    if expected.is_some_and(|n| downloaded["size"].as_u64() != Some(n)) {
-        let _ = assets::dispatch(
-            context.store,
-            context.network,
-            &service,
-            &delegated,
-            "files.delete",
-            json!({"asset_id":downloaded["asset_id"],"account_id":account}),
-        )
-        .await;
-        return Err(CoreError::new(
-            "IntegrityMismatch",
-            "Canvas download size differs from its metadata",
-        ));
-    }
-    context.store.kv_set(&namespace, &key, &downloaded)?;
+    let downloaded = download_cached_campus_file(
+        &context,
+        principal,
+        &service,
+        grant,
+        &delegated,
+        &session,
+        None,
+        CampusFile {
+            source: "official.canvas.materials",
+            capability: "canvas.read",
+            url,
+            revision: json!([
+                session.fingerprint,
+                account,
+                origin,
+                file_id,
+                metadata["updated_at"],
+                metadata["modified_at"],
+                expected
+            ]),
+            name: if name.is_empty() {
+                "course-material"
+            } else {
+                &name
+            },
+            mime: campus_file_mime(metadata.get("content-type").and_then(Value::as_str)),
+            size: expected,
+            max_bytes,
+        },
+    )
+    .await?;
     context.store.record_upsert("service:canvas",account,"official.canvas.materials",&format!("download:{file_id}"),"course_material",&json!({"file_id":file_id,"asset_id":downloaded["asset_id"],"name":downloaded["name"],"size":downloaded["size"],"mime_type":downloaded["mime_type"]}))?;
     Ok(downloaded)
+}
+
+fn canvas_download_id<'a>(params: &'a Value, field: &str) -> CoreResult<&'a str> {
+    let id = required_string(params, field)?;
+    if id.is_empty() || id.len() > 32 || !id.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(CoreError::invalid("invalid Canvas file or course id"));
+    }
+    Ok(id)
+}
+
+fn check_canvas_file_status(status: u16) -> CoreResult<()> {
+    match status {
+        200 => Ok(()),
+        401 | 300..=399 => Err(CoreError::new(
+            "AuthenticationRequired",
+            "Canvas file authentication is required",
+        )),
+        403 | 404 => Err(CoreError::new(
+            "FileUnavailable",
+            "Canvas file is unavailable in this course",
+        )),
+        _ => Err(CoreError::new(
+            "SourceError",
+            format!("Canvas file metadata returned HTTP {status}"),
+        )),
+    }
+}
+
+fn canvas_assignment_references_file(
+    origin: &url::Url,
+    course: &str,
+    file: &str,
+    description: &str,
+) -> bool {
+    use scraper::{Html, Selector};
+    if description.len() > 512 * 1024 {
+        return false;
+    }
+    let anchors = Selector::parse("a[href],a[data-api-endpoint]").expect("constant selector");
+    Html::parse_fragment(description)
+        .select(&anchors)
+        .flat_map(|anchor| {
+            ["href", "data-api-endpoint"]
+                .into_iter()
+                .filter_map(move |attr| anchor.value().attr(attr))
+        })
+        .filter(|value| value.len() <= 8192)
+        .filter_map(|value| origin.join(value.trim()).ok())
+        .any(|url| {
+            if url.origin() != origin.origin()
+                || !url.username().is_empty()
+                || url.password().is_some()
+            {
+                return false;
+            }
+            let mut path: Vec<_> = url.path().trim_matches('/').split('/').collect();
+            if path
+                .last()
+                .is_some_and(|part| matches!(*part, "preview" | "download"))
+            {
+                path.pop();
+            }
+            let path = path.strip_prefix(&["api", "v1"]).unwrap_or(&path);
+            match path {
+                ["courses", id, "files", attachment] => *id == course && *attachment == file,
+                ["files", attachment] => *attachment == file,
+                _ => false,
+            }
+        })
 }
 /// WebDAV drives configured by the owner. Server addresses (not secrets) are
 /// kept per account; credentials live only in the network session of each
@@ -4077,19 +4310,17 @@ async fn download_cloud_file(
     params: &Value,
     session: &DriveDownloadSession<'_>,
 ) -> CoreResult<Value> {
-    use dansheng_core::{PrincipalKind, assets};
-    use sha2::{Digest, Sha256};
+    use dansheng_core::PrincipalKind;
     grant.check(principal, "files.download")?;
     session.check()?;
+    let max_bytes = campus_file_limit(params)?;
     let path = required_string(params, "path")?;
     let url = crate::fudan_cloud::download_url(path).map_err(source_error)?;
     let size = params.get("size").and_then(Value::as_u64);
-    if size.is_some_and(|n| n > assets::MAX_FILE_BYTES) {
-        return Err(CoreError::new(
-            "AssetTooLarge",
-            "cloud file exceeds the managed file limit",
-        ));
-    }
+    let modified = params["modified_at"]
+        .as_str()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|time| time.with_timezone(&Utc));
     let name = path
         .trim_end_matches('/')
         .rsplit('/')
@@ -4104,19 +4335,6 @@ async fn download_cloud_file(
     } else {
         name
     };
-    let mime = params
-        .get("content_type")
-        .and_then(Value::as_str)
-        .filter(|m| {
-            m.len() <= 100
-                && m.split_once('/').is_some_and(|(a, b)| {
-                    !a.is_empty()
-                        && !b.is_empty()
-                        && m.bytes()
-                            .all(|c| c.is_ascii_alphanumeric() || b"/.+-_".contains(&c))
-                })
-        })
-        .unwrap_or("application/octet-stream");
     let mut delegated = grant.clone();
     delegated.account_ids.insert(account.into());
     delegated.origins = std::collections::BTreeSet::from([crate::fudan_cloud::ORIGIN.into()]);
@@ -4134,87 +4352,52 @@ async fn download_cloud_file(
         id: "service:fudan-cloud".into(),
         kind: PrincipalKind::Client,
     };
-    let key = hex_string(&Sha256::digest(serde_json::to_vec(&json!([
-        session.fingerprint,
-        account,
-        path,
-        params.get("modified_at"),
-        size
-    ]))?));
-    let namespace = format!("service:fudan-cloud:files:{account}");
-    context.store.require_source_capabilities(
-        "service:fudan-cloud",
-        "official.fudan.cloud.files",
-        &["fudan.cloud.read".to_owned()].into_iter().collect(),
-    )?;
-    let cached = context.store.kv_get(&namespace, &key)?;
-    if let Some(id) = cached["asset_id"].as_str()
-        && assets::export_descriptor(
-            context.store,
-            &service,
-            &delegated,
-            json!({"asset_id":id,"account_id":account}),
-        )
-        .is_ok()
-    {
-        session.check()?;
-        return Ok(cached);
-    }
-    // The drive resolves to a campus address; keep the owner's named LAN
-    // approval for this one GET, as WebDAV downloads do.
-    let downloaded = context
-        .network
-        .with_owner_private_origin_read(
-            principal,
-            grant,
-            &service,
-            account,
-            crate::fudan_cloud::ORIGIN,
-            assets::dispatch(
-                context.store,
-                context.network,
-                &service,
-                &delegated,
-                "files.download",
-                json!({
-                    "url": url.to_string(),
-                    "account_id": account,
-                    "source_id": "official.fudan.cloud.files",
-                    "name": name,
-                    "mime_type": mime,
-                    "max_bytes": assets::MAX_FILE_BYTES,
-                }),
-            ),
-        )
-        .await;
-    let downloaded = session
-        .finish(&context, &service, &delegated, downloaded)
-        .await?;
-    if size.is_some_and(|n| downloaded["size"].as_u64() != Some(n)) {
-        // A login or error page instead of the file has a different size.
-        let _ = assets::dispatch(
-            context.store,
-            context.network,
-            &service,
-            &delegated,
-            "files.delete",
-            json!({"asset_id":downloaded["asset_id"],"account_id":account}),
-        )
-        .await;
-        return Err(CoreError::new(
-            "IntegrityMismatch",
-            "cloud download differs from its listing",
-        ));
-    }
-    session.check()?;
-    context.store.kv_set(&namespace, &key, &downloaded)?;
-    session.check()?;
-    Ok(downloaded)
+    download_cached_campus_file(
+        &context,
+        principal,
+        &service,
+        grant,
+        &delegated,
+        session,
+        Some(crate::fudan_cloud::ORIGIN),
+        CampusFile {
+            source: "official.fudan.cloud.files",
+            capability: "fudan.cloud.read",
+            url,
+            revision: json!([session.fingerprint, account, path, modified, size]),
+            name: &name,
+            mime: campus_file_mime(params.get("content_type").and_then(Value::as_str)),
+            size,
+            max_bytes,
+        },
+    )
+    .await
+}
+
+fn campus_file_mime(value: Option<&str>) -> &str {
+    value
+        .and_then(|m| m.split(';').next())
+        .map(str::trim)
+        .filter(|m| {
+            m.len() <= 100
+                && m.split_once('/').is_some_and(|(a, b)| {
+                    !a.is_empty()
+                        && !b.is_empty()
+                        && m.bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || b"/.+-_".contains(&c))
+                })
+        })
+        .unwrap_or("application/octet-stream")
 }
 fn hex_string(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
-fn canvas_download_url(origin: &url::Url, file_id: &str, metadata: &Value) -> CoreResult<url::Url> {
+fn canvas_download_url(
+    origin: &url::Url,
+    approved_origins: &std::collections::BTreeSet<String>,
+    file_id: &str,
+    metadata: &Value,
+) -> CoreResult<url::Url> {
     let actual = metadata["id"]
         .as_str()
         .map(str::to_owned)
@@ -4233,13 +4416,13 @@ fn canvas_download_url(origin: &url::Url, file_id: &str, metadata: &Value) -> Co
         .join(value)
         .map_err(|_| CoreError::new("SourceError", "invalid Canvas download address"))?;
     if url.scheme() != "https"
-        || url.origin() != origin.origin()
+        || !approved_origins.contains(&url.origin().ascii_serialization())
         || !url.username().is_empty()
         || url.password().is_some()
     {
         return Err(CoreError::new(
             "PermissionDenied",
-            "Canvas must provide a same-origin download address; storage redirects require a configured origin",
+            "Canvas file storage origin is not approved",
         ));
     }
     Ok(url)
@@ -4424,21 +4607,130 @@ mod adapter_tests {
     #[test]
     fn file_tickets_are_bound_to_identity_and_origin_without_exporting_signed_urls() {
         let origin = url::Url::parse("https://canvas.example").unwrap();
+        let origins = [
+            "https://canvas.example".to_owned(),
+            FUDAN_CANVAS_STORAGE.to_owned(),
+        ]
+        .into_iter()
+        .collect();
         let good = json!({"id":42,"url":"/files/42/download?verifier=synthetic"});
         assert_eq!(
-            canvas_download_url(&origin, "42", &good)
+            canvas_download_url(&origin, &origins, "42", &good)
                 .unwrap()
                 .host_str(),
             Some("canvas.example")
         );
+        let storage =
+            json!({"id":42,"url":format!("{FUDAN_CANVAS_STORAGE}/file?signature=synthetic")});
+        assert!(canvas_download_url(&origin, &origins, "42", &storage).is_ok());
         for bad in [
             json!({"id":43,"url":"/files/42"}),
             json!({"id":42,"url":"https://outside.invalid/secret"}),
             json!({"id":42,"url":"http://canvas.example/secret"}),
             json!({"id":42,"url":"https://user:synthetic@canvas.example/secret"}),
         ] {
-            assert!(canvas_download_url(&origin, "42", &bad).is_err());
+            assert!(canvas_download_url(&origin, &origins, "42", &bad).is_err());
         }
+    }
+
+    #[test]
+    fn canvas_download_requires_a_real_assignment_link_before_using_global_file_metadata() {
+        let origin = url::Url::parse("https://canvas.example").unwrap();
+        assert!(canvas_assignment_references_file(
+            &origin,
+            "7",
+            "42",
+            r#"<a data-api-endpoint="https://canvas.example/api/v1/courses/7/files/42?verifier=synthetic">PDF</a>"#,
+        ));
+        for unrelated in [
+            r#"<a href="/courses/8/files/42">another course</a>"#,
+            r#"<a href="https://outside.example/files/42">another host</a>"#,
+            r#"<!-- <a href="/files/42">hidden comment</a> -->"#,
+            r#"<script>const link = '<a href="/files/42">hidden script</a>'</script>"#,
+        ] {
+            assert!(!canvas_assignment_references_file(
+                &origin, "7", "42", unrelated
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_campus_reads_reuse_one_asset_and_enforce_the_callers_limit() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = [0; 4096];
+                let n = socket.read(&mut bytes).await.unwrap();
+                let headers = b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n";
+                socket.write_all(headers).await.unwrap();
+                if bytes[..n].starts_with(b"GET ") {
+                    socket.write_all(b"fixture").await.unwrap();
+                }
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let store = dansheng_core::store::Store::open(dir.path()).unwrap();
+        let network = Network::default();
+        network
+            .set_session("fixture", &origin, None, vec![])
+            .unwrap();
+        let context = ServiceContext {
+            store: &store,
+            network: &network,
+            platform: &dansheng_core::UnavailablePlatform,
+        };
+        let principal = Principal::owner();
+        let service = Principal {
+            id: "service:canvas".into(),
+            kind: dansheng_core::PrincipalKind::Client,
+        };
+        let delegated = Grant {
+            allow_private_network: true,
+            origins: [origin.clone()].into_iter().collect(),
+            account_ids: ["fixture".to_owned()].into_iter().collect(),
+            capabilities: [
+                "canvas.read",
+                "http.request",
+                "files.download",
+                "files.export",
+                "files.delete",
+            ]
+            .map(str::to_owned)
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let session = DriveDownloadSession::capture(&network, "fixture").unwrap();
+        let download = |limit| {
+            download_cached_campus_file(
+                &context,
+                &principal,
+                &service,
+                &delegated,
+                &delegated,
+                &session,
+                None,
+                CampusFile {
+                    source: "official.canvas.materials",
+                    capability: "canvas.read",
+                    url: url::Url::parse(&origin).unwrap(),
+                    revision: json!(["fixture", 42, "v1"]),
+                    name: "fixture.txt",
+                    mime: "text/plain",
+                    size: None,
+                    max_bytes: limit,
+                },
+            )
+        };
+        let (first, second) = tokio::join!(download(32), download(32));
+        let first = first.unwrap();
+        assert_eq!(first["asset_id"], second.unwrap()["asset_id"]);
+        assert_eq!(first["size"], 7);
+        assert_eq!(download(6).await.unwrap_err().code, "AssetTooLarge");
+        server.await.unwrap();
     }
     #[cfg(feature = "webvpn")]
     #[tokio::test]

@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dansheng_app/agent/agent_session.dart';
 import 'package:dansheng_app/agent/agent_types.dart';
@@ -268,7 +269,7 @@ void main() {
       approve: (_) async => true,
       onText: (_) {},
       onTool: (_) {},
-      onCourseAttachment: sentFiles.add,
+      onRemoteAttachment: sentFiles.add,
     );
     expect(sentFiles, [pdf]);
     final tool = model.requests[1].firstWhere(
@@ -280,6 +281,114 @@ void main() {
     expect(model.requests.last, hasLength(1));
     expect(model.requests.last.single.attachments, isEmpty);
   });
+
+  test(
+    'only approved typed remote attachments reach model content blocks',
+    () async {
+      final png = AgentAttachment.fromHost(
+        name: '图.png',
+        mimeType: 'image/png',
+        data: base64Encode([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+      final extracted = AgentAttachment.fromHost(
+        name: '讲义.pdf.txt',
+        mimeType: 'text/plain',
+        data: base64Encode(utf8.encode('这段内容只进入附件')),
+      );
+      final largePdf = Uint8List(agentMaxCampusPdfBytes)
+        ..setAll(0, utf8.encode('%PDF-'));
+      final binary = AgentAttachment(
+        name: 'large.pdf',
+        mimeType: 'application/pdf',
+        base64Data: base64Encode(largePdf),
+        isCampusFile: true,
+      );
+      final model = _Model([
+        const AgentMessage.assistant('', [
+          AgentToolCall('too-large', 'canvas_file', {'kind': 'large'}),
+          AgentToolCall('invalid-text', 'cloud_file', {'kind': 'invalid'}),
+          AgentToolCall('untyped', 'cloud_file', {'kind': 'untyped'}),
+          AgentToolCall('extracted', 'canvas_file', {'kind': 'text'}),
+          AgentToolCall('image', 'cloud_file', {'kind': 'image'}),
+          AgentToolCall('fourth', 'cloud_file', {'kind': 'image'}),
+        ]),
+        const AgentMessage.assistant('已读取'),
+      ]);
+      AgentTool tool(String name, AgentSourceKind source) => AgentTool(
+        spec: AgentToolSpec(name, name, const {
+          'properties': {
+            'kind': {'type': 'string'},
+          },
+          'required': ['kind'],
+        }),
+        source: source,
+        label: name,
+        read: (args) async => {
+          'attachment': switch (args['kind']) {
+            'large' => binary,
+            'invalid' => AgentAttachment(
+              name: 'invalid.txt',
+              mimeType: 'text/plain',
+              base64Data: extracted.base64Data,
+              text: '字' * (agentMaxTextAttachmentBytes ~/ 3 + 1),
+            ),
+            'untyped' => {'data': 'base64-is-private'},
+            'text' => extracted,
+            _ => png,
+          },
+          if (args['kind'] == 'text') 'extracted': true,
+          if (args['kind'] == 'text') 'truncated': true,
+        },
+      );
+      final registry = AgentToolRegistry(
+        tools: [
+          tool('canvas_file', AgentSourceKind.files),
+          tool('cloud_file', AgentSourceKind.cloudFiles),
+        ],
+        activeAccount: () => 'account',
+        sourceAvailable: (_) => true,
+      );
+      final session = AgentSession(model: model, registry: registry);
+      addTearDown(session.close);
+      expect(
+        registry
+            .forSources({AgentSourceKind.files})
+            .map((tool) => tool.spec.name),
+        ['canvas_file'],
+      );
+      final approvals = <AgentSourceKind>[];
+      final sent = <AgentAttachment>[];
+      await session.send(
+        '比较这些文件',
+        sources: {AgentSourceKind.files, AgentSourceKind.cloudFiles},
+        attachments: [png],
+        approve: (source) async {
+          approvals.add(source);
+          return true;
+        },
+        onText: (_) {},
+        onTool: (_) {},
+        onRemoteAttachment: sent.add,
+      );
+      expect(approvals, [AgentSourceKind.files, AgentSourceKind.cloudFiles]);
+      expect(sent, [extracted, png]);
+      final response = model.requests.last;
+      expect(response.last.role, AgentRole.user);
+      expect(response.last.attachments, [extracted, png]);
+      final results = {
+        for (final message in response.where((m) => m.role == AgentRole.tool))
+          message.toolCallId: jsonDecode(message.text) as Json,
+      };
+      expect(results['extracted'], {'extracted': true, 'truncated': true});
+      for (final id in ['too-large', 'invalid-text', 'untyped', 'fourth']) {
+        expect(results[id], contains('error'));
+      }
+      final encoded = jsonEncode(results);
+      expect(encoded, isNot(contains(extracted.base64Data)));
+      expect(encoded, isNot(contains(extracted.text!)));
+      expect(encoded, isNot(contains('base64-is-private')));
+    },
+  );
 
   test('web search asks about each distinct query and works without a campus account', () async {
     final model = _Model([
