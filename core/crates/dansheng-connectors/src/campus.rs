@@ -1761,6 +1761,20 @@ impl<T: ConnectorTransport> FudanCampusClient<T> {
         parse_notice_attachments(&bytes, &page)
     }
 
+    /// One public department column (科研动态, 讲座, …), read anonymously so
+    /// no campus session ever reaches a department site.
+    pub async fn site_articles(
+        &self,
+        source: &SourceContext,
+        url: &str,
+    ) -> Result<Vec<crate::site_list::SiteArticle>, CampusError> {
+        let page = crate::site_list::column_url(url)?;
+        let bytes = self
+            .request(source, page.clone(), HttpMethod::Get, None, true)
+            .await?;
+        crate::site_list::parse_site_articles(&bytes, &page)
+    }
+
     pub async fn qr_state(
         &self,
         source: &SourceContext,

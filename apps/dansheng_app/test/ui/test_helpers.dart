@@ -133,6 +133,18 @@ class MockDanshengBridge implements DanshengBridge {
         return [
           {'title': '校车调整通知', 'date': '2026-11-08'},
         ];
+      case 'fudan.site.articles':
+        // One row per department column, so every research column has data.
+        final column = methodParams['url'] as String;
+        return [
+          {
+            'title': '团队在Nature发表新成果（${Uri.parse(column).host}）',
+            'url': '${column.replaceAll('list.htm', '')}c1a1/page.htm',
+            'published_on': '2026-11-15',
+          },
+        ];
+      case 'campus.openLink':
+        return {'opened': true};
       case 'fudan.ecard.transactions':
         return {'transactions': []};
       case 'fudan.gpa':

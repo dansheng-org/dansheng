@@ -1,78 +1,83 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-/// Data model representing a Fudan research news article or announcement.
+// A row of a department column (科研动态 or 讲座), read live from the
+// department site. Many rows link to the department's WeChat article.
+DateTime? _siteDate(Object? value) =>
+    value is String ? DateTime.tryParse(value) : null;
+
+String _siteDateText(Object? value) {
+  final date = _siteDate(value);
+  if (date == null) return '';
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${date.year}-${two(date.month)}-${two(date.day)}';
+}
+
+/// A research news entry (科研动态) from a department column.
 class ResearchNewsItem {
   final String id;
   final String title;
-  final String summary;
-  final String content;
-  final String source; // e.g. "科学技术研究院", "脑科学前沿科学中心"
-  final String department; // e.g. "计算机科学技术学院", "微电子学院"
-  final String publishDate; // e.g. "2026-11-15"
-  final String category; // e.g. "科研突破", "项目申报", "学术讲座", "招募招生"
-  final int readCount;
-  final bool isPinned;
-  final String? url;
+  final String department;
+  final String publishDate; // yyyy-MM-dd
+  final String category;
+  final String url;
 
   const ResearchNewsItem({
     required this.id,
     required this.title,
-    required this.summary,
-    required this.content,
-    required this.source,
     required this.department,
     required this.publishDate,
     required this.category,
-    this.readCount = 0,
-    this.isPinned = false,
-    this.url,
+    required this.url,
   });
 
-  ResearchNewsItem copyWith({
-    String? id,
-    String? title,
-    String? summary,
-    String? content,
-    String? source,
-    String? department,
-    String? publishDate,
-    String? category,
-    int? readCount,
-    bool? isPinned,
-    String? url,
+  /// `{title, url, published_on}` as returned by `fudan.site.articles`.
+  static ResearchNewsItem? fromSite(
+    Map<String, dynamic> row, {
+    required String department,
   }) {
+    final title = row['title'];
+    final url = row['url'];
+    if (title is! String || title.isEmpty || url is! String) return null;
     return ResearchNewsItem(
-      id: id ?? this.id,
-      title: title ?? this.title,
-      summary: summary ?? this.summary,
-      content: content ?? this.content,
-      source: source ?? this.source,
-      department: department ?? this.department,
-      publishDate: publishDate ?? this.publishDate,
-      category: category ?? this.category,
-      readCount: readCount ?? this.readCount,
-      isPinned: isPinned ?? this.isPinned,
-      url: url ?? this.url,
+      id: url,
+      title: title,
+      department: department,
+      publishDate: _siteDateText(row['published_on']),
+      category: categorize(title),
+      url: url,
     );
+  }
+
+  static const categories = ['科研成果', '获奖荣誉', '学术交流', '院系动态'];
+
+  /// A coarse topic from the headline; columns carry no category of their own.
+  static String categorize(String title) {
+    if (RegExp(r'喜报|荣获|获奖|获评|入选|当选|表彰|奖项|杰出|十大').hasMatch(title)) {
+      return '获奖荣誉';
+    }
+    if (RegExp(
+      r'Nature|Science|Cell|PNAS|JACS|Angew|Adv\.|Advanced|Lancet|Phys\. ?Rev|'
+      r'成果|进展|突破|发表|刊发|团队|课题组|揭示|发现|实现|研制|提出|构建|首次',
+    ).hasMatch(title)) {
+      return '科研成果';
+    }
+    if (RegExp(r'讲座|论坛|会议|研讨|报告会|访问|来访|交流|学术').hasMatch(title)) {
+      return '学术交流';
+    }
+    return '院系动态';
   }
 }
 
-/// Data model representing a research group / lab (课题组) at Fudan.
+/// A PI with an official homepage, listed as a research group (课题组).
 class ResearchGroupItem {
   final String id;
-  final String name; // 课题组名称
-  final String leader; // PI / 导师 / 团队带头人
-  final String leaderTitle; // 头衔职称
-  final String department; // 院系 / 重点实验室
-  final String campus; // 校区 (邯郸/江湾/枫林/张江)
-  final List<String> researchDirections; // 研究方向标签
-  final String description; // 课题组介绍
-  final List<String> recentPapers; // 代表性论文与成果
-  final String? recruitment; // 招生与招聘信息 (直博生/联培硕士/博士后)
-  final String contactEmail; // 联系邮箱
-  final String labLocation; // 实验室地址
-  final String websiteUrl; // 课题组官方网站 / 导师主页 (复旦域名 *.fudan.edu.cn)
-  final bool isFollowed; // 是否已关注
+  final String name; // 课题组名称 (the homepage's own group name if it has one)
+  final String leader; // PI
+  final String leaderTitle; // 职称 / 导师资格, may be empty
+  final String department; // 院系 / 研究院
+  final List<String> researchDirections;
+  final String websiteUrl; // faculty.fudan.edu.cn homepage
+  final bool isFollowed;
 
   const ResearchGroupItem({
     required this.id,
@@ -80,107 +85,81 @@ class ResearchGroupItem {
     required this.leader,
     required this.leaderTitle,
     required this.department,
-    required this.campus,
     required this.researchDirections,
-    required this.description,
-    required this.recentPapers,
-    this.recruitment,
-    required this.contactEmail,
-    required this.labLocation,
-    this.websiteUrl = '',
+    required this.websiteUrl,
     this.isFollowed = false,
   });
 
-  ResearchGroupItem copyWith({
-    String? id,
-    String? name,
-    String? leader,
-    String? leaderTitle,
-    String? department,
-    String? campus,
-    List<String>? researchDirections,
-    String? description,
-    List<String>? recentPapers,
-    String? recruitment,
-    String? contactEmail,
-    String? labLocation,
-    String? websiteUrl,
-    bool? isFollowed,
-  }) {
-    return ResearchGroupItem(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      leader: leader ?? this.leader,
-      leaderTitle: leaderTitle ?? this.leaderTitle,
-      department: department ?? this.department,
-      campus: campus ?? this.campus,
-      researchDirections: researchDirections ?? this.researchDirections,
-      description: description ?? this.description,
-      recentPapers: recentPapers ?? this.recentPapers,
-      recruitment: recruitment ?? this.recruitment,
-      contactEmail: contactEmail ?? this.contactEmail,
-      labLocation: labLocation ?? this.labLocation,
-      websiteUrl: websiteUrl ?? this.websiteUrl,
-      isFollowed: isFollowed ?? this.isFollowed,
-    );
-  }
+  /// A generated directory entry; the homepage URL identifies it.
+  const ResearchGroupItem.directory({
+    required this.name,
+    required this.leader,
+    required this.leaderTitle,
+    required this.department,
+    required this.researchDirections,
+    required this.websiteUrl,
+  }) : id = websiteUrl,
+       isFollowed = false;
+
+  ResearchGroupItem copyWith({bool? isFollowed}) => ResearchGroupItem(
+    id: id,
+    name: name,
+    leader: leader,
+    leaderTitle: leaderTitle,
+    department: department,
+    researchDirections: researchDirections,
+    websiteUrl: websiteUrl,
+    isFollowed: isFollowed ?? this.isFollowed,
+  );
 }
 
-/// Data model representing an academic seminar or lecture.
+/// An academic lecture / seminar announcement from a department column.
 class ResearchLectureItem {
   final String id;
   final String title;
-  final String speaker;
-  final String speakerTitle;
-  final String time;
-  final String venue;
-  final String organizer;
-  final String description;
-  final String campus;
-  final String category; // 人文社科 / 物质前沿 / 信息技术 / 生命健康 / 通识名家
+  final String organizer; // the department publishing it
+  final String publishDate; // yyyy-MM-dd
+  final String category; // 人文社科 / 信息技术 / 物质前沿 / 生命健康
+  final String url;
   final bool isBookmarked;
 
   const ResearchLectureItem({
     required this.id,
     required this.title,
-    required this.speaker,
-    required this.speakerTitle,
-    required this.time,
-    required this.venue,
     required this.organizer,
-    required this.description,
-    this.campus = '邯郸校区',
-    this.category = '通识名家',
+    required this.publishDate,
+    required this.category,
+    required this.url,
     this.isBookmarked = false,
   });
 
-  ResearchLectureItem copyWith({
-    String? id,
-    String? title,
-    String? speaker,
-    String? speakerTitle,
-    String? time,
-    String? venue,
-    String? organizer,
-    String? description,
-    String? campus,
-    String? category,
-    bool? isBookmarked,
+  static ResearchLectureItem? fromSite(
+    Map<String, dynamic> row, {
+    required String organizer,
+    required String category,
   }) {
+    final title = row['title'];
+    final url = row['url'];
+    if (title is! String || title.isEmpty || url is! String) return null;
     return ResearchLectureItem(
-      id: id ?? this.id,
-      title: title ?? this.title,
-      speaker: speaker ?? this.speaker,
-      speakerTitle: speakerTitle ?? this.speakerTitle,
-      time: time ?? this.time,
-      venue: venue ?? this.venue,
-      organizer: organizer ?? this.organizer,
-      description: description ?? this.description,
-      campus: campus ?? this.campus,
-      category: category ?? this.category,
-      isBookmarked: isBookmarked ?? this.isBookmarked,
+      id: url,
+      title: title,
+      organizer: organizer,
+      publishDate: _siteDateText(row['published_on']),
+      category: category,
+      url: url,
     );
   }
+
+  ResearchLectureItem copyWith({bool? isBookmarked}) => ResearchLectureItem(
+    id: id,
+    title: title,
+    organizer: organizer,
+    publishDate: publishDate,
+    category: category,
+    url: url,
+    isBookmarked: isBookmarked ?? this.isBookmarked,
+  );
 }
 
 /// Data model representing Fudan Undergraduate Research Opportunities Program (FDUROP) notices.
@@ -499,4 +478,21 @@ class FduropDocumentItem {
       downloadUrl: url,
     );
   }
+}
+
+/// A public department column read through `fudan.site.articles`.
+class ResearchSiteColumn {
+  final String department;
+  final String url;
+  final String category; // lecture category; unused for news
+
+  const ResearchSiteColumn(this.department, this.url, [this.category = '']);
+}
+
+/// Merged rows of several columns, and how many columns could not be read.
+class SiteFeedResult<T> {
+  final List<T> items;
+  final int failedColumns;
+
+  const SiteFeedResult(this.items, this.failedColumns);
 }
