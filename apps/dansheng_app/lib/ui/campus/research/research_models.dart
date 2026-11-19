@@ -305,11 +305,12 @@ class FduropProjectItem {
           ? '教师编号: ${json['teacher_code']}'
           : '指导教师',
       department: json['department_name']?.toString() ?? '复旦大学',
-      campus: '复旦大学',
+      // The open-topic system publishes no campus, quota or deadline.
+      campus: '',
       targetGrade: subjects.isNotEmpty ? subjects.join('、') : '本科各年级相关专业',
-      quota: 1,
-      deadline: '长期开放 / 本学期招募',
-      status: '招募中',
+      quota: 0,
+      deadline: '',
+      status: '开放中',
       description: json['brief']?.toString() ?? '',
       requirements: json['requirement']?.toString() ?? '',
       contactEmail: json['tutor_email']?.toString() ?? '',
@@ -398,47 +399,104 @@ class FduropProjectItem {
   }
 }
 
-/// Data model representing downloadable documents from FDUROP (相关文件下载).
+/// One page of FDUROP open topics, from paper.fudan.edu.cn or the offline seed.
+class FduropProjectPage {
+  final List<FduropProjectItem> items;
+  final int page;
+  final int pageSize;
+
+  /// Total matching topics. For a live keyword search it is an upper bound,
+  /// because the title and teacher matches are counted separately.
+  final int total;
+  final bool hasMore;
+
+  /// Whether the rows came from the live open-topic system.
+  final bool isLive;
+
+  /// Why the live system could not be used, when the seed was served instead.
+  final String? liveError;
+
+  const FduropProjectPage({
+    required this.items,
+    required this.page,
+    required this.pageSize,
+    required this.total,
+    required this.hasMore,
+    required this.isLive,
+    this.liveError,
+  });
+}
+
+/// One FDUROP form or resource attached to the official AAO pages
+/// (jwc.fudan.edu.cn 常用文档 · 复芏计划（FDUROP）相关表格).
 class FduropDocumentItem {
+  /// The attachment URL; stable across listings.
   final String id;
-  final String title; // 文件名
-  final String category; // 申报指南 / 立项申请 / 中期检查 / 结题评审 / 经费管理
-  final String fileFormat; // DOCX / PDF / ZIP / XLSX
-  final String fileSize; // e.g. "340 KB"
-  final String updateDate;
+
+  /// Display title without the numbering prefix, stage tag and extension.
+  final String title;
+
+  /// Stage derived from the 【立项】/【中期】/... tag of the official name.
+  final String category;
+
+  /// Upper-case extension, e.g. DOCX / PDF / XLSX / PPTX.
+  final String fileFormat;
+
+  /// The official file name, used as the downloaded file's name.
+  final String fileName;
   final String downloadUrl;
-  final bool isDownloaded;
 
   const FduropDocumentItem({
     required this.id,
     required this.title,
     required this.category,
     required this.fileFormat,
-    required this.fileSize,
-    required this.updateDate,
+    required this.fileName,
     required this.downloadUrl,
-    this.isDownloaded = false,
   });
 
-  FduropDocumentItem copyWith({
-    String? id,
-    String? title,
-    String? category,
-    String? fileFormat,
-    String? fileSize,
-    String? updateDate,
-    String? downloadUrl,
-    bool? isDownloaded,
-  }) {
+  static const Map<String, String> _stages = {
+    '立项': '立项申报',
+    '中期': '中期检查',
+    '结题': '结题评审',
+    '财务': '经费管理',
+    '资源': '学术资源',
+  };
+
+  /// Display categories in the order of the official list.
+  static const List<String> categories = [
+    '立项申报',
+    '中期检查',
+    '结题评审',
+    '经费管理',
+    '学术资源',
+    '其他',
+  ];
+
+  /// Parses an attachment such as
+  /// `1-a.【立项】䇹政项目申请书模板（2025年）.docx`.
+  factory FduropDocumentItem.fromAttachment(String name, String url) {
+    var rest = name.trim();
+    final dot = rest.lastIndexOf('.');
+    final ext = dot > 0 && rest.length - dot <= 6
+        ? rest.substring(dot + 1).toUpperCase()
+        : '';
+    if (ext.isNotEmpty) rest = rest.substring(0, dot);
+    // Leading numbering: "1-a." / "5." / "4-b、".
+    rest = rest.replaceFirst(RegExp(r'^\d+(-[a-zA-Z])?[.、．]\s*'), '');
+    var category = '其他';
+    final tag = RegExp(r'^【([^】]{1,8})】').firstMatch(rest);
+    if (tag != null) {
+      category = _stages[tag.group(1)] ?? '其他';
+      rest = rest.substring(tag.end).trim();
+    }
     return FduropDocumentItem(
-      id: id ?? this.id,
-      title: title ?? this.title,
-      category: category ?? this.category,
-      fileFormat: fileFormat ?? this.fileFormat,
-      fileSize: fileSize ?? this.fileSize,
-      updateDate: updateDate ?? this.updateDate,
-      downloadUrl: downloadUrl ?? this.downloadUrl,
-      isDownloaded: isDownloaded ?? this.isDownloaded,
+      id: url,
+      title: rest.isEmpty ? name : rest,
+      category: category,
+      fileFormat: ext,
+      fileName: name,
+      downloadUrl: url,
     );
   }
 }

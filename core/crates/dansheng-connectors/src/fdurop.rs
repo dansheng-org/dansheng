@@ -23,6 +23,17 @@ pub struct FduropOpenTopicItem {
     pub topic_labels: Vec<String>,
 }
 
+/// One page of open-topic search results with the server-reported totals.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FduropTopicPage {
+    pub items: Vec<FduropOpenTopicItem>,
+    pub page: u32,
+    pub page_size: u32,
+    /// Total matching rows reported by the server (upper bound for merged keyword searches).
+    pub total: u64,
+    pub has_more: bool,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FduropTopicDetail {
     #[serde(flatten)]
@@ -67,6 +78,70 @@ pub struct FduropSearchQuery {
     pub department_id: Option<String>,
 }
 
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Wrap parsed rows with the paging info from `pageInfo.totalRows`.
+fn page_from_response(
+    val: &serde_json::Value,
+    page: u32,
+    page_size: u32,
+    items: Vec<FduropOpenTopicItem>,
+) -> FduropTopicPage {
+    let total_rows = &val["pageInfo"]["totalRows"];
+    let total = total_rows
+        .as_u64()
+        .or_else(|| total_rows.as_str()?.trim().parse().ok());
+    let loaded = u64::from(page - 1) * u64::from(page_size) + items.len() as u64;
+    let (total, has_more) = match total {
+        Some(total) => (total, u64::from(page) * u64::from(page_size) < total),
+        None => (loaded, items.len() as u64 >= u64::from(page_size)),
+    };
+    FduropTopicPage {
+        items,
+        page,
+        page_size,
+        total,
+        has_more,
+    }
+}
+
+/// Merge a title-match page with an optional teacher-match page, dropping duplicates.
+fn merge_pages(mut primary: FduropTopicPage, extra: Option<FduropTopicPage>) -> FduropTopicPage {
+    let Some(extra) = extra else {
+        return primary;
+    };
+    let mut seen: std::collections::HashSet<String> =
+        primary.items.iter().map(|i| i.id.clone()).collect();
+    for item in extra.items {
+        if seen.insert(item.id.clone()) {
+            primary.items.push(item);
+        }
+    }
+    primary.total += extra.total;
+    primary.has_more |= extra.has_more;
+    primary
+}
+
+#[cfg(feature = "services")]
+async fn join_pair<A, B>(a: A, b: B) -> (A::Output, B::Output)
+where
+    A: std::future::Future,
+    B: std::future::Future,
+{
+    futures_util::future::join(a, b).await
+}
+
+#[cfg(not(feature = "services"))]
+async fn join_pair<A, B>(a: A, b: B) -> (A::Output, B::Output)
+where
+    A: std::future::Future,
+    B: std::future::Future,
+{
+    (a.await, b.await)
+}
+
 pub struct FduropClient<'a> {
     transport: &'a dyn ConnectorTransport,
     account: &'a str,
@@ -77,27 +152,16 @@ impl<'a> FduropClient<'a> {
         Self { transport, account }
     }
 
+    /// Search open topics. A bare `keyword` is matched against both the topic
+    /// title and the teacher code/name; the two server queries run concurrently
+    /// and their pages are merged by id.
     pub async fn search_open_topics(
         &self,
         query: &FduropSearchQuery,
-    ) -> Result<Vec<FduropOpenTopicItem>, ConnectorError> {
-        let kw = query
-            .keyword
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let has_title = query
-            .title
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .is_some();
-        let has_code = query
-            .code_or_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .is_some();
+    ) -> Result<FduropTopicPage, ConnectorError> {
+        let kw = non_empty(query.keyword.as_deref());
+        let has_title = non_empty(query.title.as_deref()).is_some();
+        let has_code = non_empty(query.code_or_name.as_deref()).is_some();
 
         if let Some(keyword) = kw.filter(|_| !has_title && !has_code) {
             let mut title_q = query.clone();
@@ -110,17 +174,12 @@ impl<'a> FduropClient<'a> {
             name_q.title = None;
             name_q.code_or_name = Some(keyword.to_string());
 
-            let mut items = self.search_open_topics_single(&title_q).await?;
-            if let Ok(extra) = self.search_open_topics_single(&name_q).await {
-                let mut seen: std::collections::HashSet<String> =
-                    items.iter().map(|i| i.id.clone()).collect();
-                for item in extra {
-                    if seen.insert(item.id.clone()) {
-                        items.push(item);
-                    }
-                }
-            }
-            return Ok(items);
+            let (by_title, by_name) = join_pair(
+                self.search_open_topics_single(&title_q),
+                self.search_open_topics_single(&name_q),
+            )
+            .await;
+            return Ok(merge_pages(by_title?, by_name.ok()));
         }
 
         self.search_open_topics_single(query).await
@@ -129,7 +188,7 @@ impl<'a> FduropClient<'a> {
     async fn search_open_topics_single(
         &self,
         query: &FduropSearchQuery,
-    ) -> Result<Vec<FduropOpenTopicItem>, ConnectorError> {
+    ) -> Result<FduropTopicPage, ConnectorError> {
         let page = query.page.max(1);
         let page_size = query.page_size.clamp(1, 1000);
         let mut url = Url::parse(&format!(
@@ -161,7 +220,7 @@ impl<'a> FduropClient<'a> {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                pairs.append_pair("subjectKindId", s);
+                pairs.append_pair("subjectIds", s);
             }
             if let Some(l) = query
                 .topic_label_id
@@ -169,7 +228,7 @@ impl<'a> FduropClient<'a> {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                pairs.append_pair("topicLabelId", l);
+                pairs.append_pair("topicLabelIds", l);
             }
             if let Some(d) = query
                 .department_id
@@ -177,7 +236,7 @@ impl<'a> FduropClient<'a> {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                pairs.append_pair("departmentId", d);
+                pairs.append_pair("teacherDepartmentIds", d);
             }
         }
 
@@ -290,7 +349,7 @@ impl<'a> FduropClient<'a> {
             }
         }
 
-        Ok(items)
+        Ok(page_from_response(&val, page, page_size, items))
     }
 
     pub async fn query_topic_labels(&self) -> Result<Vec<FduropTopicLabel>, ConnectorError> {
@@ -527,5 +586,61 @@ impl<'a> FduropClient<'a> {
             tutor_introduce,
             lab_introduce,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: &str) -> FduropOpenTopicItem {
+        FduropOpenTopicItem {
+            id: id.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn page_uses_server_total_rows() {
+        let val = serde_json::json!({"pageInfo": {"totalRows": 45}});
+        let page = page_from_response(&val, 2, 20, vec![item("a"); 20]);
+        assert_eq!(page.total, 45);
+        assert!(page.has_more);
+        let last = page_from_response(&val, 3, 20, vec![item("a"); 5]);
+        assert!(!last.has_more);
+    }
+
+    #[test]
+    fn page_without_total_infers_from_row_count() {
+        let val = serde_json::json!({"data": []});
+        let full = page_from_response(&val, 1, 2, vec![item("a"), item("b")]);
+        assert!(full.has_more);
+        assert_eq!(full.total, 2);
+        let short = page_from_response(&val, 2, 2, vec![item("c")]);
+        assert!(!short.has_more);
+        assert_eq!(short.total, 3);
+    }
+
+    #[test]
+    fn merge_pages_dedups_and_combines_totals() {
+        let a = FduropTopicPage {
+            items: vec![item("1"), item("2")],
+            page: 1,
+            page_size: 2,
+            total: 2,
+            has_more: false,
+        };
+        let b = FduropTopicPage {
+            items: vec![item("2"), item("3")],
+            page: 1,
+            page_size: 2,
+            total: 5,
+            has_more: true,
+        };
+        let merged = merge_pages(a, Some(b));
+        let ids: Vec<_> = merged.items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["1", "2", "3"]);
+        assert_eq!(merged.total, 7);
+        assert!(merged.has_more);
     }
 }

@@ -55,6 +55,8 @@ pub enum LoginTarget {
     Dining,
     WebVpn,
     Fdurop,
+    /// The undergraduate AAO notice site; its CAS client is the xxb broker.
+    Notices,
 }
 
 impl LoginTarget {
@@ -68,6 +70,7 @@ impl LoginTarget {
             Self::Dining => "https://my.fudan.edu.cn",
             Self::WebVpn => "https://webvpn.fudan.edu.cn",
             Self::Fdurop => "https://paper.fudan.edu.cn",
+            Self::Notices => "https://jwc.fudan.edu.cn",
         }
     }
 
@@ -84,6 +87,8 @@ impl LoginTarget {
             Self::Dining => "https://my.fudan.edu.cn/simple_list/stqk",
             Self::WebVpn => "https://webvpn.fudan.edu.cn/login?cas_login=true",
             Self::Fdurop => "https://paper.fudan.edu.cn/fdurop-service/jwt/cas/login",
+            // A sign-in-only page (the FDUROP forms); public pages never redirect to CAS.
+            Self::Notices => "https://jwc.fudan.edu.cn/0e/07/c27281a724487/page.psp",
         }
     }
 
@@ -91,6 +96,20 @@ impl LoginTarget {
     /// always go to the HTTPS identity provider; the service gets a one-time ticket.
     fn plain_http(self) -> bool {
         self.origin().starts_with("http://")
+    }
+
+    /// A fixed HTTPS CAS client that takes the ticket on the target's behalf and
+    /// hands the session back to it. Its own cookies are never exported.
+    fn broker(self) -> Option<&'static str> {
+        match self {
+            Self::Notices => Some("https://xxb.fudan.edu.cn"),
+            _ => None,
+        }
+    }
+
+    /// The origins that may consume a ticket: the target, or its broker.
+    fn ticket_origin(self, origin: &str) -> bool {
+        origin == self.origin() || self.broker() == Some(origin)
     }
 }
 
@@ -940,13 +959,14 @@ fn validate_url_depth(url: &Url, target: LoginTarget, depth: usize) -> Result<()
                 && url.origin().ascii_serialization() == target.origin()))
         || !url.username().is_empty()
         || url.password().is_some()
-        || ![ID, UIS, target.origin()].contains(&url.origin().ascii_serialization().as_str())
+        || !([ID, UIS, target.origin()].contains(&url.origin().ascii_serialization().as_str())
+            || target.broker() == Some(url.origin().ascii_serialization().as_str()))
     {
         return Err(LoginError::UnsafeRedirect);
     }
     for (name, value) in url.query_pairs() {
         let name = name.to_ascii_lowercase();
-        if name == "ticket" && url.origin().ascii_serialization() != target.origin() {
+        if name == "ticket" && !target.ticket_origin(&url.origin().ascii_serialization()) {
             return Err(LoginError::UnsafeRedirect);
         }
         if [
@@ -1330,7 +1350,7 @@ fn ticket_url(page: &Page, target: LoginTarget) -> Result<Option<Url>, LoginErro
         .attr("action")
         .ok_or(LoginError::ProtocolChanged)?;
     let mut url = resolve_url(&page.url, action, target)?;
-    if url.origin().ascii_serialization() != target.origin() || url.fragment().is_some() {
+    if !target.ticket_origin(&url.origin().ascii_serialization()) || url.fragment().is_some() {
         return Err(LoginError::UnsafeRedirect);
     }
     if url
@@ -1682,6 +1702,48 @@ mod tests {
             parse_public_key(&data),
             Err(LoginError::CryptoError)
         ));
+    }
+
+    #[test]
+    fn notice_site_ticket_goes_only_to_its_xxb_broker() {
+        let target = LoginTarget::Notices;
+        for accepted in [
+            target.entry(),
+            "https://xxb.fudan.edu.cn/login",
+            "https://xxb.fudan.edu.cn/loginCallback?ticket=ST-1",
+            "https://jwc.fudan.edu.cn/_callback?ticket=ST-1",
+        ] {
+            assert!(
+                validate_url(&accepted.parse().unwrap(), target).is_ok(),
+                "{accepted}"
+            );
+        }
+        // The broker is the notice site's alone; it is no other target's.
+        for (denied, target) in [
+            ("https://xxb.fudan.edu.cn/login", LoginTarget::Academic),
+            ("http://xxb.fudan.edu.cn/login", LoginTarget::Notices),
+            ("https://gs.fudan.edu.cn/login", LoginTarget::Notices),
+            (
+                "https://id.fudan.edu.cn/idp/authCenter/authenticate?service=https%3A%2F%2Fevil.test%2F",
+                LoginTarget::Notices,
+            ),
+        ] {
+            assert_eq!(
+                validate_url(&denied.parse().unwrap(), target),
+                Err(LoginError::UnsafeRedirect),
+                "{denied}"
+            );
+        }
+        let form = page(
+            ID,
+            r#"<form id="logon" action="https://xxb.fudan.edu.cn/loginCallback"><input id="ticket" value="ST-fixture"></form>"#,
+        );
+        let url = ticket_url(&form, target).unwrap().unwrap();
+        assert_eq!(url.host_str(), Some("xxb.fudan.edu.cn"));
+        assert_eq!(
+            ticket_url(&form, LoginTarget::Academic),
+            Err(LoginError::UnsafeRedirect)
+        );
     }
 
     #[test]
