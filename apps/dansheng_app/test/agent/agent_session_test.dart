@@ -397,6 +397,38 @@ void main() {
     },
   );
 
+  test(
+    'manual campus PDF selection uses the original PDF upload budget',
+    () async {
+      final model = _Model([const AgentMessage.assistant('已读取')]);
+      final session = AgentSession(
+        model: model,
+        registry: AgentToolRegistry(
+          tools: [],
+          activeAccount: () => 'account',
+          sourceAvailable: (_) => true,
+        ),
+      );
+      addTearDown(session.close);
+      final attachment = AgentAttachment.cachedPdf(
+        name: '课程文件.pdf',
+        size: agentMaxCampusPdfBytes + 1,
+        openRead: () => const Stream.empty(),
+      );
+
+      final answer = await session.send(
+        '读取附件',
+        sources: {},
+        approve: (_) async => false,
+        onText: (_) {},
+        onTool: (_) {},
+        attachments: [attachment],
+      );
+      expect(answer, '已读取');
+      expect(model.requests.single.last.attachments, [attachment]);
+    },
+  );
+
   test('web search asks about each distinct query and works without a campus account', () async {
     final model = _Model([
       const AgentMessage.assistant('', [

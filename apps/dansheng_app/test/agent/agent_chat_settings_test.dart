@@ -40,9 +40,10 @@ void main() {
     },
   );
 
-  testWidgets('model settings display and save the reasoning effort', (
+  testWidgets('saving model settings keeps the composer reasoning effort', (
     tester,
   ) async {
+    _setPhoneSize(tester);
     final bridge = _SettingsBridge();
     final store = AgentSettingsStore(DanshengClient(bridge: bridge));
     await tester.pumpWidget(
@@ -63,31 +64,18 @@ void main() {
     await tester.pump(const Duration(milliseconds: 450));
     await tester.pumpAndSettle();
 
-    final effort = find.byType(DropdownButtonFormField<AgentReasoningEffort>);
-    await tester.ensureVisible(effort);
-    expect(
-      find.descendant(of: effort, matching: find.text('中')),
-      findsOneWidget,
-    );
-    await tester.tap(effort);
-    await tester.pumpAndSettle();
-    for (final label in ['默认', '低', '中', '高']) {
-      expect(find.text(label).last, findsOneWidget);
-    }
-    await tester.tap(find.text('高').last);
-    await tester.pumpAndSettle();
-
     final save = find.text('保存配置');
     await tester.ensureVisible(save);
     await tester.tap(save);
     await tester.pumpAndSettle();
-    expect(bridge.profile['reasoning_effort'], 'high');
+    expect(bridge.profile['reasoning_effort'], 'medium');
     expect(bridge.profile['api_key'], 'test-key');
   });
 
   testWidgets('switching to Responses at the same API address keeps the key', (
     tester,
   ) async {
+    _setPhoneSize(tester);
     final bridge = _SettingsBridge();
     final store = AgentSettingsStore(DanshengClient(bridge: bridge));
     await tester.pumpWidget(
@@ -119,11 +107,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 450));
 
     final save = find.text('保存配置');
-    await tester.scrollUntilVisible(
-      save,
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
+    await tester.ensureVisible(save);
     await tester.tap(save);
     await tester.pumpAndSettle();
     final saved = await store.load();
@@ -131,6 +115,13 @@ void main() {
     expect(saved?.baseUrl, Uri.parse('https://api.deepseek.com'));
     expect(saved?.apiKey, 'test-key');
   });
+}
+
+void _setPhoneSize(WidgetTester tester) {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(430, 860);
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
 }
 
 AgentModelConfig _config(AgentReasoningEffort effort) => AgentModelConfig(

@@ -252,28 +252,32 @@ Future<Map<String, String>> _assignmentFiles(
       continue;
     }
     if (assignment.lockedForUser) break;
-    final description = assignment.description ?? '';
-    final files = <String, String>{};
-    for (final tag in _markup.allMatches(description)) {
-      final attributes = tag[2];
-      if (attributes == null) continue;
-      final attrs = _htmlAttribute.allMatches(attributes).toList();
-      final ids = attrs
-          .map((attr) => _canvasFileLink(attr, courseId))
-          .whereType<String>();
-      if (ids.isEmpty) continue;
-      final label = _assignmentFileLabel(description, tag.end, attrs);
-      for (final id in ids) {
-        files.update(
-          id,
-          (old) => old.isEmpty ? label : old,
-          ifAbsent: () => label,
-        );
-      }
-    }
-    return files;
+    return agentAssignmentFileLinks(assignment.description ?? '', courseId);
   }
   throw const AgentFailure('这门课程中没有找到可查看的指定作业。');
+}
+
+/// Same-campus file identifiers and display names linked in assignment HTML.
+Map<String, String> agentAssignmentFileLinks(String markup, String courseId) {
+  final files = <String, String>{};
+  for (final tag in _markup.allMatches(markup)) {
+    final attributes = tag[2];
+    if (attributes == null) continue;
+    final attrs = _htmlAttribute.allMatches(attributes).toList();
+    final ids = attrs
+        .map((attr) => _canvasFileLink(attr, courseId))
+        .whereType<String>();
+    if (ids.isEmpty) continue;
+    final label = _assignmentFileLabel(markup, tag.end, attrs);
+    for (final id in ids) {
+      files.update(
+        id,
+        (old) => old.isEmpty ? label : old,
+        ifAbsent: () => label,
+      );
+    }
+  }
+  return files;
 }
 
 String _assignmentFileLabel(

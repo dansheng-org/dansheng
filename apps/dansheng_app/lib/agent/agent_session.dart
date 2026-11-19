@@ -147,11 +147,14 @@ class AgentSession {
     if ((text.trim().isEmpty && attachments.isEmpty) || text.length > 4000) {
       throw const AgentFailure('请输入消息或添加附件。消息最多 4000 个字符。');
     }
+    var attachmentLimit = agentAttachmentBudget(attachments);
     if (attachments.length > agentMaxAttachments ||
         attachments.any((file) => !_canAttach(file)) ||
         attachments.fold(0, (size, file) => size + file.byteLength) >
-            agentMaxAttachmentBytes) {
-      throw const AgentFailure('每条消息最多附加 3 个文件，总大小不得超过 2 MiB。');
+            attachmentLimit) {
+      throw AgentFailure(
+        '每条消息最多附加 3 个文件，总大小不得超过 ${attachmentLimit ~/ (1024 * 1024)} MiB。',
+      );
     }
     _busy = true;
     final account = _registry.activeAccount();
@@ -183,7 +186,6 @@ class AgentSession {
     var retriedAnswer = false;
     var hasAnswerText = false;
     var attachmentCount = attachments.length;
-    var attachmentLimit = agentMaxAttachmentBytes;
     var attachmentBytes = attachments.fold(
       0,
       (size, file) => size + file.byteLength,
