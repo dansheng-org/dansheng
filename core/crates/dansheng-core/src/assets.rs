@@ -642,7 +642,8 @@ async fn download(
                 && response.status == 200 && length > max_bytes {
                 return Err(CoreError::new("ResponseTooLarge", "document exceeds requested byte quota"));
             }
-            let detected = header(&response.headers, "content-type").and_then(|m| validate_mime(m).ok());
+            // A refused HEAD (some CMS sites answer HEAD with an HTML 403) says nothing about the file.
+            let detected = (response.status == 200).then(|| header(&response.headers, "content-type")).flatten().and_then(|m| validate_mime(m).ok());
             store.with(|db| { db.execute("UPDATE managed_assets_v1 SET etag=?,mime_type=CASE WHEN mime_type='application/octet-stream' THEN coalesce(?,mime_type) ELSE mime_type END WHERE id=?", params![etag,detected,id])?; Ok(()) })?;
             // A newly discovered validator cannot authenticate bytes from an earlier unvalidated transfer.
             let file = OpenOptions::new().create(true).write(true).truncate(true).open(&part)?;
@@ -683,7 +684,9 @@ async fn download(
         let etag = strong_etag(header(&receipt.headers, "etag"));
         let actual = sql_bytes(actual)?;
         // Persist a promotion intent before atomic rename. Crash recovery can complete either side.
-        store.with(|db| { db.execute("UPDATE managed_assets_v1 SET state='promoting',size=?,reserved_bytes=?,sha256=?,etag=?,updated_at=? WHERE id=?", params![actual,actual,digest,etag,now(),id])?; Ok(()) })?;
+        // The bytes' own response names their type when nothing better was known.
+        let served = header(&receipt.headers, "content-type").and_then(|m| validate_mime(m).ok());
+        store.with(|db| { db.execute("UPDATE managed_assets_v1 SET state='promoting',size=?,reserved_bytes=?,sha256=?,etag=?,mime_type=CASE WHEN mime_type='application/octet-stream' THEN coalesce(?,mime_type) ELSE mime_type END,updated_at=? WHERE id=?", params![actual,actual,digest,etag,served,now(),id])?; Ok(()) })?;
         if regular_size(&root.join(&id))?.is_some() { return Err(CoreError::new("UnsafeAssetPath", "managed final file already exists")); }
         std::fs::rename(&part, root.join(&id))?;
         store.with(|db| { db.execute("UPDATE managed_assets_v1 SET state='ready',error_code=NULL,updated_at=? WHERE id=?", params![now(),id])?; Ok(()) })?;

@@ -252,51 +252,23 @@ async fn test_fdurop_login_and_query() {
 
     // Test search / list
     let search_url = "https://paper.fudan.edu.cn/fdurop-service/api/v1/for-std/urop-init-flow/open-topic/search?queryPage__=1,20";
-    // Test if Bearer prefix works
-    let bearer_res = test_client
-        .get(search_url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .await
-        .unwrap();
-    println!(
-        "GET open-topic/search with Bearer prefix status: {}",
-        bearer_res.status()
-    );
-    let raw_res = test_client
+    let search_res = test_client
         .get(search_url)
         .header("Authorization", &token)
         .send()
         .await
         .unwrap();
-    println!(
-        "GET open-topic/search with raw token status: {}",
-        raw_res.status()
-    );
-    let search_res = raw_res;
-    println!(
-        "Step 9 GET open-topic/search status: {}",
-        search_res.status()
-    );
+    println!("Step 9 status: {}", search_res.status());
+    println!("Step 9 headers: {:?}", search_res.headers());
     let search_text = search_res.text().await.unwrap();
-    println!(
-        "Step 9 response preview (first 100 chars): {}",
-        search_text.chars().take(100).collect::<String>()
-    );
 
-    // Parse json
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&search_text) {
-        println!(
-            "Step 9 parsed code: {}, has data: {}",
-            v["code"],
-            v.get("data").is_some()
-        );
-        let list_opt = v["data"]
+        println!("pageInfo: {}", v["pageInfo"]);
+        if let Some(arr) = v["data"]
             .as_array()
             .or_else(|| v["data"]["dataList"].as_array())
-            .or_else(|| v["data"]["rows"].as_array());
-        if let Some(arr) = list_opt {
-            println!("Step 9 total items in data array: {}", arr.len());
+        {
+            println!("Page 1 item count: {}", arr.len());
             if let Some(first) = arr.first() {
                 println!(
                     "First topic keys: {:?}",
@@ -304,12 +276,7 @@ async fn test_fdurop_login_and_query() {
                         .as_object()
                         .map(|o| o.keys().cloned().collect::<Vec<_>>())
                 );
-                println!(
-                    "First topic: {}",
-                    serde_json::to_string_pretty(first).unwrap()
-                );
                 let topic_id = first["id"].as_str().expect("topic id missing");
-                // 10. Query detail
                 let detail_url = format!(
                     "https://paper.fudan.edu.cn/fdurop-service/api/v1/for-std/urop-init-flow/topic-view/{}",
                     topic_id
@@ -321,26 +288,23 @@ async fn test_fdurop_login_and_query() {
                     .await
                     .unwrap();
                 println!("Step 10 detail status: {}", detail_res.status());
-                let detail_val: serde_json::Value = detail_res.json().await.unwrap();
-                println!(
-                    "Step 10 detail code: {}, has data: {}",
-                    detail_val["code"],
-                    detail_val.get("data").is_some()
-                );
-                if let Some(data) = detail_val.get("data") {
-                    println!(
-                        "Detail data keys: {:?}",
-                        data.as_object()
-                            .map(|o| o.keys().cloned().collect::<Vec<_>>())
-                    );
-                    println!(
-                        "Detail data: {}",
-                        serde_json::to_string_pretty(data).unwrap()
-                    );
-                }
             }
         }
     }
+
+    // Query open topic verification
+    let count_url = "https://paper.fudan.edu.cn/fdurop-service/api/v1/for-std/urop-init-flow/open-topic/search?queryPage__=1,5";
+    let count_res = test_client
+        .get(count_url)
+        .header("Authorization", &token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(count_res.status(), reqwest::StatusCode::OK);
+    let count_val: serde_json::Value = count_res.json().await.unwrap();
+    let total_rows = count_val["pageInfo"]["totalRows"].as_u64().unwrap_or(0);
+    println!("FDUROP total live open topics: {}", total_rows);
+    assert!(total_rows > 1000, "expected >1000 open topics");
 }
 
 #[tokio::test]

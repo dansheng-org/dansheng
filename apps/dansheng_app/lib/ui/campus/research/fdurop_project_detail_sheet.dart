@@ -281,19 +281,25 @@ class _FduropProjectDetailViewState extends State<_FduropProjectDetailView> {
                 ),
                 Chip(
                   avatar: const Icon(Icons.apartment, size: 16),
-                  label: Text('${_project.department} · ${_project.campus}'),
+                  label: Text(
+                    _project.campus.isEmpty
+                        ? _project.department
+                        : '${_project.department} · ${_project.campus}',
+                  ),
                   visualDensity: VisualDensity.compact,
                 ),
-                Chip(
-                  avatar: const Icon(Icons.people_outline, size: 16),
-                  label: Text('名额 ${_project.quota} 人'),
-                  visualDensity: VisualDensity.compact,
-                ),
-                Chip(
-                  avatar: const Icon(Icons.event_outlined, size: 16),
-                  label: Text('截止 ${_project.deadline}'),
-                  visualDensity: VisualDensity.compact,
-                ),
+                if (_project.quota > 0)
+                  Chip(
+                    avatar: const Icon(Icons.people_outline, size: 16),
+                    label: Text('名额 ${_project.quota} 人'),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                if (_project.deadline.isNotEmpty)
+                  Chip(
+                    avatar: const Icon(Icons.event_outlined, size: 16),
+                    label: Text('截止 ${_project.deadline}'),
+                    visualDensity: VisualDensity.compact,
+                  ),
               ],
             ),
             const SizedBox(height: 16),

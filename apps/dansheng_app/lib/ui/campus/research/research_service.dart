@@ -3,6 +3,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../campus_api.dart';
+import 'fdurop_seed_data.dart';
 import 'research_models.dart';
 
 /// Service providing Fudan University research news, research groups (课题组),
@@ -13,31 +14,43 @@ class ResearchService extends ChangeNotifier {
 
   CampusApi? _api;
 
+  // Live paper.fudan.edu.cn caches, scoped to the bound API (and so to the account).
+  Future<Map<String, String>>? _liveSubjectIds;
+  Future<Map<String, String>>? _liveLabelIds;
+  final Map<String, FduropProjectItem> _fduropDetailCache = {};
+  // Official FDUROP files: the listing, and the managed asset of each file
+  // fetched this session (Core keeps the bytes; reopening needs no download).
+  List<FduropDocumentItem>? _fduropDocuments;
+  final Map<String, String> _fduropDocAssets = {};
+
   /// Bind or unbind the authenticated campus API port from the host session.
   void bindApi(CampusApi? api) {
+    if (!identical(api, _api) &&
+        (api?.accountScope?.accountId != _api?.accountScope?.accountId)) {
+      _fduropDocuments = null;
+      _fduropDocAssets.clear();
+    }
     _api = api;
+    _liveSubjectIds = null;
+    _liveLabelIds = null;
+    _fduropDetailCache.clear();
   }
 
   // In-memory persistent states
   final Set<String> _followedGroupIds = {'rg_nlp', 'rg_brain', 'rg_chip'};
   final Set<String> _bookmarkedLectureIds = {'lec_1', 'lec_hist_1'};
   final Set<String> _bookmarkedFduropProjectIds = {'fdurop_p1'};
-  final Set<String> _downloadedFduropDocIds = <String>{};
 
   Set<String> get followedGroupIds => Set.unmodifiable(_followedGroupIds);
   Set<String> get bookmarkedLectureIds =>
       Set.unmodifiable(_bookmarkedLectureIds);
   Set<String> get bookmarkedFduropProjectIds =>
       Set.unmodifiable(_bookmarkedFduropProjectIds);
-  Set<String> get downloadedFduropDocIds =>
-      Set.unmodifiable(_downloadedFduropDocIds);
 
   bool isGroupFollowed(String id) => _followedGroupIds.contains(id);
   bool isLectureBookmarked(String id) => _bookmarkedLectureIds.contains(id);
   bool isFduropProjectBookmarked(String id) =>
       _bookmarkedFduropProjectIds.contains(id);
-  bool isFduropDocumentDownloaded(String id) =>
-      _downloadedFduropDocIds.contains(id);
 
   /// Toggle follow state for a research group.
   void toggleFollowGroup(String id) {
@@ -66,14 +79,6 @@ class ResearchService extends ChangeNotifier {
     } else {
       _bookmarkedFduropProjectIds.add(id);
     }
-    notifyListeners();
-  }
-
-  /// Mark an FDUROP document as downloaded.
-  Future<void> downloadFduropDocument(String id) async {
-    // Simulates an async safe document download
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    _downloadedFduropDocIds.add(id);
     notifyListeners();
   }
 
@@ -1019,228 +1024,8 @@ class ResearchService extends ChangeNotifier {
   // =========================================================================
   // 5. 开放科研项目数据 (Open Research Projects - 来源于 paper.fudan.edu.cn 教师开放课题系统与院系招募)
   // =========================================================================
-  static const List<FduropProjectItem> _initialFduropProjects = [
-    FduropProjectItem(
-      id: 'fdurop_p1',
-      title: '基于端侧小模型的高校课程智能问答助教系统构建与实证评估',
-      program: '曦源项目',
-      advisor: '邱锡鹏教授',
-      advisorTitle: '教授 / 博士生导师',
-      department: '计算机科学技术学院',
-      campus: '江湾校区',
-      targetGrade: '大二、大三本科生（计算机、软件工程、大数据专业优先）',
-      quota: 2,
-      deadline: '2026-11-30',
-      status: '招募中',
-      description: '本项目依托智能信息处理重点实验室与 MOSS 团队，探索将量化小语言模型（SLM）部署于本地移动端或边缘计算设备，结合检索增强生成（RAG）构建专属校园课程知识库，开展端侧推理加速与交互评测。已在 paper.fudan.edu.cn 导师开放课题库立项备案。',
-      requirements: '掌握Python基础，了解PyTorch基本使用，具备基本自然语言处理或Web全栈开发经验。',
-      contactEmail: 'xpqiu@fudan.edu.cn',
-      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
-    ),
-    FduropProjectItem(
-      id: 'fdurop_p2',
-      title: '阿尔茨海默病突触功能障碍小鼠模型的在体双光子钙成像分析',
-      program: '望道项目',
-      advisor: '舒友生教授 / 冯建峰团队',
-      advisorTitle: '特聘教授 / 国家杰青',
-      department: '脑科学前沿科学中心 / 基础医学院',
-      campus: '枫林校区',
-      targetGrade: '大二、大三本科生（基础医学、生命科学、生医工背景）',
-      quota: 1,
-      deadline: '2026-12-05',
-      status: '招募中',
-      description: '利用双光子激光共聚焦显微镜观察 APP/PS1 转基因小鼠在早期认知减退阶段皮层锥体神经元树突棘的变化规律，结合荧光分子标记开展长时程活体追踪，指导学生学习脑科学切片与显微操作。',
-      requirements: '修读过生物化学或神经生物学，细心耐心，能保证每周至少8小时实验进组时间。',
-      contactEmail: 'yousheng@fudan.edu.cn',
-      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
-    ),
-    FduropProjectItem(
-      id: 'fdurop_p3',
-      title: '高比能固态锂电池微结构界面电化学演化与原位显微表征',
-      program: '莙政学者',
-      advisor: '赵东元院士 / 彭慧胜团队',
-      advisorTitle: '中国科学院院士团队 / 教授',
-      department: '先进材料实验室 / 化学系',
-      campus: '江湾校区',
-      targetGrade: '大二至大四本科生（化学、材料、高分子专业）',
-      quota: 2,
-      deadline: '2026-11-28',
-      status: '招募中',
-      description: '探究固态电解质与锂金属阳极界面的锂枝晶生长动力学机制，通过分子动力学模拟与原位显微表征辅助设计具有自平滑效应的高性能固态电解质薄膜。符合莙政学者高水平学术见习标准。',
-      requirements: '物理化学与材料学基础扎实，有较强文献阅读能力与实验动手能力。',
-      contactEmail: 'dyzhao@fudan.edu.cn',
-      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
-    ),
-    FduropProjectItem(
-      id: 'fdurop_p4',
-      title: '新原理二维半导体异质结场效应晶体管器件制备与量子输运测试',
-      program: '登峰项目',
-      advisor: '周鹏教授 / 曾璇教授',
-      advisorTitle: '国家杰青 / 产教融合平台首席专家',
-      department: '微电子学院',
-      campus: '张江校区',
-      targetGrade: '大二、大三本科生（微电子科学、应用物理、电子信息）',
-      quota: 2,
-      deadline: '2026-12-10',
-      status: '招募中',
-      description: '进入张江微纳超净间学习光刻加工、电子束蒸发（EBE）与极低温电学探针台测试技术，参与构建基于原子级二硫化钼/黑磷异质结的新型负电容晶体管原型。',
-      requirements: '了解半导体物理或固体电子学基础，有意愿深入微电子器件科研。',
-      contactEmail: 'pengzhou@fudan.edu.cn',
-      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
-    ),
-    FduropProjectItem(
-      id: 'fdurop_p5',
-      title: '数字经济赋能长三角一体化产业链韧性的实证测度与微观大数据建模',
-      program: '开放自选课题',
-      advisor: '陆铭特聘教授',
-      advisorTitle: '文科资深教授 / 博士生导师',
-      department: '经济学院',
-      campus: '邯郸校区',
-      targetGrade: '大一至大三本科生（经济学、金融学、管理科学专业）',
-      quota: 2,
-      deadline: '2026-12-15',
-      status: '招募中',
-      description:
-          '基于上市公司供应链网络大数据与长三角微观企业调查问卷，构建产业链韧性量化评估指标体系，结合计量经济学因果推断模型开展经验实证研究。',
-      requirements: '熟练掌握Stata或R语言或Python数据清洗，具备较强统计计量基础。',
-      contactEmail: 'minglu@fudan.edu.cn',
-      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
-    ),
-    FduropProjectItem(
-      id: 'fdurop_p6',
-      title: '中古丝路出土汉文文书与基层赋役形态对勘考释',
-      program: '望道项目',
-      advisor: '冯培红教授',
-      advisorTitle: '历史学系教授 / 博士生导师',
-      department: '历史学系',
-      campus: '邯郸校区',
-      targetGrade: '历史学系、中文系、哲学学院大二大三本科生',
-      quota: 1,
-      deadline: '2026-11-26',
-      status: '招募中',
-      description:
-          '整理敦煌莫高窟藏经洞及吐鲁番阿斯塔那墓地出土的租庸调文书残片，运用古代职官与度量衡知识进行文献排比校勘，撰写高质量文史学术论文。',
-      requirements: '具有扎实中国古代史与古典文献学基础，能阅读繁体古籍异体字。',
-      contactEmail: 'history_lab@fudan.edu.cn',
-      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
-    ),
-    FduropProjectItem(
-      id: 'fdurop_p7',
-      title: '基于大模型代理（Agent）的复杂软件缺陷自动复现与补丁合成',
-      program: '登峰项目',
-      advisor: '彭鑫教授',
-      advisorTitle: '计算机学院教授 / 软件工程实验室主任',
-      department: '计算机科学技术学院 / 软件学院',
-      campus: '江湾校区',
-      targetGrade: '大二、大三本科生（计算机、软件工程）',
-      quota: 2,
-      deadline: '2026-12-08',
-      status: '招募中',
-      description: '依托 CodeWisdom 团队自主研发的代码大模型 Agent 框架，探索将测试用例生成、代码执行追踪与符号验证整合到自动化软件缺陷修复（APR）工作流中。系统已对接 paper.fudan.edu.cn 导师课题。',
-      requirements: '熟悉 Python 与 Java/C++，对自动化测试或软件工程前沿研究充满热情。',
-      contactEmail: 'xinpeng@fudan.edu.cn',
-      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
-    ),
-    FduropProjectItem(
-      id: 'fdurop_p8',
-      title: '非小细胞肺癌脑转移关键靶点的高通量蛋白质组学筛选与验证',
-      program: '望道项目',
-      advisor: '丁琛教授 / 占昌友教授',
-      advisorTitle: '国家杰青 / 教授',
-      department: '生命科学学院 / 基础医学院',
-      campus: '江湾校区 / 枫林校区',
-      targetGrade: '生物科学、临床医学、生物信息学专业本科生',
-      quota: 2,
-      deadline: '2026-12-12',
-      status: '招募中',
-      description: '利用高精度轨道阱质谱仪（Orbitrap）分析临床肺癌脑转移配对组织，挖掘特异性过表达膜蛋白与激酶靶标，并利用分子生物学手段开展体外功能确认。',
-      requirements: '修读过细胞生物学或分子生物学，具有良好实验规范意识。',
-      contactEmail: 'chend@fudan.edu.cn',
-      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
-    ),
-    FduropProjectItem(
-      id: 'fdurop_p9',
-      title: '长三角典型城市群二次有机气溶胶（SOA）生成机制与烟雾箱模拟',
-      program: '曦源项目',
-      advisor: '陈建民院士团队',
-      advisorTitle: '中国科学院院士团队 / 特聘教授',
-      department: '环境科学与工程系',
-      campus: '江湾校区',
-      targetGrade: '环境科学、环境工程、应用化学大二大三本科生',
-      quota: 2,
-      deadline: '2026-12-18',
-      status: '招募中',
-      description: '在江湾环境系大型室内烟雾箱中模拟挥发性有机物（VOCs）在大气光照条件下的多相光化学反应，利用高分辨飞行时间质谱分析纳米级气溶胶成核动力学。',
-      requirements: '环境化学或普通化学实验基础扎实，有一定化学仪器分析技能。',
-      contactEmail: 'jmchen@fudan.edu.cn',
-      portalUrl: 'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index',
-    ),
-  ];
-
-  // =========================================================================
-  // 6. FDUROP 相关文件下载数据 (FDUROP Document Downloads)
-  // =========================================================================
-  static const List<FduropDocumentItem> _initialFduropDocuments = [
-    FduropDocumentItem(
-      id: 'doc_1',
-      title: '复旦大学本科生学术研究资助计划（FDUROP）立项申请书模板（2026版）.docx',
-      category: '立项申报',
-      fileFormat: 'DOCX',
-      fileSize: '340 KB',
-      updateDate: '2026-10-15',
-      downloadUrl:
-          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_apply_2026.docx',
-    ),
-    FduropDocumentItem(
-      id: 'doc_2',
-      title: 'FDUROP中期进展报告表与指导教师审核评语单.docx',
-      category: '中期检查',
-      fileFormat: 'DOCX',
-      fileSize: '185 KB',
-      updateDate: '2026-10-18',
-      downloadUrl:
-          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_midterm_form.docx',
-    ),
-    FduropDocumentItem(
-      id: 'doc_3',
-      title: '复旦大学FDUROP结题论文写作规范与成果总结报告模板.pdf',
-      category: '结题评审',
-      fileFormat: 'PDF',
-      fileSize: '620 KB',
-      updateDate: '2026-10-22',
-      downloadUrl:
-          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_thesis_guide.pdf',
-    ),
-    FduropDocumentItem(
-      id: 'doc_4',
-      title: '复旦大学本科生学术研究导师推荐信及团队分工确认书.docx',
-      category: '立项申报',
-      fileFormat: 'DOCX',
-      fileSize: '120 KB',
-      updateDate: '2026-10-15',
-      downloadUrl:
-          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_recommendation.docx',
-    ),
-    FduropDocumentItem(
-      id: 'doc_5',
-      title: '复旦大学本科生学术研究资助计划经费使用与财务报销指南手册（2026版）.pdf',
-      category: '经费管理',
-      fileFormat: 'PDF',
-      fileSize: '1.1 MB',
-      updateDate: '2026-09-28',
-      downloadUrl:
-          'http://www.fdurop.fudan.edu.cn/downloads/fdurop_financial_guide.pdf',
-    ),
-    FduropDocumentItem(
-      id: 'doc_6',
-      title: '复旦大学优秀本科生学术研究结题论文精选集（第十三届优秀成果汇编）.pdf',
-      category: '结题评审',
-      fileFormat: 'PDF',
-      fileSize: '4.5 MB',
-      updateDate: '2026-09-10',
-      downloadUrl: 'http://www.fdurop.fudan.edu.cn/downloads/fdurop_selected_papers_v13.pdf',
-    ),
-  ];
+  static const List<FduropProjectItem> _initialFduropProjects =
+      initialFduropProjects;
 
   // =========================================================================
   // Query APIs
@@ -1373,147 +1158,251 @@ class ResearchService extends ChangeNotifier {
     }).toList();
   }
 
-  /// Get FDUROP open research projects for undergraduates.
-  Future<List<FduropProjectItem>> getFduropProjects({
-    String? program,
-    String? department,
-    String? query,
-    bool? bookmarkedOnly,
-  }) async {
-    if (_api != null) {
-      try {
-        final params = <String, dynamic>{
-          'page': 1,
-          'page_size': 50,
-          if (query != null && query.trim().isNotEmpty)
-            'code_or_name': query.trim(),
-        };
-        final res = await _api!.call('fudan.fdurop.topics', params);
-        if (res is List && res.isNotEmpty) {
-          final liveList = res
-              .map(
-                (e) => FduropProjectItem.fromLiveJson(
-                  Map<String, dynamic>.from(e as Map),
-                  isBookmarked: _bookmarkedFduropProjectIds.contains(
-                    e['id']?.toString(),
-                  ),
-                ),
-              )
-              .toList();
+  /// Default number of open topics fetched per page.
+  static const int fduropPageSize = 20;
 
-          return liveList.where((item) {
-            if (bookmarkedOnly == true && !item.isBookmarked) return false;
-            if (program != null && program != '全部') {
-              final matchProgram =
-                  item.program.contains(program) ||
-                  item.topicLabels.any((l) => l.contains(program)) ||
-                  item.subjectKinds.any((s) => s.contains(program));
-              if (!matchProgram) return false;
-            }
-            if (department != null &&
-                department != '全部' &&
-                !item.department.contains(department)) {
+  static final Map<String, FduropProjectItem> _seedProjectsById = {
+    for (final p in _initialFduropProjects) p.id: p,
+  };
+
+  /// Fetch one page of FDUROP open topics.
+  ///
+  /// With a bound campus API the filters are sent to paper.fudan.edu.cn, so
+  /// paging covers the whole live catalogue. When the live system is not
+  /// reachable (not signed in, offline) the bundled seed is filtered and paged
+  /// locally, and [FduropProjectPage.liveError] says why.
+  Future<FduropProjectPage> fetchFduropProjectPage({
+    int page = 1,
+    int pageSize = fduropPageSize,
+    String? query,
+    String? subjectKind,
+    String? topicLabel,
+  }) async {
+    final q = query?.trim() ?? '';
+    final subject = _activeFilter(subjectKind);
+    final label = _activeFilter(topicLabel);
+    String? liveError;
+
+    final api = _api;
+    if (api != null) {
+      try {
+        final subjectId = subject == null
+            ? null
+            : (await _liveSubjectIdMap())[subject];
+        final labelId = label == null ? null : (await _liveLabelIdMap())[label];
+        final res = await api.call('fudan.fdurop.topics', {
+          'page': page,
+          'page_size': pageSize,
+          if (q.isNotEmpty) 'keyword': q,
+          'subject_kind_id': ?subjectId,
+          'topic_label_id': ?labelId,
+        });
+        final live = _parseLivePage(res, page, pageSize);
+        if (live != null) {
+          // A filter the server could not resolve to an id is applied locally.
+          final items = live.items.where((item) {
+            if (subject != null &&
+                subjectId == null &&
+                !item.matchesSubjectKind(subject)) {
               return false;
             }
-            if (query != null && query.trim().isNotEmpty) {
-              final q = query.trim().toLowerCase();
-              final matchTitle = item.title.toLowerCase().contains(q);
-              final matchAdvisor = item.advisor.toLowerCase().contains(q);
-              final matchDept = item.department.toLowerCase().contains(q);
-              final matchDesc = item.description.toLowerCase().contains(q);
-              if (!matchTitle && !matchAdvisor && !matchDept && !matchDesc) {
-                return false;
-              }
+            if (label != null &&
+                labelId == null &&
+                !item.matchesTopicLabel(label)) {
+              return false;
             }
             return true;
           }).toList();
+          return FduropProjectPage(
+            items: items,
+            page: page,
+            pageSize: pageSize,
+            total: live.total,
+            hasMore: live.hasMore,
+            isLive: true,
+          );
         }
-      } catch (_) {
-        // Fallback to static mock on error / unauthenticated
+        liveError = '开放课题系统返回了无法识别的数据';
+      } catch (e) {
+        liveError = campusError(e);
       }
     }
 
-    return _initialFduropProjects
-        .map((project) {
-          return project.copyWith(
-            isBookmarked: _bookmarkedFduropProjectIds.contains(project.id),
-          );
-        })
-        .where((item) {
-          if (bookmarkedOnly == true && !item.isBookmarked) {
-            return false;
-          }
-          if (program != null && program != '全部' && item.program != program) {
-            return false;
-          }
-          if (department != null &&
-              department != '全部' &&
-              item.department != department) {
-            return false;
-          }
-          if (query != null && query.trim().isNotEmpty) {
-            final q = query.trim().toLowerCase();
-            final matchTitle = item.title.toLowerCase().contains(q);
-            final matchAdvisor = item.advisor.toLowerCase().contains(q);
-            final matchDept = item.department.toLowerCase().contains(q);
-            final matchDesc = item.description.toLowerCase().contains(q);
-            if (!matchTitle && !matchAdvisor && !matchDept && !matchDesc) {
-              return false;
-            }
-          }
-          return true;
-        })
-        .toList();
+    final filtered = _initialFduropProjects.where((item) {
+      if (subject != null && !item.matchesSubjectKind(subject)) return false;
+      if (label != null && !item.matchesTopicLabel(label)) return false;
+      return item.matchesQuery(q);
+    }).toList();
+    final start = (page - 1) * pageSize;
+    final items = start >= filtered.length
+        ? const <FduropProjectItem>[]
+        : filtered
+              .sublist(start, (start + pageSize).clamp(0, filtered.length))
+              .map(_withBookmark)
+              .toList();
+    return FduropProjectPage(
+      items: items,
+      page: page,
+      pageSize: pageSize,
+      total: filtered.length,
+      hasMore: start + items.length < filtered.length,
+      isLive: false,
+      liveError: liveError,
+    );
   }
 
   /// Get detailed profile of an FDUROP topic including tutor and lab details.
+  /// Live details are cached for the lifetime of the bound API.
   Future<FduropProjectItem?> getFduropProjectDetail(String id) async {
-    if (_api != null) {
-      try {
-        final res = await _api!.call('fudan.fdurop.topic.detail', {'id': id});
-        if (res is Map) {
-          return FduropProjectItem.fromLiveJson(
-            Map<String, dynamic>.from(res),
-            isBookmarked: _bookmarkedFduropProjectIds.contains(id),
-          );
-        }
-      } catch (_) {
-        // Fallback
+    final seed = _seedProjectsById[id];
+    if (seed != null) return _withBookmark(seed);
+    final cached = _fduropDetailCache[id];
+    if (cached != null) return _withBookmark(cached);
+    final api = _api;
+    if (api == null) return null;
+    try {
+      final res = await api.call('fudan.fdurop.topic.detail', {'id': id});
+      if (res is Map && (res['title']?.toString() ?? '').isNotEmpty) {
+        final item = FduropProjectItem.fromLiveJson(
+          Map<String, dynamic>.from(res),
+        );
+        if (identical(api, _api)) _fduropDetailCache[id] = item;
+        return _withBookmark(item);
       }
+    } catch (_) {
+      // The caller keeps the summary row it already shows.
     }
-    final list = await getFduropProjects();
-    final matches = list.where((p) => p.id == id);
-    return matches.isNotEmpty ? matches.first : null;
+    return null;
   }
 
-  /// Get FDUROP downloadable documents.
-  Future<List<FduropDocumentItem>> getFduropDocuments({
-    String? category,
-    String? query,
+  FduropProjectItem _withBookmark(FduropProjectItem item) => item.copyWith(
+    isBookmarked: _bookmarkedFduropProjectIds.contains(item.id),
+  );
+
+  static String? _activeFilter(String? value) {
+    final v = value?.trim();
+    return v == null || v.isEmpty || v == '全部' ? null : v;
+  }
+
+  FduropProjectPage? _parseLivePage(Object? res, int page, int pageSize) {
+    List<dynamic>? rows;
+    int? total;
+    bool? hasMore;
+    if (res is Map && res['items'] is List) {
+      rows = res['items'] as List;
+      total = (res['total'] as num?)?.toInt();
+      hasMore = res['has_more'] as bool?;
+    } else if (res is List) {
+      rows = res;
+    }
+    if (rows == null) return null;
+    final items = [
+      for (final row in rows)
+        if (row is Map)
+          _withBookmark(
+            FduropProjectItem.fromLiveJson(Map<String, dynamic>.from(row)),
+          ),
+    ];
+    return FduropProjectPage(
+      items: items,
+      page: page,
+      pageSize: pageSize,
+      total: total ?? (page - 1) * pageSize + items.length,
+      hasMore: hasMore ?? false,
+      isLive: true,
+    );
+  }
+
+  /// The official AAO pages carrying the FDUROP forms and resources. Both are
+  /// shown to signed-in members only; the host signs in to jwc on demand.
+  static const List<String> fduropDocumentPages = [
+    'https://jwc.fudan.edu.cn/0e/07/c27281a724487/page.psp',
+    'https://jwc.fudan.edu.cn/fb/f7/c27281a457719/page.psp',
+  ];
+
+  /// The listing loaded this session, if any.
+  List<FduropDocumentItem>? get cachedFduropDocuments => _fduropDocuments;
+
+  bool isFduropDocumentDownloaded(String id) =>
+      _fduropDocAssets.containsKey(id);
+
+  /// The official FDUROP files (via `fudan.notice.attachments`). Pages that
+  /// fail are skipped while another succeeds; if none does, the error is thrown.
+  Future<List<FduropDocumentItem>> fetchFduropDocuments({
+    bool refresh = false,
   }) async {
-    return _initialFduropDocuments
-        .map((doc) {
-          return doc.copyWith(
-            isDownloaded: _downloadedFduropDocIds.contains(doc.id),
-          );
-        })
-        .where((item) {
-          if (category != null &&
-              category != '全部' &&
-              item.category != category) {
-            return false;
-          }
-          if (query != null && query.trim().isNotEmpty) {
-            final q = query.trim().toLowerCase();
-            final matchTitle = item.title.toLowerCase().contains(q);
-            final matchCat = item.category.toLowerCase().contains(q);
-            if (!matchTitle && !matchCat) {
-              return false;
-            }
-          }
-          return true;
-        })
-        .toList();
+    final cached = _fduropDocuments;
+    if (!refresh && cached != null) return cached;
+    final api = _api;
+    if (api == null) throw StateError('campus api unbound');
+    Object? failure;
+    final pages = await Future.wait([
+      for (final page in fduropDocumentPages)
+        api
+            .call('fudan.notice.attachments', {'url': page})
+            .then<Object?>((v) => v)
+            .catchError((Object e) {
+              failure ??= e;
+              return null;
+            }),
+    ]);
+    if (pages.every((p) => p is! List)) {
+      throw failure ?? StateError('unexpected attachment payload');
+    }
+    final seen = <String>{};
+    final items = [
+      for (final page in pages.whereType<List>())
+        for (final row in page.whereType<Map>())
+          if (row['url'] is String && seen.add(row['url'] as String))
+            FduropDocumentItem.fromAttachment(
+              row['name']?.toString() ?? '附件',
+              row['url'] as String,
+            ),
+    ];
+    _fduropDocuments = items;
+    return items;
+  }
+
+  /// Fetch the file into Core's managed asset store (reused within the session).
+  Future<String> _fduropDocumentAsset(
+    FduropDocumentItem doc, {
+    bool fresh = false,
+  }) async {
+    final known = _fduropDocAssets[doc.id];
+    if (known != null && !fresh) return known;
+    final api = _api;
+    if (api == null) throw StateError('campus api unbound');
+    final result = await api.call('fudan.notice.attachment.download', {
+      'url': doc.downloadUrl,
+      'name': doc.fileName,
+    });
+    final id = result is Map ? result['asset_id']?.toString() : null;
+    if (id == null || id.isEmpty) throw StateError('FileUnavailable');
+    _fduropDocAssets[doc.id] = id;
+    notifyListeners();
+    return id;
+  }
+
+  /// Download (once per session) and open with the system viewer.
+  Future<void> openFduropDocument(FduropDocumentItem doc) =>
+      _withFduropAsset(doc, 'campus.openFile');
+
+  /// Download (once per session) and save a copy where the person picks.
+  Future<void> saveFduropDocument(FduropDocumentItem doc) =>
+      _withFduropAsset(doc, 'campus.saveFile');
+
+  Future<void> _withFduropAsset(FduropDocumentItem doc, String method) async {
+    final cached = _fduropDocAssets.containsKey(doc.id);
+    var id = await _fduropDocumentAsset(doc);
+    try {
+      await _api!.call(method, {'asset_id': id});
+    } catch (e) {
+      // A cached asset may have been evicted; fetch it again once.
+      if (!cached || e.toString().contains('Cancelled')) rethrow;
+      _fduropDocAssets.remove(doc.id);
+      id = await _fduropDocumentAsset(doc, fresh: true);
+      await _api!.call(method, {'asset_id': id});
+    }
   }
 
   /// List of distinct departments for filtering groups.
@@ -1539,22 +1428,86 @@ class ResearchService extends ChangeNotifier {
     '生命健康',
   ];
 
-  /// List of FDUROP programs for filtering.
-  List<String> get availableFduropPrograms => [
+  /// Fallback academic subject kinds (学科门类) of paper.fudan.edu.cn.
+  static const List<String> _fallbackSubjectKinds = [
     '全部',
-    '曦源项目',
-    '望道项目',
-    '莙政项目',
-    '登峰项目',
-    '开放自选课题',
+    '交叉学科',
+    '医学',
+    '工学',
+    '理学',
+    '文学',
+    '法学',
+    '经济学',
+    '管理学',
+    '历史学',
+    '哲学',
+    '教育学',
+    '艺术学',
   ];
 
-  /// List of FDUROP document categories.
-  List<String> get availableFduropDocCategories => [
+  /// Fallback topic labels / funding sources (课题标签) of paper.fudan.edu.cn.
+  static const List<String> _fallbackTopicLabels = [
     '全部',
-    '立项申报',
-    '中期检查',
-    '结题评审',
-    '经费管理',
+    '国家自然科学基金项目',
+    '国家科技重大专项',
+    '国家社科基金项目',
+    '省（市）级基金项目',
+    '企事业单位委托项目',
+    '国际合作项目',
+    '其它项目',
   ];
+
+  /// Subject kind filter options: the live list when reachable, else the fallback.
+  Future<List<String>> fduropSubjectKindOptions() async {
+    try {
+      final live = await _liveSubjectIdMap();
+      if (live.isNotEmpty) return ['全部', ...live.keys];
+    } catch (_) {}
+    return _fallbackSubjectKinds;
+  }
+
+  /// Topic label filter options: the live list when reachable, else the fallback.
+  Future<List<String>> fduropTopicLabelOptions() async {
+    try {
+      final live = await _liveLabelIdMap();
+      if (live.isNotEmpty) return ['全部', ...live.keys];
+    } catch (_) {}
+    return _fallbackTopicLabels;
+  }
+
+  /// `name_zh -> id` of live subject kinds; loaded once per bound API, retried after a failure.
+  Future<Map<String, String>> _liveSubjectIdMap() {
+    final pending = _liveSubjectIds ??= _loadLiveDictionary(
+      'fudan.fdurop.subjects',
+    );
+    return pending.catchError((Object e) {
+      if (identical(_liveSubjectIds, pending)) _liveSubjectIds = null;
+      throw e;
+    });
+  }
+
+  /// `name_zh -> id` of live topic labels; loaded once per bound API, retried after a failure.
+  Future<Map<String, String>> _liveLabelIdMap() {
+    final pending = _liveLabelIds ??= _loadLiveDictionary(
+      'fudan.fdurop.labels',
+    );
+    return pending.catchError((Object e) {
+      if (identical(_liveLabelIds, pending)) _liveLabelIds = null;
+      throw e;
+    });
+  }
+
+  Future<Map<String, String>> _loadLiveDictionary(String method) async {
+    final api = _api;
+    if (api == null) throw StateError('campus api unbound');
+    final res = await api.call(method, const <String, dynamic>{});
+    if (res is! List) throw StateError('unexpected $method payload');
+    return {
+      for (final row in res)
+        if (row is Map &&
+            (row['name_zh']?.toString() ?? '').isNotEmpty &&
+            (row['id']?.toString() ?? '').isNotEmpty)
+          row['name_zh'].toString(): row['id'].toString(),
+    };
+  }
 }

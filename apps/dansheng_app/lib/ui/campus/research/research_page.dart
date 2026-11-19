@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -49,19 +51,41 @@ class _ResearchPageState extends State<ResearchPage>
   String _selectedLectureCategory = '全部';
   bool _lectureBookmarkedOnly = false;
 
-  // FDUROP Sub-tab state: 0: 开放科研项目, 1: 网站通知, 2: 常用文件下载
+  // FDUROP Sub-tab state: 0: 开放课题, 1: 网站通知, 2: 文件下载
   int _fduropSubIndex = 0;
-  String _selectedFduropProgram = '全部';
+  String _selectedFduropSubject = '全部';
+  String _selectedFduropTopicLabel = '全部';
   String _selectedFduropDocCategory = '全部';
+  List<String> _fduropSubjectOptions = const ['全部'];
+  List<String> _fduropLabelOptions = const ['全部'];
 
   List<ResearchNewsItem> _newsList = [];
   List<ResearchGroupItem> _groupList = [];
   List<ResearchLectureItem> _lectureList = [];
-  List<FduropProjectItem> _fduropProjects = [];
   List<FduropNoticeItem> _fduropNotices = [];
-  List<FduropDocumentItem> _fduropDocuments = [];
+  bool _localReady = false;
 
-  bool _loading = false;
+  // Official FDUROP files from jwc.fudan.edu.cn, loaded when first shown.
+  List<FduropDocumentItem>? _fduropDocuments;
+  bool _fduropDocsLoading = false;
+  String? _fduropDocsError;
+  final Set<String> _fduropDocBusy = {};
+
+  // FDUROP open topics, paged from paper.fudan.edu.cn or the offline seed.
+  final List<FduropProjectItem> _fduropProjects = [];
+  final Set<String> _fduropProjectIds = {};
+  int _fduropTotal = 0;
+  int _fduropPage = 0;
+  bool _fduropHasMore = false;
+  bool _fduropLoading = false;
+  bool _fduropIsLive = false;
+  String? _fduropLiveError;
+  String? _fduropPageError;
+  int _fduropGeneration = 0;
+  Timer? _fduropSearchDebounce;
+
+  static const _portalUrl =
+      'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index';
 
   @override
   void initState() {
@@ -69,11 +93,15 @@ class _ResearchPageState extends State<ResearchPage>
     _service.bindApi(CampusApi.forAccount(widget.controller));
     _tabController = TabController(length: 4, vsync: this);
     _service.addListener(_onServiceChanged);
-    _loadData();
+    _fduropDocuments = _service.cachedFduropDocuments;
+    _loadLocal();
+    _loadFduropFilterOptions();
+    _reloadFduropProjects();
   }
 
   @override
   void dispose() {
+    _fduropSearchDebounce?.cancel();
     _service.removeListener(_onServiceChanged);
     _tabController.dispose();
     _newsSearchCtrl.dispose();
@@ -83,14 +111,68 @@ class _ResearchPageState extends State<ResearchPage>
     super.dispose();
   }
 
+  /// Follow / bookmark / download toggles only change local state, so the
+  /// in-memory lists are recomputed and no network request is made.
   void _onServiceChanged() {
-    if (mounted) {
-      _loadData();
+    if (mounted) _loadLocal();
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([
+      _loadLocal(),
+      _reloadFduropProjects(),
+      if (_fduropDocuments != null || _fduropSubIndex == 2)
+        _loadFduropDocuments(refresh: true),
+    ]);
+  }
+
+  /// The official FDUROP files; signing in to jwc is handled by the host.
+  Future<void> _loadFduropDocuments({bool refresh = false}) async {
+    if (_fduropDocsLoading) return;
+    setState(() {
+      _fduropDocsLoading = true;
+      _fduropDocsError = null;
+    });
+    try {
+      final docs = await _service.fetchFduropDocuments(refresh: refresh);
+      if (!mounted) return;
+      setState(() => _fduropDocuments = docs);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _fduropDocsError = campusError(e));
+    } finally {
+      if (mounted) setState(() => _fduropDocsLoading = false);
     }
   }
 
-  Future<void> _loadData() async {
-    setState(() => _loading = true);
+  Future<void> _runFduropDocument(
+    FduropDocumentItem doc, {
+    required bool save,
+  }) async {
+    if (!_fduropDocBusy.add(doc.id)) return;
+    setState(() {});
+    try {
+      if (save) {
+        await _service.saveFduropDocument(doc);
+      } else {
+        await _service.openFduropDocument(doc);
+      }
+      if (save && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('已保存：${doc.fileName}')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(campusError(e))));
+      }
+    } finally {
+      if (mounted) setState(() => _fduropDocBusy.remove(doc.id));
+    }
+  }
+
+  /// Recompute the bundled (in-memory) lists from the current filters.
+  Future<void> _loadLocal() async {
     final news = await _service.getNews(
       category: _selectedNewsCategory,
       query: _newsSearchCtrl.text,
@@ -105,30 +187,112 @@ class _ResearchPageState extends State<ResearchPage>
       category: _selectedLectureCategory,
       bookmarkedOnly: _lectureBookmarkedOnly,
     );
-    final fduropProjects = await _service.getFduropProjects(
-      program: _selectedFduropProgram,
-      query: _fduropSearchCtrl.text,
-    );
-    final fduropNotices = await _service.getFduropNotices(
-      program: _selectedFduropProgram,
-      query: _fduropSearchCtrl.text,
-    );
-    final fduropDocuments = await _service.getFduropDocuments(
-      category: _selectedFduropDocCategory,
-      query: _fduropSearchCtrl.text,
-    );
+    final notices = await _service.getFduropNotices();
+    if (!mounted) return;
+    setState(() {
+      _newsList = news;
+      _groupList = groups;
+      _lectureList = lectures;
+      _fduropNotices = notices;
+      _localReady = true;
+    });
+  }
 
-    if (mounted) {
+  Future<void> _loadFduropFilterOptions() async {
+    final results = await Future.wait([
+      _service.fduropSubjectKindOptions(),
+      _service.fduropTopicLabelOptions(),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _fduropSubjectOptions = results[0];
+      _fduropLabelOptions = results[1];
+      if (!_fduropSubjectOptions.contains(_selectedFduropSubject)) {
+        _selectedFduropSubject = '全部';
+      }
+      if (!_fduropLabelOptions.contains(_selectedFduropTopicLabel)) {
+        _selectedFduropTopicLabel = '全部';
+      }
+    });
+  }
+
+  void _onFduropSearchChanged(String _) {
+    setState(() {}); // Toggle the clear button.
+    _fduropSearchDebounce?.cancel();
+    _fduropSearchDebounce = Timer(
+      const Duration(milliseconds: 400),
+      _reloadFduropProjects,
+    );
+  }
+
+  /// Restart the open-topic list from page 1 with the current filters.
+  Future<void> _reloadFduropProjects() {
+    _fduropSearchDebounce?.cancel();
+    _fduropGeneration++;
+    setState(() {
+      _fduropProjects.clear();
+      _fduropProjectIds.clear();
+      _fduropPage = 0;
+      _fduropTotal = 0;
+      _fduropHasMore = true;
+      _fduropLoading = false;
+      _fduropPageError = null;
+    });
+    return _loadMoreFduropProjects();
+  }
+
+  /// Append the next page. Responses for an outdated query are dropped.
+  Future<void> _loadMoreFduropProjects() async {
+    if (_fduropLoading || !_fduropHasMore) return;
+    final generation = _fduropGeneration;
+    final nextPage = _fduropPage + 1;
+    setState(() {
+      _fduropLoading = true;
+      _fduropPageError = null;
+    });
+    try {
+      final page = await _service.fetchFduropProjectPage(
+        page: nextPage,
+        query: _fduropSearchCtrl.text,
+        subjectKind: _selectedFduropSubject,
+        topicLabel: _selectedFduropTopicLabel,
+      );
+      if (!mounted || generation != _fduropGeneration) return;
+      // Page 2+ must come from the same source as page 1.
+      if (nextPage > 1 && page.isLive != _fduropIsLive) {
+        setState(() {
+          _fduropLoading = false;
+          _fduropPageError = page.liveError ?? '数据来源已变化，请下拉刷新';
+        });
+        return;
+      }
       setState(() {
-        _newsList = news;
-        _groupList = groups;
-        _lectureList = lectures;
-        _fduropProjects = fduropProjects;
-        _fduropNotices = fduropNotices;
-        _fduropDocuments = fduropDocuments;
-        _loading = false;
+        for (final item in page.items) {
+          if (_fduropProjectIds.add(item.id)) _fduropProjects.add(item);
+        }
+        _fduropPage = nextPage;
+        _fduropTotal = page.total;
+        _fduropHasMore = page.hasMore;
+        _fduropIsLive = page.isLive;
+        if (nextPage == 1) _fduropLiveError = page.liveError;
+        _fduropLoading = false;
+      });
+    } catch (e) {
+      if (!mounted || generation != _fduropGeneration) return;
+      setState(() {
+        _fduropLoading = false;
+        _fduropPageError = campusError(e);
       });
     }
+  }
+
+  bool _onFduropScroll(ScrollNotification notification) {
+    if (_fduropSubIndex == 0 &&
+        notification.metrics.axis == Axis.vertical &&
+        notification.metrics.extentAfter < 600) {
+      _loadMoreFduropProjects();
+    }
+    return false;
   }
 
   @override
@@ -144,7 +308,7 @@ class _ResearchPageState extends State<ResearchPage>
           IconButton(
             tooltip: '刷新',
             icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
+            onPressed: _refreshAll,
           ),
           CampusAccountActions(controller: widget.controller),
         ],
@@ -160,11 +324,7 @@ class _ResearchPageState extends State<ResearchPage>
           ],
         ),
       ),
-      body:
-          _loading &&
-              _newsList.isEmpty &&
-              _groupList.isEmpty &&
-              _fduropProjects.isEmpty
+      body: !_localReady
           ? const Center(child: CircularProgressIndicator())
           : TabBarView(
               controller: _tabController,
@@ -183,7 +343,7 @@ class _ResearchPageState extends State<ResearchPage>
   // -------------------------------------------------------------
   Widget _buildNewsTab(ThemeData theme, ColorScheme colorScheme) {
     return RefreshIndicator(
-      onRefresh: _loadData,
+      onRefresh: _loadLocal,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
@@ -198,7 +358,7 @@ class _ResearchPageState extends State<ResearchPage>
                       icon: const Icon(Icons.clear, size: 18),
                       onPressed: () {
                         _newsSearchCtrl.clear();
-                        _loadData();
+                        _loadLocal();
                       },
                     )
                   : null,
@@ -210,7 +370,7 @@ class _ResearchPageState extends State<ResearchPage>
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            onChanged: (_) => _loadData(),
+            onChanged: (_) => _loadLocal(),
           ),
           const SizedBox(height: 10),
 
@@ -227,7 +387,7 @@ class _ResearchPageState extends State<ResearchPage>
                       setState(() {
                         _selectedNewsCategory = selected ? cat : '全部';
                       });
-                      _loadData();
+                      _loadLocal();
                     },
                   ),
                   const SizedBox(width: 8),
@@ -420,7 +580,7 @@ class _ResearchPageState extends State<ResearchPage>
   // -------------------------------------------------------------
   Widget _buildGroupsTab(ThemeData theme, ColorScheme colorScheme) {
     return RefreshIndicator(
-      onRefresh: _loadData,
+      onRefresh: _loadLocal,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
@@ -435,7 +595,7 @@ class _ResearchPageState extends State<ResearchPage>
                       icon: const Icon(Icons.clear, size: 18),
                       onPressed: () {
                         _groupSearchCtrl.clear();
-                        _loadData();
+                        _loadLocal();
                       },
                     )
                   : null,
@@ -447,7 +607,7 @@ class _ResearchPageState extends State<ResearchPage>
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            onChanged: (_) => _loadData(),
+            onChanged: (_) => _loadLocal(),
           ),
           const SizedBox(height: 10),
 
@@ -463,7 +623,7 @@ class _ResearchPageState extends State<ResearchPage>
                 selected: _groupFollowedOnly,
                 onSelected: (val) {
                   setState(() => _groupFollowedOnly = val);
-                  _loadData();
+                  _loadLocal();
                 },
               ),
               const SizedBox(width: 10),
@@ -494,7 +654,7 @@ class _ResearchPageState extends State<ResearchPage>
                   onChanged: (dept) {
                     if (dept != null) {
                       setState(() => _selectedGroupDepartment = dept);
-                      _loadData();
+                      _loadLocal();
                     }
                   },
                 ),
@@ -751,187 +911,198 @@ class _ResearchPageState extends State<ResearchPage>
   }
 
   // -------------------------------------------------------------
-  // TAB 3: 本科生科研 (FDUROP 望道/莙政/开放课题/文件下载)
+  // TAB 3: 本科生科研 (FDUROP 开放课题/网站通知/文件下载)
   // -------------------------------------------------------------
   Widget _buildFduropTab(ThemeData theme, ColorScheme colorScheme) {
+    const pad = EdgeInsets.symmetric(horizontal: 16);
     return RefreshIndicator(
-      onRefresh: _loadData,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          // FDUROP Banner Card
-          Card(
-            color: colorScheme.primaryContainer.withAlpha(80),
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: colorScheme.primary.withAlpha(80)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.workspace_premium_outlined,
-                    size: 32,
-                    color: colorScheme.primary,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '复旦大学本科生学术研究资助计划（FDUROP）',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: colorScheme.primary,
-                          ),
+      onRefresh: _refreshAll,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _onFduropScroll,
+        child: CustomScrollView(
+          key: const Key('fdurop-scroll'),
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildFduropPortalCard(theme, colorScheme),
+                    const SizedBox(height: 14),
+                    SegmentedButton<int>(
+                      segments: [
+                        ButtonSegment(
+                          value: 0,
+                          label: Text('开放课题 ($_fduropTotal)'),
+                          icon: const Icon(Icons.assignment_outlined),
                         ),
-                        const SizedBox(height: 3),
-                        Text(
-                          '包含望道学者、莙政学者、曦源项目与登峰计划，支持本科生进组开展高水平原创研究。',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                            height: 1.35,
+                        ButtonSegment(
+                          value: 1,
+                          label: Text('网站通知 (${_fduropNotices.length})'),
+                          icon: const Icon(Icons.campaign_outlined),
+                        ),
+                        ButtonSegment(
+                          value: 2,
+                          label: Text(
+                            _fduropDocuments == null
+                                ? '文件下载'
+                                : '文件下载 (${_fduropDocuments!.length})',
                           ),
+                          icon: const Icon(Icons.download_outlined),
                         ),
                       ],
+                      selected: {_fduropSubIndex},
+                      onSelectionChanged: (set) {
+                        setState(() => _fduropSubIndex = set.first);
+                        if (set.first == 2 &&
+                            _fduropDocuments == null &&
+                            _fduropDocsError == null) {
+                          _loadFduropDocuments();
+                        }
+                      },
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 14),
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 10),
-
-          // FDUROP Teacher Open Topic Portal Access Card
-          Card(
-            color: colorScheme.surfaceContainerHighest.withAlpha(140),
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: colorScheme.primary.withAlpha(90)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.open_in_browser_rounded,
-                    size: 26,
-                    color: colorScheme.primary,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'FDUROP 教师开放课题系统',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: colorScheme.primary,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'paper.fudan.edu.cn/fdurop-pc · 导师开放课题与在线申报',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                    ),
-                    onPressed: () async {
-                      const url =
-                          'https://paper.fudan.edu.cn/fdurop-pc/#/for-student/teacher-open-topic/index';
-                      await Clipboard.setData(const ClipboardData(text: url));
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              '已复制 FDUROP 教师开放课题申报网址：$url\n可在浏览器或配合复旦内网访问。',
-                            ),
-                            duration: Duration(seconds: 3),
-                          ),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.copy, size: 16),
-                    label: const Text('复制网址'),
-                  ),
-                ],
+            if (_fduropSubIndex == 0) ...[
+              SliverPadding(
+                padding: pad,
+                sliver: SliverToBoxAdapter(
+                  child: _buildFduropProjectFilters(theme, colorScheme),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // Sub-switcher Segmented Button
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<int>(
-              segments: [
-                ButtonSegment(
-                  value: 0,
-                  label: Text('开放课题 (${_fduropProjects.length})'),
-                  icon: const Icon(Icons.assignment_outlined),
+              SliverPadding(
+                padding: pad,
+                sliver: SliverList.builder(
+                  itemCount: _fduropProjects.length,
+                  itemBuilder: (context, i) => _buildFduropProjectCard(
+                    _fduropProjects[i],
+                    theme,
+                    colorScheme,
+                  ),
                 ),
-                ButtonSegment(
-                  value: 1,
-                  label: Text('网站通知 (${_fduropNotices.length})'),
-                  icon: const Icon(Icons.campaign_outlined),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                sliver: SliverToBoxAdapter(
+                  child: _buildFduropProjectFooter(theme, colorScheme),
                 ),
-                ButtonSegment(
-                  value: 2,
-                  label: Text('文件下载 (${_fduropDocuments.length})'),
-                  icon: const Icon(Icons.download_outlined),
+              ),
+            ] else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                sliver: SliverToBoxAdapter(
+                  child: _fduropSubIndex == 1
+                      ? _buildFduropNoticesSection(theme, colorScheme)
+                      : _buildFduropDocumentsSection(theme, colorScheme),
                 ),
-              ],
-              selected: {_fduropSubIndex},
-              onSelectionChanged: (set) {
-                setState(() => _fduropSubIndex = set.first);
-              },
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // Dynamic Sub-view
-          if (_fduropSubIndex == 0)
-            _buildFduropProjectsSection(theme, colorScheme)
-          else if (_fduropSubIndex == 1)
-            _buildFduropNoticesSection(theme, colorScheme)
-          else
-            _buildFduropDocumentsSection(theme, colorScheme),
-        ],
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  // --- Sub-view 0: 开放科研项目 (Open Research Projects) ---
-  Widget _buildFduropProjectsSection(ThemeData theme, ColorScheme colorScheme) {
+  /// One header for the programme and the open-topic system it links to.
+  Widget _buildFduropPortalCard(ThemeData theme, ColorScheme colorScheme) {
+    return Card(
+      color: colorScheme.primaryContainer.withAlpha(80),
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: colorScheme.primary.withAlpha(80)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(
+              Icons.workspace_premium_outlined,
+              size: 28,
+              color: colorScheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'FDUROP 教师开放课题系统',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '复旦大学本科生学术研究资助计划 · 望道/莙政/曦源/登峰\npaper.fudan.edu.cn/fdurop-pc',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      fontSize: 11,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+              onPressed: () async {
+                await Clipboard.setData(const ClipboardData(text: _portalUrl));
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('已复制 FDUROP 教师开放课题系统网址，可在浏览器中打开'),
+                    duration: Duration(seconds: 3),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.copy, size: 16),
+              label: const Text('复制网址'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFduropProjectFilters(ThemeData theme, ColorScheme colorScheme) {
+    final query = _fduropSearchCtrl.text.trim();
+    final String status;
+    if (_fduropPage == 0 && _fduropLoading) {
+      status = '正在查询开放课题…';
+    } else if (_fduropIsLive) {
+      final approx = query.isNotEmpty ? '约 ' : '';
+      status =
+          '实时数据 · 共 $approx$_fduropTotal 项 · 已加载 ${_fduropProjects.length} 项';
+    } else {
+      status =
+          '离线示例数据 · 共 $_fduropTotal 项'
+          '${_fduropLiveError == null ? '' : '（实时查询失败：$_fduropLiveError）'}';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Search & Program Filter
         TextField(
           controller: _fduropSearchCtrl,
+          textInputAction: TextInputAction.search,
           decoration: InputDecoration(
-            hintText: '搜索开放课题、指导老师、院系...',
+            hintText: '搜索课题名称、导师姓名或工号...',
             prefixIcon: const Icon(Icons.search, size: 20),
             suffixIcon: _fduropSearchCtrl.text.isNotEmpty
                 ? IconButton(
                     icon: const Icon(Icons.clear, size: 18),
                     onPressed: () {
                       _fduropSearchCtrl.clear();
-                      _loadData();
+                      _reloadFduropProjects();
                     },
                   )
                 : null,
@@ -941,48 +1112,137 @@ class _ResearchPageState extends State<ResearchPage>
             ),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
-          onChanged: (_) => _loadData(),
+          onChanged: _onFduropSearchChanged,
+          onSubmitted: (_) => _reloadFduropProjects(),
         ),
         const SizedBox(height: 10),
-
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (final prog in _service.availableFduropPrograms) ...[
-                FilterChip(
-                  label: Text(prog),
-                  selected: _selectedFduropProgram == prog,
-                  onSelected: (selected) {
-                    setState(() {
-                      _selectedFduropProgram = selected ? prog : '全部';
-                    });
-                    _loadData();
-                  },
-                ),
-                const SizedBox(width: 8),
-              ],
-            ],
-          ),
+        _buildFduropChipRow(
+          label: '学科门类',
+          color: colorScheme.primary,
+          background: colorScheme.primaryContainer.withAlpha(100),
+          options: _fduropSubjectOptions,
+          selected: _selectedFduropSubject,
+          onSelected: (value) {
+            setState(() => _selectedFduropSubject = value);
+            _reloadFduropProjects();
+          },
         ),
-        const SizedBox(height: 12),
-
-        if (_fduropProjects.isEmpty)
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 36),
+        const SizedBox(height: 8),
+        _buildFduropChipRow(
+          label: '课题标签',
+          color: colorScheme.tertiary,
+          background: colorScheme.tertiaryContainer.withAlpha(100),
+          options: _fduropLabelOptions,
+          selected: _selectedFduropTopicLabel,
+          onSelected: (value) {
+            setState(() => _selectedFduropTopicLabel = value);
+            _reloadFduropProjects();
+          },
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Icon(
+              _fduropIsLive ? Icons.cloud_done_outlined : Icons.cloud_off,
+              size: 16,
+              color: _fduropIsLive ? colorScheme.primary : colorScheme.outline,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
               child: Text(
-                '暂无匹配的开放科研课题',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.outline,
+                status,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
-          )
-        else
-          for (final proj in _fduropProjects)
-            _buildFduropProjectCard(proj, theme, colorScheme),
+          ],
+        ),
+        const SizedBox(height: 10),
       ],
+    );
+  }
+
+  Widget _buildFduropChipRow({
+    required String label,
+    required Color color,
+    required Color background,
+    required List<String> options,
+    required String selected,
+    required ValueChanged<String> onSelected,
+  }) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            margin: const EdgeInsets.only(right: 6),
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ),
+          for (final option in options) ...[
+            FilterChip(
+              label: Text(option),
+              selected: selected == option,
+              onSelected: (on) => onSelected(on ? option : '全部'),
+            ),
+            const SizedBox(width: 6),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFduropProjectFooter(ThemeData theme, ColorScheme colorScheme) {
+    final muted = theme.textTheme.bodyMedium?.copyWith(
+      color: colorScheme.outline,
+    );
+    final Widget child;
+    if (_fduropLoading) {
+      child = const SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    } else if (_fduropPageError != null) {
+      child = Column(
+        children: [
+          Text('加载失败：$_fduropPageError', style: muted),
+          TextButton(
+            onPressed: _loadMoreFduropProjects,
+            child: const Text('重试'),
+          ),
+        ],
+      );
+    } else if (_fduropProjects.isEmpty) {
+      child = Text('暂无匹配的开放科研课题', style: muted);
+    } else if (_fduropHasMore) {
+      child = TextButton(
+        onPressed: _loadMoreFduropProjects,
+        child: const Text('加载更多'),
+      );
+    } else {
+      child = Text(
+        '已显示全部 ${_fduropProjects.length} 项',
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: colorScheme.outline,
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(child: child),
     );
   }
 
@@ -991,13 +1251,26 @@ class _ResearchPageState extends State<ResearchPage>
     ThemeData theme,
     ColorScheme colorScheme,
   ) {
+    final bookmarked = _service.isFduropProjectBookmarked(proj.id);
+    // Live rows derive `program` from their labels; show it only when it adds something.
+    final showProgram =
+        proj.program.isNotEmpty &&
+        !proj.topicLabels.contains(proj.program) &&
+        proj.program != proj.topicLabels.join(' / ') &&
+        proj.program != proj.subjectKinds.join(' / ');
+    final tags = {
+      if (showProgram) proj.program,
+      ...proj.subjectKinds,
+      ...proj.topicLabels,
+    };
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: proj.isBookmarked
+          color: bookmarked
               ? colorScheme.primary.withAlpha(140)
               : colorScheme.outlineVariant,
         ),
@@ -1009,35 +1282,23 @@ class _ResearchPageState extends State<ResearchPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top tags row
               Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
+                  if (bookmarked) ...[
+                    Icon(Icons.bookmark, size: 14, color: colorScheme.primary),
+                    const SizedBox(width: 4),
+                  ],
+                  Expanded(
                     child: Text(
-                      proj.program,
-                      style: TextStyle(
-                        color: colorScheme.onPrimaryContainer,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
+                      proj.department,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    proj.department,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const Spacer(),
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 6,
@@ -1048,7 +1309,9 @@ class _ResearchPageState extends State<ResearchPage>
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      '名额 ${proj.quota} 人 · ${proj.status}',
+                      proj.quota > 0
+                          ? '名额 ${proj.quota} 人 · ${proj.status}'
+                          : proj.status,
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
@@ -1059,8 +1322,6 @@ class _ResearchPageState extends State<ResearchPage>
                 ],
               ),
               const SizedBox(height: 8),
-
-              // Title
               Text(
                 proj.title,
                 style: theme.textTheme.titleMedium?.copyWith(
@@ -1069,8 +1330,6 @@ class _ResearchPageState extends State<ResearchPage>
                 ),
               ),
               const SizedBox(height: 6),
-
-              // Mentor & Grade
               Row(
                 children: [
                   Icon(
@@ -1079,40 +1338,78 @@ class _ResearchPageState extends State<ResearchPage>
                     color: colorScheme.primary,
                   ),
                   const SizedBox(width: 4),
-                  Text(
-                    '${proj.advisor} (${proj.advisorTitle})',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.primary,
+                  Expanded(
+                    child: Text(
+                      '${proj.advisor} (${proj.advisorTitle})',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.primary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Icon(
-                    Icons.event_outlined,
-                    size: 14,
-                    color: colorScheme.outline,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '截止 ${proj.deadline}',
-                    style: theme.textTheme.labelSmall?.copyWith(
+                  if (proj.deadline.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.event_outlined,
+                      size: 14,
                       color: colorScheme.outline,
                     ),
-                  ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '截止 ${proj.deadline}',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: colorScheme.outline,
+                      ),
+                    ),
+                  ],
                 ],
               ),
-              const SizedBox(height: 6),
-
-              // Description preview
-              Text(
-                proj.description,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                  height: 1.35,
+              if (proj.description.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  proj.description,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    height: 1.35,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+              ],
+              if (tags.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    for (final tag in tags)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: proj.subjectKinds.contains(tag)
+                              ? colorScheme.tertiaryContainer.withAlpha(120)
+                              : colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          tag,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            color: proj.subjectKinds.contains(tag)
+                                ? colorScheme.onTertiaryContainer
+                                : colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
@@ -1219,29 +1516,81 @@ class _ResearchPageState extends State<ResearchPage>
     );
   }
 
-  // --- Sub-view 2: 相关文件下载 (Document Downloads) ---
+  // --- Sub-view 2: 相关文件下载 (official forms on jwc.fudan.edu.cn) ---
   Widget _buildFduropDocumentsSection(
     ThemeData theme,
     ColorScheme colorScheme,
   ) {
+    final docs = _fduropDocuments;
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: colorScheme.onSurfaceVariant,
+    );
+    final source = Text(
+      '来源：教务处 · 常用文档 · 复芏计划（FDUROP）相关表格（需登录校园账号）',
+      style: muted,
+    );
+    if (docs == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          source,
+          const SizedBox(height: 32),
+          if (_fduropDocsLoading)
+            const Center(child: CircularProgressIndicator())
+          else ...[
+            Text(
+              _fduropDocsError ?? '尚未加载文件列表',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.outline,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              children: [
+                FilledButton.tonal(
+                  onPressed: () => _loadFduropDocuments(refresh: true),
+                  child: const Text('重试'),
+                ),
+                OutlinedButton(
+                  onPressed: _openFduropDocumentPage,
+                  child: const Text('打开原网页'),
+                ),
+              ],
+            ),
+          ],
+        ],
+      );
+    }
+    final categories = [
+      '全部',
+      for (final c in FduropDocumentItem.categories)
+        if (docs.any((d) => d.category == c)) c,
+    ];
+    final shown = [
+      for (final d in docs)
+        if (_selectedFduropDocCategory == '全部' ||
+            d.category == _selectedFduropDocCategory)
+          d,
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Category chips
+        source,
+        const SizedBox(height: 10),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
             children: [
-              for (final cat in _service.availableFduropDocCategories) ...[
+              for (final cat in categories) ...[
                 FilterChip(
                   label: Text(cat),
                   selected: _selectedFduropDocCategory == cat,
-                  onSelected: (selected) {
-                    setState(() {
-                      _selectedFduropDocCategory = selected ? cat : '全部';
-                    });
-                    _loadData();
-                  },
+                  onSelected: (selected) => setState(
+                    () => _selectedFduropDocCategory = selected ? cat : '全部',
+                  ),
                 ),
                 const SizedBox(width: 8),
               ],
@@ -1249,8 +1598,7 @@ class _ResearchPageState extends State<ResearchPage>
           ),
         ),
         const SizedBox(height: 12),
-
-        if (_fduropDocuments.isEmpty)
+        if (shown.isEmpty)
           Center(
             child: Padding(
               padding: const EdgeInsets.only(top: 36),
@@ -1263,71 +1611,88 @@ class _ResearchPageState extends State<ResearchPage>
             ),
           )
         else
-          for (final doc in _fduropDocuments)
-            Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: colorScheme.outlineVariant),
-              ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: doc.fileFormat == 'PDF'
-                      ? colorScheme.errorContainer
-                      : colorScheme.primaryContainer,
-                  child: Icon(
-                    doc.fileFormat == 'PDF'
-                        ? Icons.picture_as_pdf
-                        : Icons.description,
-                    color: doc.fileFormat == 'PDF'
-                        ? colorScheme.error
-                        : colorScheme.primary,
-                    size: 20,
-                  ),
-                ),
-                title: Text(
-                  doc.title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    '${doc.category} · ${doc.fileSize} · 更新于 ${doc.updateDate}',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                trailing: IconButton(
-                  tooltip: doc.isDownloaded ? '已下载' : '下载文件',
-                  icon: Icon(
-                    doc.isDownloaded
-                        ? Icons.check_circle
-                        : Icons.download_rounded,
-                    color: doc.isDownloaded
-                        ? colorScheme.primary
-                        : colorScheme.onSurfaceVariant,
-                  ),
-                  onPressed: () async {
-                    await _service.downloadFduropDocument(doc.id);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            '已成功下载：${doc.title}（保存在 Download/旦生/FDUROP/）',
-                          ),
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                  },
-                ),
-              ),
-            ),
+          for (final doc in shown)
+            _buildFduropDocumentTile(doc, theme, colorScheme),
       ],
     );
+  }
+
+  Widget _buildFduropDocumentTile(
+    FduropDocumentItem doc,
+    ThemeData theme,
+    ColorScheme colorScheme,
+  ) {
+    final busy = _fduropDocBusy.contains(doc.id);
+    final cached = _service.isFduropDocumentDownloaded(doc.id);
+    final (icon, tint) = switch (doc.fileFormat) {
+      'PDF' => (Icons.picture_as_pdf, colorScheme.error),
+      'XLS' || 'XLSX' => (Icons.table_chart_outlined, colorScheme.tertiary),
+      'PPT' || 'PPTX' => (Icons.slideshow_outlined, colorScheme.secondary),
+      _ => (Icons.description_outlined, colorScheme.primary),
+    };
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: colorScheme.outlineVariant),
+      ),
+      child: ListTile(
+        onTap: busy ? null : () => _runFduropDocument(doc, save: false),
+        leading: Icon(icon, color: tint),
+        title: Text(
+          doc.title,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          [
+            doc.category,
+            if (doc.fileFormat.isNotEmpty) doc.fileFormat,
+            if (cached) '已下载',
+          ].join(' · '),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        trailing: busy
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: cached ? '打开文件' : '下载并打开',
+                    icon: Icon(
+                      cached ? Icons.open_in_new : Icons.download_rounded,
+                    ),
+                    onPressed: () => _runFduropDocument(doc, save: false),
+                  ),
+                  IconButton(
+                    tooltip: '保存到手机',
+                    icon: const Icon(Icons.save_alt),
+                    onPressed: () => _runFduropDocument(doc, save: true),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Future<void> _openFduropDocumentPage() async {
+    try {
+      await CampusApi.forAccount(widget.controller).call('campus.openNotice', {
+        'url': ResearchService.fduropDocumentPages.first,
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(campusError(e))));
+      }
+    }
   }
 
   // -------------------------------------------------------------
@@ -1335,7 +1700,7 @@ class _ResearchPageState extends State<ResearchPage>
   // -------------------------------------------------------------
   Widget _buildLecturesTab(ThemeData theme, ColorScheme colorScheme) {
     return RefreshIndicator(
-      onRefresh: _loadData,
+      onRefresh: _loadLocal,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
@@ -1350,7 +1715,7 @@ class _ResearchPageState extends State<ResearchPage>
                       icon: const Icon(Icons.clear, size: 18),
                       onPressed: () {
                         _lectureSearchCtrl.clear();
-                        _loadData();
+                        _loadLocal();
                       },
                     )
                   : null,
@@ -1362,7 +1727,7 @@ class _ResearchPageState extends State<ResearchPage>
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            onChanged: (_) => _loadData(),
+            onChanged: (_) => _loadLocal(),
           ),
           const SizedBox(height: 10),
 
@@ -1382,7 +1747,7 @@ class _ResearchPageState extends State<ResearchPage>
                   selected: _lectureBookmarkedOnly,
                   onSelected: (val) {
                     setState(() => _lectureBookmarkedOnly = val);
-                    _loadData();
+                    _loadLocal();
                   },
                 ),
                 const SizedBox(width: 8),
@@ -1394,7 +1759,7 @@ class _ResearchPageState extends State<ResearchPage>
                       setState(() {
                         _selectedLectureCategory = selected ? cat : '全部';
                       });
-                      _loadData();
+                      _loadLocal();
                     },
                   ),
                   const SizedBox(width: 8),
