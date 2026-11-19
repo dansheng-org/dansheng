@@ -32,7 +32,7 @@ internal class CampusServices(
         "canvas.quizzes.sync","canvas.quiz.read","canvas.discussions.sync","canvas.discussion.read","canvas.discussion.view",
         "canvas.assignment_groups.sync","canvas.submission.self","canvas.grades.self","fudan.catalog.syllabus",
         "fudan.cloud.roots","fudan.cloud.list","fudan.notice.attachments","webdav.servers","webdav.list",
-        "fudan.fdurop.topics","fudan.fdurop.topic.detail",
+        "fudan.fdurop.topics","fudan.fdurop.topic.detail","fudan.fdurop.labels","fudan.fdurop.subjects",
         "community.tea.divisions","community.tea.holes","community.tea.hole","community.tea.floors","community.tea.favorites","community.danke.search","community.danke.group","community.danke.reviews","community.danke.random",
     )
     /** Drive writes: run exactly once after a UI action, never cached or retried. */
@@ -256,6 +256,9 @@ internal class CampusServices(
                 method.startsWith("community.") -> "forum"
                 method.startsWith("fudan.ecard.") -> "ecard"
                 method.startsWith("fudan.fdurop.") -> "fdurop"
+                // Sign-in-only AAO notices (the FDUROP forms) and their files; GS has no such login.
+                method in setOf("fudan.notice.attachments","fudan.notice.attachment.download") &&
+                    android.net.Uri.parse(p.optString("url")).host=="jwc.fudan.edu.cn" -> "notices"
                 method=="fudan.electricity" -> "power"
                 method=="fudan.dining.occupancy" || method=="fudan.electricity.history" || method=="fudan.electricity.statistics" -> "dining"
                 method=="fudan.bus" -> "bus"

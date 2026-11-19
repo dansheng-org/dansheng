@@ -704,6 +704,8 @@ impl CoreService for CampusService {
             ("fudan.fdurop.subjects", "fudan.academic.read"),
             #[cfg(feature = "login")]
             ("fudan.fdurop.login", "fudan.academic.login"),
+            #[cfg(feature = "login")]
+            ("fudan.notices.login", "fudan.academic.login"),
             ("fudan.timetable.sync", "fudan.academic.read"),
             ("fudan.postgraduate.sync", "fudan.academic.read"),
             ("fudan.student_association", "fudan.academic.read"),
@@ -1143,6 +1145,7 @@ impl CoreService for CampusService {
                 | "fudan.academic.login"
                 | "fudan.life.login"
                 | "fudan.fdurop.login"
+                | "fudan.notices.login"
         ) {
             // A local trusted host can establish a card session. This is never a
             // plugin action or a scheduled job, and no credentials leave the service.
@@ -1173,6 +1176,8 @@ impl CoreService for CampusService {
                     Some("postgraduate") => crate::login::LoginTarget::Postgraduate,
                     _ => return Err(CoreError::invalid("unknown academic service")),
                 }
+            } else if method == "fudan.notices.login" {
+                crate::login::LoginTarget::Notices
             } else if method == "fudan.fdurop.login" {
                 crate::login::LoginTarget::Fdurop
             } else {
@@ -2190,7 +2195,7 @@ impl CoreService for CampusService {
                     let fdurop_client = crate::fdurop::FduropClient::new(&transport, account);
                     let query = crate::fdurop::FduropSearchQuery {
                         page: params["page"].as_u64().unwrap_or(1) as u32,
-                        page_size: params["page_size"].as_u64().unwrap_or(50) as u32,
+                        page_size: params["page_size"].as_u64().unwrap_or(20).min(200) as u32,
                         title: params["title"].as_str().map(str::to_string),
                         code_or_name: params["code_or_name"].as_str().map(str::to_string),
                         keyword: params["keyword"]
@@ -2265,6 +2270,11 @@ impl CoreService for CampusService {
                 }
                 _ => return Err(CoreError::new("MethodNotFound", "unknown campus query")),
             };
+            // Attachment lists and FDUROP pages are transient views without
+            // record ids; they are returned to the caller, not committed.
+            if method == "fudan.notice.attachments" || method.starts_with("fudan.fdurop.") {
+                return Ok(value);
+            }
             publish_value(context.store, owner, &source, method, &value)?;
             return Ok(value);
         }

@@ -37,6 +37,7 @@ pub const FUDAN_ORIGINS: &[&str] = &[
     "https://news.fudan.edu.cn",
     "https://opac.fudan.edu.cn",
     "https://paper.fudan.edu.cn",
+    "https://xxb.fudan.edu.cn",
     "https://yzsfwapp.fudan.edu.cn",
     "http://10.64.130.6",
 ];
@@ -70,6 +71,7 @@ pub const DEFAULT_ORIGINS: &[&str] = &[
     "https://news.fudan.edu.cn",
     "https://opac.fudan.edu.cn",
     "https://paper.fudan.edu.cn",
+    "https://xxb.fudan.edu.cn",
     "https://yzsfwapp.fudan.edu.cn",
     "http://10.64.130.6",
     "https://www.fduhole.com",
@@ -339,6 +341,7 @@ mod tests {
             // Only negative cases in login tests.
             "https://fudan.edu.cn",
             "http://fdjwgl.fudan.edu.cn",
+            "http://xxb.fudan.edu.cn",
         ];
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut missing = std::collections::BTreeSet::new();
