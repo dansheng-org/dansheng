@@ -6,7 +6,7 @@ Android 在 Agent 栏提供流式聊天。打开「模型设置」，选择 Open
 
 在输入框内点「+」添加本地附件、打开信息源或管理授权。用「课程文件」读取 eLearning 资料，包括作业说明中的文件链接。用「复旦云盘」按目录和文件名查找，再读取匹配的文件。支持 PDF、PNG、JPEG、WebP 和 UTF-8 文本（含 Markdown、CSV、JSON）。模型需要支持工具调用。
 
-Core 先验证课程文件的访问范围或云盘目录权限，再使用同一套受管文件机制缓存下载，缓存按账号、会话和文件版本区分。可在模型设置里清理当前账号的两类本地缓存。校园 PDF 最大 8 MiB，优先在本机提取最多 24 KiB 的文本，提取结果不写入全文索引。无法提取时会把 PDF 原件交给支持 PDF 的模型。每轮最多发送 3 个附件，总计 2 MiB，含校园 PDF 原件时总计 8 MiB。单个文本附件最多 24 KiB。
+Core 先验证课程文件的访问范围或云盘目录权限，再使用同一套受管文件机制缓存下载，缓存按账号、会话和文件版本区分。可在模型设置里清理当前账号的两类本地缓存。校园 PDF 和 UTF-8 文本的单个文件下载上限为 200 MiB，长文本返回最多 24 KiB 的节选。大 PDF 默认从第一页开始，可在对话中指定页码。每次返回该页的文本或缩小后的页面图片，并标明页码及总页数。8 MiB 以内的校园 PDF 仍优先在本机提取文本，提取不了时也可以把原件交给支持 PDF 的模型。每轮最多发送 3 个附件，总计 2 MiB，含校园 PDF 原件时总计 8 MiB。
 
 打开「搜索网页」后，可以通过当前模型服务联网搜索。使用 OpenAI Responses、Anthropic Messages 或 DeepSeek 官方搜索接口所支持的协议。也可以配置 Brave Search 密钥，改用 Brave Search。聊天会列出实际检索到的网页标题和链接。[OpenAI 网页搜索](https://developers.openai.com/api/docs/guides/tools-web-search)、[Claude 网页搜索](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool)、[DeepSeek 网页搜索](https://api-docs.deepseek.com/zh-cn/api/search/)、[Brave Search API](https://api-dashboard.search.brave.com/app/documentation/web-search)
 

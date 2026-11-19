@@ -3466,6 +3466,7 @@ async fn download_cached_campus_file(
             "name": file.name,
             "mime_type": file.mime,
             "max_bytes": file.size.unwrap_or(file.max_bytes).max(1),
+            "timeout_ms": 300_000,
         }),
     );
     let downloaded = if let Some(origin) = private_origin {

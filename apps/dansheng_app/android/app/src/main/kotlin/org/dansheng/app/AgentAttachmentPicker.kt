@@ -17,6 +17,8 @@ import kotlinx.coroutines.withContext
 import org.dansheng.android.PortError
 import org.json.JSONObject
 
+internal const val PDF_SIGNATURE = "%PDF-"
+
 internal object AgentAttachmentPicker {
     const val MAX_BINARY_BYTES = 2 * 1024 * 1024
     const val MAX_TEXT_BYTES = 24 * 1024
@@ -125,7 +127,7 @@ internal object AgentAttachmentPicker {
     }
 
     private fun hasExpectedContent(kind: Kind, bytes: ByteArray): Boolean = when (kind) {
-        Kind.PDF -> bytes.matchesAt(0, "%PDF-".toByteArray(Charsets.US_ASCII))
+        Kind.PDF -> bytes.matchesAt(0, PDF_SIGNATURE.toByteArray(Charsets.US_ASCII))
         Kind.PNG -> bytes.matchesAt(0, byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 13, 10, 26, 10))
         Kind.JPEG -> bytes.matchesAt(0, byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte()))
         Kind.WEBP -> bytes.matchesAt(0, "RIFF".toByteArray(Charsets.US_ASCII)) &&

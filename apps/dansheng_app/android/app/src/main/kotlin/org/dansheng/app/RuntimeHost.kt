@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 class RuntimeHost(private val context: Context, browserIsolated:Boolean=true, pageFactory:(GrantGate)->VisiblePage = ::VisiblePage) : AutoCloseable {
+    internal val coreDataDir = File(context.filesDir, "core")
     internal val prefs = context.getSharedPreferences("dansheng-app-state-v1", Context.MODE_PRIVATE)
     @Volatile private var activeAccount: String? = prefs.getString("active_account", null)
 
@@ -114,9 +115,9 @@ class RuntimeHost(private val context: Context, browserIsolated:Boolean=true, pa
                     reply(Result.failure(PortError("NativeLibraryUnavailable")))
                     return
                 }
-                val coreDir = File(context.filesDir, "core").apply { mkdirs() }
+                coreDataDir.mkdirs()
                 val options = JSONObject()
-                    .put("data_dir", coreDir.absolutePath)
+                    .put("data_dir", coreDataDir.absolutePath)
                     .put("platform_capabilities", JSONArray(compositeDispatcher.capabilities.toList()))
                 val op = NativeCore.open(options.toString().toByteArray(Charsets.UTF_8))
                 val deadline = System.currentTimeMillis() + 15_000L
@@ -228,8 +229,13 @@ class RuntimeHost(private val context: Context, browserIsolated:Boolean=true, pa
         val op = NativeCore.request(engine, requestBytes)
         // Visible SSO may take up to 50 s and the native card connector has a
         // 45 s exchange deadline. Do not abandon either operation at 30 s.
-        val bulkRead=method in setOf("fudan.ecard.statement","fudan.ecard.statistics","fudan.electricity.statistics")
-        val deadline = System.currentTimeMillis() + if(bulkRead)180_000L else 58_000L
+        val timeoutMs = when (method) {
+            // Core allows the campus download stream up to 300 seconds.
+            "canvas.material.download", "fudan.cloud.download" -> 330_000L
+            "fudan.ecard.statement", "fudan.ecard.statistics", "fudan.electricity.statistics" -> 180_000L
+            else -> 58_000L
+        }
+        val deadline = System.currentTimeMillis() + timeoutMs
         var responseBytes: ByteArray? = null
         try { while (System.currentTimeMillis() < deadline) {
             responseBytes = NativeCore.poll(op)

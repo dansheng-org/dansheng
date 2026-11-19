@@ -2,14 +2,18 @@
 
 package org.dansheng.app
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.dansheng.android.PortError
 import org.json.JSONObject
 import java.util.Base64
 
 /** Adapts account-owned Core assets to the same validated input as a local attachment. */
-internal class AgentRemoteFiles {
+internal class AgentRemoteFiles(
+    private val previewPdf: (id: String, size: Long, page: Int, checkAccount: () -> Unit) -> AgentPdfPreview.Page,
+) {
     private enum class Source(val method: String, val id: String, val owner: String) {
         CANVAS("canvas.material.download", "official.canvas.materials", "service:canvas"),
         CLOUD("fudan.cloud.download", "official.fudan.cloud.files", "service:fudan-cloud"),
@@ -29,7 +33,8 @@ internal class AgentRemoteFiles {
             "cloud" -> Source.CLOUD
             else -> throw PortError("InvalidInput")
         }
-        val request = JSONObject().put("account_id", account).put("max_bytes", MAX_DOCUMENT_BYTES)
+        val page = requestedPage(params)
+        val request = JSONObject().put("account_id", account).put("max_bytes", MAX_DOWNLOAD_BYTES)
         when (source) {
             Source.CANVAS -> {
                 request.put("course_id", canvasId(params, "course_id"))
@@ -51,46 +56,76 @@ internal class AgentRemoteFiles {
         if (asset.optString("state") != "ready") throw PortError("FileUnavailable")
         val size = asset.optLong("size", -1)
         if (size <= 0) throw PortError("AttachmentInvalidContent")
-        if (size > MAX_DOCUMENT_BYTES) throw PortError("AttachmentTooLarge")
+        if (size > MAX_DOWNLOAD_BYTES) throw PortError("AttachmentTooLarge")
 
         val name = asset.optString("name")
         val kind = AgentAttachmentPicker.resolveKind(asset.optString("mime_type"), name)
         val assetParams = JSONObject().put("account_id", account).put("asset_id", id)
+        if (page != null && kind != AgentAttachmentPicker.Kind.PDF) throw PortError("InvalidInput")
         if (kind == AgentAttachmentPicker.Kind.PDF) {
-            val extracted = extractPdfText(assetParams, name, id, core)
-            checkAccount()
-            if (extracted != null) return@scoped extracted
+            if (page != null || size > MAX_INLINE_PDF_BYTES) {
+                val pageNumber = page ?: 1
+                val prefix = readChunk(
+                    assetParams, id, size, 0, minOf(size.toInt(), PDF_SIGNATURE.length), checkAccount, core,
+                )
+                if (prefix.toString(Charsets.US_ASCII) != PDF_SIGNATURE) {
+                    throw PortError("AttachmentInvalidContent")
+                }
+                val preview = withContext(Dispatchers.IO) {
+                    checkAccount()
+                    previewPdf(id, size, pageNumber, checkAccount)
+                }
+                checkAccount()
+                val extracted = preview.kind.isText
+                return@scoped AgentAttachmentPicker.payload(name, preview.kind, preview.bytes)
+                    .put("page", pageNumber).put("page_count", preview.pageCount)
+                    .put("preview", if (extracted) "page_text" else "page_image")
+                    .put("extracted", extracted).put("truncated", preview.truncated || preview.pageCount > 1)
+            }
+            readText(assetParams, name, id, checkAccount, core, allowPdfFallback = true)?.let {
+                return@scoped it
+            }
+        }
+        if (kind.isText && size > AgentAttachmentPicker.MAX_TEXT_BYTES) {
+            return@scoped readText(assetParams, name, id, checkAccount, core, allowPdfFallback = false)
+                ?: throw PortError("AttachmentInvalidContent")
         }
         val limit = when {
-            kind == AgentAttachmentPicker.Kind.PDF -> MAX_DOCUMENT_BYTES
+            kind == AgentAttachmentPicker.Kind.PDF -> MAX_INLINE_PDF_BYTES
             kind.isText -> AgentAttachmentPicker.MAX_TEXT_BYTES
             else -> AgentAttachmentPicker.MAX_BINARY_BYTES
         }
-        if (size > limit) throw PortError(if (kind.isText) "AttachmentTextTooLarge" else "AttachmentTooLarge")
+        if (size > limit) throw PortError("AttachmentTooLarge")
         val bytes = readBytes(assetParams, id, size.toInt(), checkAccount, core)
-        AgentAttachmentPicker.payload(name, kind, bytes, pdfLimit = MAX_DOCUMENT_BYTES)
+        AgentAttachmentPicker.payload(name, kind, bytes, pdfLimit = MAX_INLINE_PDF_BYTES)
     }
 
-    private fun extractPdfText(
+    private fun readText(
         params: JSONObject,
         name: String,
         id: String,
+        checkAccount: () -> Unit,
         core: (String, JSONObject) -> Any?,
+        allowPdfFallback: Boolean,
     ): JSONObject? {
+        checkAccount()
         val result = try {
             core("files.text", params) as? JSONObject ?: throw PortError("SourceSchemaChanged")
         } catch (error: PortError) {
             // A small scanned, encrypted, or complex PDF can still be passed
             // to a model that supports the file format directly.
-            if (error.code in TEXT_FALLBACK_ERRORS) return null
+            if (allowPdfFallback && error.code in TEXT_FALLBACK_ERRORS) return null
             throw error
         }
+        checkAccount()
         if (result.optString("asset_id") != id) throw PortError("FileUnavailable")
-        val text = (result.opt("text") as? String ?: throw PortError("SourceSchemaChanged"))
-            .filterNot { it.isISOControl() && it != '\t' && it != '\n' && it != '\r' }
-        if (text.isBlank()) return null
-        return AgentAttachmentPicker.payload(name, AgentAttachmentPicker.Kind.TEXT, text.toByteArray())
-            .put("extracted", true).put("truncated", result.optBoolean("truncated"))
+        val text = result.opt("text") as? String ?: throw PortError("SourceSchemaChanged")
+        val (bytes, truncated) = boundedAgentText(sequenceOf(text))
+        if (bytes.isEmpty() || (allowPdfFallback && bytes.toString(Charsets.UTF_8).isBlank())) return null
+        val payload = AgentAttachmentPicker.payload(name, AgentAttachmentPicker.Kind.TEXT, bytes)
+            .put("extracted", allowPdfFallback).put("truncated", truncated || result.optBoolean("truncated"))
+        if (!allowPdfFallback) payload.put("preview", "text_excerpt")
+        return payload
     }
 
     private fun readBytes(
@@ -103,32 +138,45 @@ internal class AgentRemoteFiles {
         val bytes = ByteArray(size)
         var offset = 0
         while (offset < size) {
-            checkAccount()
             val length = minOf(CHUNK_BYTES, size - offset)
-            val chunk = core(
-                "files.read",
-                assetParams.put("offset", offset).put("length", length),
-            ) as? JSONObject ?: throw PortError("FileUnavailable")
-            checkAccount()
-            val data = chunk.opt("data") as? String ?: throw PortError("FileUnavailable")
-            if (data.length != (length + 2) / 3 * 4 ||
-                chunk.optString("asset_id") != id ||
-                chunk.optString("encoding") != "base64" ||
-                chunk.optLong("offset", -1) != offset.toLong() ||
-                chunk.optLong("length", -1) != length.toLong() ||
-                chunk.optLong("next_offset", -1) != (offset + length).toLong() ||
-                chunk.opt("eof") != (offset + length == size)
-            ) throw PortError("FileUnavailable")
-            val decoded = try {
-                Base64.getDecoder().decode(data)
-            } catch (_: IllegalArgumentException) {
-                throw PortError("FileUnavailable")
-            }
-            if (decoded.size != length) throw PortError("FileUnavailable")
-            decoded.copyInto(bytes, offset)
+            readChunk(assetParams, id, size.toLong(), offset, length, checkAccount, core).copyInto(bytes, offset)
             offset += length
         }
         return bytes
+    }
+
+    private fun readChunk(
+        assetParams: JSONObject,
+        id: String,
+        size: Long,
+        offset: Int,
+        length: Int,
+        checkAccount: () -> Unit,
+        core: (String, JSONObject) -> Any?,
+    ): ByteArray {
+        checkAccount()
+        val chunk = core(
+            "files.read",
+            assetParams.put("offset", offset).put("length", length),
+        ) as? JSONObject ?: throw PortError("FileUnavailable")
+        checkAccount()
+        val data = chunk.opt("data") as? String ?: throw PortError("FileUnavailable")
+        val nextOffset = offset.toLong() + length
+        if (data.length != (length + 2) / 3 * 4 ||
+            chunk.optString("asset_id") != id ||
+            chunk.optString("encoding") != "base64" ||
+            chunk.optLong("offset", -1) != offset.toLong() ||
+            chunk.optLong("length", -1) != length.toLong() ||
+            chunk.optLong("next_offset", -1) != nextOffset ||
+            chunk.opt("eof") != (nextOffset == size)
+        ) throw PortError("FileUnavailable")
+        val decoded = try {
+            Base64.getDecoder().decode(data)
+        } catch (_: IllegalArgumentException) {
+            throw PortError("FileUnavailable")
+        }
+        if (decoded.size != length) throw PortError("FileUnavailable")
+        return decoded
     }
 
     suspend fun clear(
@@ -185,6 +233,17 @@ internal class AgentRemoteFiles {
     private fun canvasId(params: JSONObject, field: String): String =
         (params.opt(field) as? String)?.takeIf(CANVAS_ID::matches) ?: throw PortError("InvalidInput")
 
+    private fun requestedPage(params: JSONObject): Int? {
+        if (!params.has("page")) return null
+        val value = when (val raw = params.opt("page")) {
+            is Int -> raw.toLong()
+            is Long -> raw
+            else -> throw PortError("InvalidInput")
+        }
+        if (value !in 1L..Int.MAX_VALUE.toLong()) throw PortError("InvalidInput")
+        return value.toInt()
+    }
+
     private fun assetId(asset: JSONObject, account: String, source: Source): String {
         val id = asset.optString("asset_id")
         if (asset.optString("account_id") != account || asset.optString("source_id") != source.id ||
@@ -194,7 +253,8 @@ internal class AgentRemoteFiles {
     }
 
     private companion object {
-        const val MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
+        const val MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
+        const val MAX_INLINE_PDF_BYTES = 8 * 1024 * 1024
         const val CHUNK_BYTES = 128 * 1024
         const val CACHE_PAGE_SIZE = 128
         const val MAX_CACHE_PAGES = 64

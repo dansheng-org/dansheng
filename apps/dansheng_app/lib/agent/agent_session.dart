@@ -14,17 +14,19 @@ class AgentTool {
     required this.source,
     required this.label,
     required this.read,
+    this.timeout,
   });
 
   final AgentToolSpec spec;
   final AgentSourceKind source;
   final String label;
   final Future<Json> Function(Json arguments) read;
+  final Duration? timeout;
 
   bool accepts(Json? arguments) {
     if (arguments == null) return false;
     final properties = spec.inputSchema['properties'] as Json;
-    final required = spec.inputSchema['required'] as List;
+    final required = spec.inputSchema['required'] as List? ?? const [];
     if (required.any((key) => !arguments.containsKey(key))) return false;
     return arguments.entries.every((entry) {
       final field = properties[entry.key];
@@ -32,6 +34,11 @@ class AgentTool {
       final value = entry.value;
       return switch (field['type']) {
         'boolean' => value is bool,
+        'integer' =>
+          value is int &&
+              (field['minimum'] == null ||
+                  value >= (field['minimum'] as int)) &&
+              (field['maximum'] == null || value <= (field['maximum'] as int)),
         'string' =>
           value is String &&
               value.trim().isNotEmpty &&
@@ -223,9 +230,12 @@ class AgentSession {
                     result = await tool
                         .read(args)
                         .timeout(
-                          Duration(
-                            seconds: tool.source.isRemoteFileSource ? 80 : 35,
-                          ),
+                          tool.timeout ??
+                              Duration(
+                                seconds: tool.source.isRemoteFileSource
+                                    ? 80
+                                    : 35,
+                              ),
                         );
                   } on TimeoutException {
                     result = {'error': '${tool.source.label}查询超时。'};

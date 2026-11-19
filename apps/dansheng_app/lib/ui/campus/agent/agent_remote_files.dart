@@ -14,6 +14,8 @@ const _cloudSource = AgentSourceKind.cloudFiles;
 const _maxCloudPathLength = 4096;
 const _pathField = {'type': 'string', 'maxLength': _maxCloudPathLength};
 const agentFileQueryField = {'type': 'string', 'maxLength': 120};
+const agentFilePageField = {'type': 'integer', 'minimum': 1, 'maximum': 100000};
+const agentFileReadTimeout = Duration(minutes: 6);
 const _maxCloudRecords = 20;
 const _maxCloudRecordChars = 10000;
 const _maxCloudFolders = 8;
@@ -70,19 +72,21 @@ Iterable<AgentTool> cloudFileAgentTools(CampusApi api) => [
     spec: const AgentToolSpec(
       'campus_cloud_read',
       '读取一个复旦云盘文件。原样传入目录列表或搜索结果返回的文件 path。'
-          '支持 PDF、PNG、JPEG、WebP 和 UTF-8 文本，PDF 可能以提取的文本返回。',
+          'PDF 和 UTF-8 文本最大 200 MiB。可用 page 指定 PDF 页码，大 PDF 按页返回，长文本返回节选。支持小尺寸 PNG、JPEG 和 WebP。',
       {
         'type': 'object',
-        'properties': {'path': _pathField},
+        'properties': {'path': _pathField, 'page': agentFilePageField},
         'required': ['path'],
         'additionalProperties': false,
       },
     ),
     source: _cloudSource,
     label: '读取复旦云盘文件',
+    timeout: agentFileReadTimeout,
     read: (args) => readAgentRemoteFile(api, _cloudSource.label, {
       'source': 'cloud',
       'path': _cloudPath(args),
+      'page': ?args['page'],
     }),
   ),
 ];
@@ -261,9 +265,8 @@ String? agentFileMimeType(String? reported, Iterable<String> names) {
 bool agentFileSizeSupported(String mime, int? size) {
   if (size == null || size < 0) return true;
   final limit = switch (mime) {
-    _pdfMime => agentMaxCampusPdfBytes,
-    _ when agentTextAttachmentTypes.contains(mime) =>
-      agentMaxTextAttachmentBytes,
+    _pdfMime => agentMaxCampusFileBytes,
+    _ when agentTextAttachmentTypes.contains(mime) => agentMaxCampusFileBytes,
     _ => agentMaxAttachmentBytes,
   };
   return size > 0 && size <= limit;
@@ -297,6 +300,16 @@ Future<Json> readAgentRemoteFile(
         'name': file.name,
         'mime_type': file.mimeType,
         'size': file.byteLength,
+        if (result['page'] case final int page when page > 0) 'page': page,
+        if (result['page_count'] case final int count when count > 0)
+          'page_count': count,
+        if (result['preview'] case final String kind
+            when const {
+              'page_text',
+              'page_image',
+              'text_excerpt',
+            }.contains(kind))
+          'preview': kind,
         if (result['extracted'] case final bool value) 'extracted': value,
         if (result['truncated'] case final bool value) 'truncated': value,
         'attachment': file,
@@ -320,7 +333,9 @@ Future<Object?> callAgentFileApi(
     return await api.call(method, params);
   } on PlatformException catch (error) {
     throw AgentFailure(switch (error.code) {
-      'AssetTooLarge' || 'ResponseTooLarge' => '文件超过 8 MiB 下载上限。',
+      'AssetTooLarge' || 'ResponseTooLarge' => '文件超过 200 MiB 下载上限。',
+      'InvalidPage' => '指定的页码超出 PDF 范围。',
+      'PdfPreviewUnavailable' => '无法读取此 PDF 的指定页。请尝试其他页或在校园文件查看器中打开。',
       'AttachmentTooLarge' => '原始附件不能超过 2 MiB。',
       'AttachmentTextTooLarge' => '文本附件不能超过 24 KiB。',
       'AttachmentUnsupportedType' => '请使用 PDF、PNG、JPEG、WebP 或 UTF-8 文本文件。',

@@ -96,7 +96,7 @@ filesystem path, caller principal, or arbitrary destination.
 | `files.download` | Required `url`; optional `asset_id`, `resume`, `account_id`, `source_id`, `name`, `mime_type`, `sha256`, `headers`, `max_bytes`, `timeout_ms`, `method` (GET only) | Asset metadata after confirmed completion; errors leave discoverable partial metadata |
 | `files.list` | Optional `account_id`, `source_id`, `state`, `limit` (1–500; default 50), `offset` | `{items, offset, limit}`; items contain metadata only |
 | `files.read` | `asset_id`; optional `account_id`, byte `offset` (default 0), `length` (default 64 KiB, maximum 1 MiB) | `{asset_id, encoding:"base64", data, offset, length, next_offset, eof}` |
-| `files.text` | `asset_id`; optional `account_id` | `{asset_id, text, truncated}` with up to 24 KiB of UTF-8 text. Uses the same extraction and integrity checks as indexing. Reads leave the search index and file metadata untouched. |
+| `files.text` | `asset_id`; optional `account_id` | `{asset_id, text, truncated}` with up to 24 KiB of UTF-8 text. For large plain-text files, verifies the cached file incrementally and returns a bounded excerpt. Reads leave the search index and file metadata untouched. |
 | `files.delete` | `asset_id`; optional `account_id` | `{asset_id, deleted:true}` after bytes, metadata and the derived document record are removed |
 | `files.index` | `asset_id`; optional `account_id` | Document source identity, extraction byte count and index timestamp |
 | `files.export` | `asset_id`; optional `account_id` | Engine returns only `{asset_id, exported}` after its trusted platform callback; `CapabilityUnavailable` when no platform port exists or when calling asset dispatch directly |
@@ -133,7 +133,7 @@ directory belongs to the trusted host; arbitrary local filesystem writers are
 outside the plugin isolation boundary. Small `<uuid>.lock` coordination files may
 remain after deletion and contain no user data.
 
-The fixed default/hard limits are 100 MiB per file and 512 MiB across the data
+The fixed default/hard limits are 200 MiB per file and 512 MiB across the data
 directory. `max_bytes` can lower the file limit. An SQLite transaction reserves
 the whole sink limit before transfer, preventing simultaneous downloads from
 overcommitting the total quota. Retained partial bytes and completed bytes count

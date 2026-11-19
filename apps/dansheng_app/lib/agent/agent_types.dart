@@ -93,6 +93,7 @@ enum AgentSourceKind {
 const agentMaxAttachments = 3;
 const agentMaxAttachmentBytes = 2 * 1024 * 1024;
 const agentMaxCampusPdfBytes = 8 * 1024 * 1024;
+const agentMaxCampusFileBytes = 200 * 1024 * 1024;
 const agentMaxTextAttachmentBytes = 24 * 1024;
 
 const agentTextAttachmentTypes = {
@@ -288,6 +289,6 @@ const agentSystemPrompt = '''
 当工具提供链接时，用 Markdown 链接引用对应的实际帖子、课程、作业或通知。保留返回的完整链接，不要编造链接。
 阅读 Canvas 文件时，可以先用 campus_file_context 按名字找到课程或作业 ID，再查询课程资料。读取时使用同一条结果的课程 ID 和文件 ID。来自作业说明的文件同时传入作业 ID。
 查找复旦云盘文件时，根据用户要求确定目录，优先使用关键词缩小范围。读取时原样传入列表或搜索返回的文件 path。在没有收到文件内容时说明读取失败。
-文件读取结果的 extracted 表示内容是提取的文本。truncated 表示只返回了部分内容。
+文件读取结果的 extracted 表示内容是提取的文本。truncated 表示只返回了部分内容。读取大 PDF 时可指定 page，从第 1 页开始计数。结果中的 page 和 page_count 表示当前页和总页数。不要把单页或节选当作整份文件。
 不要编造帖子、课程、作业或截止日期，不要要求用户提供凭据。用户未启用需要的资料来源时，提示他们可以选择启用。
 ''';

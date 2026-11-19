@@ -89,6 +89,7 @@ void main() {
         _ => throw StateError('Unexpected lookup $method'),
       };
       final lookup = canvas['campus_file_context']!;
+      expect(lookup.accepts({'query': '物理'}), isTrue);
       final courses = await lookup.read({'query': '物理'});
       expect(courses['records'], [
         {
@@ -114,8 +115,12 @@ void main() {
       expect(method, 'canvas.materials.sync');
       return [
         {'id': 1, 'filename': 'Week-One.PNG', 'display_name': '图表'},
-        {'id': 2, 'filename': 'week-two.pdf', 'size': 8 * 1024 * 1024},
-        {'id': 3, 'filename': 'week-three.pdf', 'size': 8 * 1024 * 1024 + 1},
+        {'id': 2, 'filename': 'week-two.pdf', 'size': agentMaxCampusFileBytes},
+        {
+          'id': 3,
+          'filename': 'week-three.pdf',
+          'size': agentMaxCampusFileBytes + 1,
+        },
         {'id': 4, 'filename': 'week-four.docx'},
         {'id': 5, 'filename': 'week-five.txt', 'hidden_for_user': true},
         {'id': 6, 'filename': 'private.txt'},
@@ -134,7 +139,13 @@ void main() {
         'file_id': '2',
         'name': 'week-two.pdf',
         'mime_type': 'application/pdf',
-        'size': 8 * 1024 * 1024,
+        'size': agentMaxCampusFileBytes,
+      },
+      {
+        'file_id': '7',
+        'name': 'week-seven.csv',
+        'mime_type': 'text/csv',
+        'size': 24 * 1024 + 1,
       },
       {'file_id': '9', 'name': 'week-nine.md', 'mime_type': 'text/markdown'},
     ]);
@@ -359,7 +370,7 @@ void main() {
           isA<AgentFailure>().having(
             (e) => e.message,
             'message',
-            allOf(contains('8 MiB'), isNot(contains('fixture-private'))),
+            allOf(contains('200 MiB'), isNot(contains('fixture-private'))),
           ),
         ),
       );
@@ -372,6 +383,36 @@ void main() {
         read.read({'path': 'fixture'}),
         throwsA(isA<AgentFailure>()),
       );
+    },
+  );
+
+  test(
+    'large PDFs can be read by page without forwarding the raw file',
+    () async {
+      final read = cloud['campus_cloud_read']!;
+      expect(read.accepts({'path': 'fixture', 'page': 12}), isTrue);
+      expect(read.accepts({'path': 'fixture', 'page': 0}), isFalse);
+      expect(read.accepts({'path': 'fixture', 'page': '12'}), isFalse);
+      bridge.respond = (method, params) {
+        expect(method, 'agent.remoteFile.read');
+        expect(params, {'source': 'cloud', 'path': 'fixture', 'page': 12});
+        return {
+          'name': '课程讲义.pdf.txt',
+          'mime_type': 'text/plain',
+          'data': base64Encode(utf8.encode('这是指定页的文字。')),
+          'page': 12,
+          'page_count': 103,
+          'preview': 'page_text',
+          'truncated': true,
+        };
+      };
+      final result = await read.read({'path': 'fixture', 'page': 12});
+      expect(result['page'], 12);
+      expect(result['page_count'], 103);
+      expect(result['preview'], 'page_text');
+      expect(result['truncated'], isTrue);
+      expect((result['attachment'] as AgentAttachment).text, '这是指定页的文字。');
+      expect(result.containsKey('data'), isFalse);
     },
   );
 }

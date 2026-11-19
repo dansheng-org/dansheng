@@ -207,10 +207,10 @@ impl Harness {
 
 #[tokio::test]
 async fn text_read_is_bounded_and_does_not_index_private_files() {
-    let content = format!("a{}", "课".repeat(9000));
+    let content = format!("a{}", "课".repeat(assets::MAX_INDEX_BYTES as usize / 3 + 1));
     let server = Server::new(
         content.as_bytes().to_vec(),
-        "text/plain",
+        "application/octet-stream",
         Mode::Normal,
         true,
     )
@@ -219,7 +219,7 @@ async fn text_read_is_bounded_and_does_not_index_private_files() {
     let asset = h
         .call(
             "files.download",
-            json!({"url":format!("{}/text",server.origin)}),
+            json!({"url":format!("{}/text",server.origin),"name":"large.txt","max_bytes":200*1024*1024}),
         )
         .await
         .unwrap();
