@@ -1,0 +1,83 @@
+name: Organization release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: organization-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.repository == 'dansheng-org/dansheng' && github.event.created && !github.event.deleted
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release tag and SDK lock
+        shell: pwsh
+        run: |
+          $commit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the tagged commit.' }
+          git merge-base --is-ancestor $commit origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'A release tag must point to a commit on organization main.' }
+          . ./apps/dansheng_app/scripts/prerelease-common.ps1
+          $identity = Get-DanshengPrereleaseIdentity -AppRoot ./apps/dansheng_app -Commit $commit
+          if ($env:GITHUB_REF_NAME -cne "v$($identity.version_name)") {
+            throw 'The release tag must match the app version in pubspec.yaml.'
+          }
+          $lock = Get-Content -LiteralPath ./apps/dansheng_app/core.lock.json -Raw | ConvertFrom-Json
+          if ($lock.state -cne 'release' -or $lock.artifact.packaged_receipt_complete -ne $true) {
+            throw 'A formal release requires a stable Core SDK lock with a complete packaged receipt.'
+          }
+  checks:
+    needs: validate
+    uses: ./.github/workflows/app-ci.yml
+    with:
+      organization_release: true
+  build:
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/initialize-ci
+        with:
+          role: AndroidSource
+      - name: Install the pinned Core SDK archive
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/Install-ReleaseSdk.ps1
+      - name: Load the organization signing identity
+        shell: pwsh
+        env:
+          KEYSTORE: ${{ secrets.DANSHENG_RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.DANSHENG_RELEASE_KEYSTORE_PASSWORD }}
+        run: ./scripts/ci/Write-Signing.ps1
+      - name: Build and verify the ARM64 release APK
+        shell: pwsh
+        env:
+          DANSHENG_BETA_PASSWORD: ${{ secrets.DANSHENG_RELEASE_KEYSTORE_PASSWORD }}
+          PUB_HOSTED_URL: https://pub.flutter-io.cn
+        run: ./scripts/ci/Build-Release.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dansheng-android-${{ github.ref_name }}
+          path: ${{ env.DANSHENG_TASK_RUNTIME }}/artifacts/release/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove temporary signing files
+        if: always()
+        shell: pwsh
+        run: ./scripts/ci/Clear-Signing.ps1

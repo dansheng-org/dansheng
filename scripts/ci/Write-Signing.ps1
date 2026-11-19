@@ -2,7 +2,7 @@
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $layout = Get-DanshengCiLayout
 Assert-DanshengCiRuntime $layout
-if (-not $env:KEYSTORE -or -not $env:KEYSTORE_PASSWORD) { throw 'Configure both DANSHENG_PRERELEASE_KEYSTORE_* secrets first.' }
+if (-not $env:KEYSTORE -or -not $env:KEYSTORE_PASSWORD) { throw 'Configure both signing secrets referenced by this workflow.' }
 $directory = Assert-CiPlainPath (Join-Path $layout.runtime 'signing')
 if (Test-Path -LiteralPath $directory) { throw 'Signing directory already exists.' }
 [void][IO.Directory]::CreateDirectory($directory)
