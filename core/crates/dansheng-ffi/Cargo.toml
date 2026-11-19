@@ -10,6 +10,7 @@ default = ["services"]
 services = ["dep:dansheng-connectors", "dep:log"]
 card-login = ["services", "dansheng-connectors/login"]
 campus-webvpn = ["card-login", "dansheng-connectors/webvpn"]
+document-text = ["dansheng-core/pdf"]
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]

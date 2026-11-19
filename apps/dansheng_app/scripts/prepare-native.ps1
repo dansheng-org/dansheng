@@ -106,14 +106,14 @@ try {
     $env:SOURCE_DATE_EPOCH = '0'
     $env:CFLAGS_aarch64_linux_android = Get-DanshengNativePrefixFlags -TargetDirectory $env:CARGO_TARGET_DIR
     $env:CC_SHELL_ESCAPED_FLAGS = '1'
-    cargo build -p dansheng-ffi --target aarch64-linux-android --release --features campus-webvpn --locked --offline -j $nativeParallelism.cargo
+    cargo build -p dansheng-ffi --target aarch64-linux-android --release --features campus-webvpn,document-text --locked --offline -j $nativeParallelism.cargo
     if($LASTEXITCODE -ne 0){throw 'Rust ARM64 build failed'}
     $armSo = Join-Path $armDir.FullName 'libdansheng_ffi.so'
     Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'aarch64-linux-android/release/libdansheng_ffi.so') -Destination $armSo
     . ./scripts/android-env.ps1 -Architecture x86_64
     $env:CARGO_HOME=$nativeCargoHome
     $env:CARGO_TARGET_DIR = Join-Path $nativeTargetRoot 'cargo-x86'
-    cargo build -p dansheng-ffi --target x86_64-linux-android --features campus-webvpn --locked --offline -j $nativeParallelism.cargo
+    cargo build -p dansheng-ffi --target x86_64-linux-android --features campus-webvpn,document-text --locked --offline -j $nativeParallelism.cargo
     if($LASTEXITCODE -ne 0){throw 'Rust x86_64 build failed'}
     $debug = Join-Path $env:CARGO_TARGET_DIR 'x86_64-linux-android/debug/libdansheng_ffi.so'
     $target = Join-Path $staging.FullName 'libdansheng_ffi.so'
@@ -129,7 +129,7 @@ try {
 } finally { Pop-Location;$env:GRADLE_USER_HOME=$savedGradleHome }
 $aar = Join-Path $ArtifactDirectory 'dansheng-android-0.1.0.aar'
 Copy-Item -LiteralPath (Join-Path $coreGradleOutput 'adapter/outputs/aar/adapter-release.aar') -Destination $aar
-$metadata = [ordered]@{version='0.1.0';core_source_sha256=$fingerprint;features=@('services','card-login','campus-webvpn');aar_sha256=(Get-FileHash $aar).Hash;arm64_sha256=(Get-FileHash $armSo).Hash;x86_64_sha256=(Get-FileHash $target).Hash}
+$metadata = [ordered]@{version='0.1.0';core_source_sha256=$fingerprint;features=@('services','card-login','campus-webvpn','document-text');aar_sha256=(Get-FileHash $aar).Hash;arm64_sha256=(Get-FileHash $armSo).Hash;x86_64_sha256=(Get-FileHash $target).Hash}
 $metadata.adapter_source_sha256=$adapterHash
 $packaged=Get-DanshengPackagedNativeHashes -AarPath $aar
 foreach($field in $packaged.Keys){$metadata[$field]=$packaged[$field]}

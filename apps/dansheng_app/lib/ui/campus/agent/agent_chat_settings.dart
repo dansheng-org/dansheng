@@ -16,7 +16,7 @@ class AgentChatSettings extends StatefulWidget {
     required this.onSave,
     required this.onClear,
     this.loadModels,
-    this.onClearCourseFiles,
+    this.onClearRemoteFiles,
   });
 
   final AgentModelConfig? config;
@@ -24,7 +24,7 @@ class AgentChatSettings extends StatefulWidget {
   final Future<void> Function(AgentModelConfig config) onSave;
   final Future<void> Function() onClear;
   final ModelCatalogLoader? loadModels;
-  final Future<int> Function()? onClearCourseFiles;
+  final Future<int> Function()? onClearRemoteFiles;
 
   @override
   State<AgentChatSettings> createState() => _AgentChatSettingsState();
@@ -306,13 +306,13 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
   }
 
   Future<void> _clearCourseFiles() async {
-    final clear = widget.onClearCourseFiles;
+    final clear = widget.onClearRemoteFiles;
     if (clear == null || _clearingFiles || _dialog != null || _saving) return;
     final prompt = DialogRoute<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('清理课程文件缓存？'),
-        content: const Text('这会清除当前账号本机保存的课程文件缓存。需要时可重新下载。'),
+        title: const Text('清理校园文件缓存？'),
+        content: const Text('将清除当前账号在本机下载的 eLearning 和复旦云盘文件。需要时可重新下载。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -334,11 +334,11 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
       final count = await clear();
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('已清理 $count 个课程文件缓存。')));
+            .showSnackBar(SnackBar(content: Text('已清理 $count 个校园文件缓存。')));
       }
     } catch (error) {
       if (mounted) {
-        final message = error is AgentFailure ? error.message : '无法清理课程文件缓存。';
+        final message = error is AgentFailure ? error.message : '无法清理校园文件缓存。';
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(message)));
       }
@@ -545,13 +545,13 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
                     onPressed: _saving ? null : _clear,
                     child: const Text('移除配置'),
                   ),
-                if (widget.onClearCourseFiles != null)
+                if (widget.onClearRemoteFiles != null)
                   TextButton.icon(
                     onPressed: _saving || _clearingFiles
                         ? null
                         : _clearCourseFiles,
                     icon: const Icon(Icons.delete_sweep_outlined),
-                    label: Text(_clearingFiles ? '正在清理…' : '清理课程文件缓存'),
+                    label: Text(_clearingFiles ? '正在清理…' : '清理校园文件缓存'),
                   ),
               ],
             ),

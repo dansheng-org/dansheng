@@ -8,6 +8,7 @@ import '../../../agent/campus_tools.dart';
 import '../campus_api.dart';
 import 'agent_course_files.dart';
 import 'agent_public_campus.dart';
+import 'agent_remote_files.dart';
 
 AgentToolRegistry campusAgentTools(
   CampusApi api, {
@@ -18,7 +19,11 @@ AgentToolRegistry campusAgentTools(
   activeAccount: activeAccount,
   forumEnabled: forumEnabled,
   webTool: webTool,
-  extraTools: [...publicCampusAgentTools(), ...courseFileAgentTools(api)],
+  extraTools: [
+    ...publicCampusAgentTools(),
+    ...courseFileAgentTools(api),
+    ...cloudFileAgentTools(api),
+  ],
   read: (method, params) async {
     final forumSearch = method == 'community.tea.search';
     try {

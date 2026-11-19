@@ -52,17 +52,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(bridge.config?['provider'], ModelProvider.anthropic.name);
     expect(bridge.config?['base_url'], _endpoint);
-    expect(find.textContaining(_endpoint), findsOneWidget);
+    expect(find.text('发送至 model.example.test'), findsOneWidget);
     expect(find.text(_testKey), findsNothing);
     expect(tester.widget<TextField>(_field('消息')).enabled, isTrue);
+    expect(find.byType(SwitchListTile), findsNothing);
+    await _openComposerOptions(tester);
+    expect(find.textContaining(_endpoint), findsOneWidget);
     for (final source in AgentSourceKind.values) {
-      final chip = _chip(tester, source);
-      expect(chip.selected, isFalse);
-      expect(
-        chip.onSelected,
-        source == AgentSourceKind.web ? isNotNull : isNull,
-      );
+      final toggle = _sourceToggle(tester, source);
+      expect(toggle.value, isFalse);
+      expect(toggle.onChanged, source.requiresAccount ? isNull : isNotNull);
     }
+    await _closeComposerOptions(tester);
 
     await tester.tap(find.byTooltip('模型设置'));
     await tester.pumpAndSettle();
@@ -139,11 +140,15 @@ void main() {
     final bridge = _Bridge.configured();
     final controller = _Controller(bridge, account: 'A');
     final models = await _pumpChat(tester, controller);
-    final forum = _chip(tester, AgentSourceKind.forum);
-    expect(forum.selected, isFalse);
-    expect(forum.onSelected, isNull);
+    await _openComposerOptions(tester);
+    final forum = _sourceToggle(tester, AgentSourceKind.forum);
+    expect(forum.value, isFalse);
+    expect(forum.onChanged, isNull);
     await tester.tap(find.text(AgentSourceKind.campus.label));
     await tester.pump();
+    expect(_sourceToggle(tester, AgentSourceKind.campus).value, isTrue);
+    await _closeComposerOptions(tester);
+    expect(find.byTooltip('添加与信息源，已启用 1 项'), findsOneWidget);
     await _send(tester, '查询图书馆');
     final model = models.single;
     model.requests.single.reply.complete(
@@ -195,8 +200,7 @@ void main() {
       final bridge = _Bridge.configured();
       final controller = _Controller(bridge, account: 'A', forum: true);
       final models = await _pumpChat(tester, controller);
-      await tester.tap(find.text(AgentSourceKind.campus.label));
-      await tester.pump();
+      await _enableSource(tester, AgentSourceKind.campus);
       await _send(tester, 'A 的消息');
       final model = models.single;
       model.requests.single.reply.complete(
@@ -218,7 +222,13 @@ void main() {
       controller.finishSwitch('A');
       await tester.pumpAndSettle();
       expect(bridge.campusReads, isEmpty);
-      expect(_chip(tester, AgentSourceKind.campus).selected, isFalse);
+      await _openComposerOptions(tester);
+      expect(_sourceToggle(tester, AgentSourceKind.campus).value, isFalse);
+      controller.beginSwitch();
+      await tester.pumpAndSettle();
+      expect(find.text('信息源'), findsNothing);
+      controller.finishSwitch('A');
+      await tester.pumpAndSettle();
       await _send(tester, '新对话');
       final nextRequest = models.last.requests.single;
       expect(models, hasLength(2));
@@ -262,9 +272,16 @@ void main() {
     (tester) async {
       final bridge = _Bridge.configured();
       final models = await _pumpChat(tester, _Controller(bridge));
-      await tester.tap(find.byTooltip('添加附件'));
+      await _openComposerOptions(tester);
+      await tester.tap(find.text('添加附件'));
       await tester.pumpAndSettle();
       expect(find.text('notes.txt'), findsOneWidget);
+      await tester.tap(find.byTooltip('移除 notes.txt'));
+      await tester.pumpAndSettle();
+      expect(find.text('notes.txt'), findsNothing);
+      await _openComposerOptions(tester);
+      await tester.tap(find.text('添加附件'));
+      await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('发送'));
       await tester.pumpAndSettle();
@@ -302,8 +319,10 @@ void main() {
       final bridge = _Bridge.configured();
       bridge.config!['search_api_key'] = 'fixture-search-key';
       final models = await _pumpChat(tester, _Controller(bridge));
-      await tester.tap(find.text('搜索网页'));
-      await tester.pump();
+      await _openComposerOptions(tester);
+      expect(find.text('通过 Brave Search 搜索'), findsOneWidget);
+      await tester.tap(find.text(AgentSourceKind.web.label));
+      await _closeComposerOptions(tester);
       await _send(tester, '搜索复旦通知');
       final model = models.single;
       expect(model.requests.single.tools.map((tool) => tool.name), [
@@ -403,13 +422,15 @@ void main() {
   });
 
   testWidgets(
-    'composer picks a friendly model name while preserving history and raw ID',
+    'narrow composer picks a friendly model name and keeps the raw ID',
     (tester) async {
       final bridge = _Bridge.configured();
       final configs = <AgentModelConfig>[];
       final models = await _pumpChat(
         tester,
         _Controller(bridge),
+        size: const Size(320, 640),
+        textScale: 1.8,
         onModel: configs.add,
         loadModels:
             ({required provider, required baseUrl, required apiKey}) async => [
@@ -420,6 +441,15 @@ void main() {
               ),
             ],
       );
+      await _openComposerOptions(tester);
+      expect(find.textContaining(_endpoint), findsOneWidget);
+      await tester.ensureVisible(find.text(AgentSourceKind.web.label));
+      expect(
+        find.text(AgentSourceKind.web.label).hitTestable(),
+        findsOneWidget,
+      );
+      await _closeComposerOptions(tester);
+      expect(tester.takeException(), isNull);
       await _send(tester, '上一条消息');
       models.single.requests.single.reply.complete(
         const AgentMessage.assistant('上一条回答'),
@@ -429,7 +459,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Next Generation Flash'));
       await tester.pumpAndSettle();
-      expect(find.text('模型 · Next Generation Flash'), findsOneWidget);
+      expect(find.text('Next Generation Flash'), findsOneWidget);
       expect(find.text('上一条回答'), findsOneWidget);
       expect(bridge.config!['model'], 'next-model');
       expect(bridge.config!['model_label'], 'Next Generation Flash');
@@ -451,8 +481,7 @@ void main() {
   ) async {
     final bridge = _Bridge.configured();
     final models = await _pumpChat(tester, _Controller(bridge, account: 'A'));
-    await tester.tap(find.text(AgentSourceKind.campus.label));
-    await tester.pump();
+    await _enableSource(tester, AgentSourceKind.campus);
     final toolReply = const AgentMessage.assistant('', [
       AgentToolCall('read', 'campus_library', {}),
     ]);
@@ -478,7 +507,8 @@ void main() {
     expect(find.text('允许查询校园服务？'), findsNothing);
     expect(bridge.campusReads, ['A', 'A']);
     await finish();
-    await tester.tap(find.byTooltip('管理授权'));
+    await _openComposerOptions(tester);
+    await tester.tap(find.text('管理授权'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('撤销'));
     await tester.pumpAndSettle();
@@ -497,12 +527,30 @@ Finder _field(String label) => find.byWidgetPredicate(
   (widget) => widget is TextField && widget.decoration?.labelText == label,
 );
 
-FilterChip _chip(WidgetTester tester, AgentSourceKind source) =>
-    tester.widget<FilterChip>(find.widgetWithText(FilterChip, source.label));
+SwitchListTile _sourceToggle(WidgetTester tester, AgentSourceKind source) =>
+    tester.widget<SwitchListTile>(
+      find.widgetWithText(SwitchListTile, source.label),
+    );
 
-void _setPhoneSize(WidgetTester tester) {
+Future<void> _openComposerOptions(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('chat-composer-options')));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _closeComposerOptions(WidgetTester tester) async {
+  await tester.binding.handlePopRoute();
+  await tester.pumpAndSettle();
+}
+
+Future<void> _enableSource(WidgetTester tester, AgentSourceKind source) async {
+  await _openComposerOptions(tester);
+  await tester.tap(find.text(source.label));
+  await _closeComposerOptions(tester);
+}
+
+void _setPhoneSize(WidgetTester tester, [Size size = const Size(430, 860)]) {
   tester.view.devicePixelRatio = 1;
-  tester.view.physicalSize = const Size(430, 860);
+  tester.view.physicalSize = size;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
 }
@@ -510,13 +558,20 @@ void _setPhoneSize(WidgetTester tester) {
 Future<List<_Model>> _pumpChat(
   WidgetTester tester,
   _Controller controller, {
+  Size size = const Size(430, 860),
+  double textScale = 1,
   void Function(AgentModelConfig)? onModel,
   ModelCatalogLoader? loadModels,
 }) async {
-  _setPhoneSize(tester);
+  _setPhoneSize(tester, size);
   final models = <_Model>[];
   await tester.pumpWidget(
     MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context)
+            .copyWith(textScaler: TextScaler.linear(textScale)),
+        child: child!,
+      ),
       home: AgentChatPage(
         controller: controller,
         onOpenLocal: () {},

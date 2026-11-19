@@ -5,11 +5,11 @@ package org.dansheng.app
 import android.content.ContentResolver
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.util.Base64
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
+import java.util.Base64
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -18,12 +18,12 @@ import org.dansheng.android.PortError
 import org.json.JSONObject
 
 internal object AgentAttachmentPicker {
-    private const val MAX_BINARY_BYTES = 2 * 1024 * 1024
-    private const val MAX_TEXT_BYTES = 24 * 1024
+    const val MAX_BINARY_BYTES = 2 * 1024 * 1024
+    const val MAX_TEXT_BYTES = 24 * 1024
     private const val MAX_NAME_LENGTH = 120
     private val unsafeNameChars = Regex("""[\p{Cc}\p{Cf}<>:"/\\|?*]""")
 
-    private enum class Kind(val mime: String, val isText: Boolean, vararg val extensions: String) {
+    enum class Kind(val mime: String, val isText: Boolean, vararg val extensions: String) {
         PDF("application/pdf", false, "pdf"),
         PNG("image/png", false, "png"),
         JPEG("image/jpeg", false, "jpg", "jpeg", "jpe"),
@@ -43,14 +43,11 @@ internal object AgentAttachmentPicker {
                     if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
                 }
             val name = safeName(displayName)
-            val kind = resolveKind(resolver.getType(uri), extension(name))
+            val kind = resolveKind(resolver.getType(uri), name)
             val limit = if (kind.isText) MAX_TEXT_BYTES else MAX_BINARY_BYTES
             val bytes = resolver.openInputStream(uri)?.use { readBounded(it, limit) }
                 ?: throw PortError("AttachmentReadFailed")
-            if (!hasExpectedContent(kind, bytes)) throw PortError("AttachmentInvalidContent")
-
-            JSONObject().put("name", nameForKind(name, kind)).put("mime_type", kind.mime)
-                .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+            payload(name, kind, bytes)
         } catch (e: CancellationException) {
             throw e
         } catch (e: PortError) {
@@ -58,6 +55,20 @@ internal object AgentAttachmentPicker {
         } catch (_: Exception) {
             throw PortError("AttachmentReadFailed")
         }
+    }
+
+    fun payload(displayName: String, kind: Kind, bytes: ByteArray, pdfLimit: Int = MAX_BINARY_BYTES): JSONObject {
+        val limit = when {
+            kind == Kind.PDF -> pdfLimit
+            kind.isText -> MAX_TEXT_BYTES
+            else -> MAX_BINARY_BYTES
+        }
+        if (bytes.size > limit) throw PortError(
+            if (kind.isText) "AttachmentTextTooLarge" else "AttachmentTooLarge",
+        )
+        if (!hasExpectedContent(kind, bytes)) throw PortError("AttachmentInvalidContent")
+        return JSONObject().put("name", nameForKind(safeName(displayName), kind))
+            .put("mime_type", kind.mime).put("data", Base64.getEncoder().encodeToString(bytes))
     }
 
     private fun safeName(displayName: String?): String = displayName.orEmpty()
@@ -76,9 +87,10 @@ internal object AgentAttachmentPicker {
             .ifEmpty { "attachment" } + suffix
     }
 
-    private fun resolveKind(reportedMime: String?, extension: String): Kind {
+    fun resolveKind(reportedMime: String?, name: String): Kind {
         val mime = reportedMime?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT).orEmpty()
-        val fromExtension = Kind.entries.firstOrNull { extension in it.extensions }
+        val ext = extension(name)
+        val fromExtension = Kind.entries.firstOrNull { ext in it.extensions }
         val kind = when (mime) {
             "", "application/octet-stream", "binary/octet-stream", "*/*" -> fromExtension
             "text/plain" -> fromExtension?.takeIf { it.isText } ?: Kind.TEXT

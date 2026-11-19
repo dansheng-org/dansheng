@@ -26,6 +26,7 @@ pub const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_READ_BYTES: u64 = 1024 * 1024;
 pub const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_TEXT_BYTES: usize = 256 * 1024;
+const MAX_TEXT_READ_BYTES: usize = 24 * 1024;
 pub const MAX_PDF_PAGES: usize = 128;
 pub const MAX_PDF_OBJECTS: usize = 4096;
 // Retain the permit inside the blocking task: dropping its caller cannot admit
@@ -146,6 +147,7 @@ pub async fn dispatch(
         "files.download"
             | "files.list"
             | "files.read"
+            | "files.text"
             | "files.delete"
             | "files.index"
             | "files.export"
@@ -193,6 +195,14 @@ pub async fn dispatch(
             input.offset.unwrap_or(0),
             input.length.unwrap_or(64 * 1024),
         ),
+        "files.text" => {
+            let mut text = extract_managed_text(&root, &asset).await?;
+            let truncated = text.len() > MAX_TEXT_READ_BYTES;
+            if truncated {
+                text.truncate(text.floor_char_boundary(MAX_TEXT_READ_BYTES));
+            }
+            Ok(json!({"asset_id":asset.id,"text":text,"truncated":truncated}))
+        }
         "files.delete" => delete(store, &root, &asset),
         "files.index" => {
             grant.check(principal, "sources.write")?;
@@ -763,12 +773,12 @@ fn finish_delete(store: &Store, root: &Path, id: &str) -> CoreResult<()> {
     })
 }
 
-async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
+async fn extract_managed_text(root: &Path, asset: &Asset) -> CoreResult<String> {
     ready(asset)?;
     if asset.size > MAX_INDEX_BYTES {
         return Err(CoreError::new(
             "DocumentTooLarge",
-            "index input exceeds 8 MiB",
+            "document extraction input exceeds 8 MiB",
         ));
     }
     let path = root.join(&asset.id);
@@ -786,7 +796,7 @@ async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
         INDEX_WORKERS.clone().acquire_owned().await.map_err(|_| {
             CoreError::new("Shutdown", "document extraction workers are unavailable")
         })?;
-    let text = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let mut bytes = Vec::new();
         File::open(path)?
@@ -795,7 +805,7 @@ async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
         if bytes.len() as u64 > MAX_INDEX_BYTES {
             return Err(CoreError::new(
                 "DocumentTooLarge",
-                "index input exceeds 8 MiB",
+                "document extraction input exceeds 8 MiB",
             ));
         }
         if expected.as_deref() != Some(hash(&bytes).as_str()) {
@@ -807,7 +817,11 @@ async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
         extract(&bytes, &mime)
     })
     .await
-    .map_err(|_| CoreError::new("DocumentParseError", "document extraction stopped"))??;
+    .map_err(|_| CoreError::new("DocumentParseError", "document extraction stopped"))?
+}
+
+async fn index(store: &Store, root: &Path, asset: &Asset) -> CoreResult<Value> {
+    let text = extract_managed_text(root, asset).await?;
     // The Store creates the search record with its standard FTS triggers and size checks.
     let external = format!("asset:{}", asset.id);
     let data = json!({"asset_id":asset.id,"name":asset.name,"mime_type":asset.mime,"sha256":asset.sha256,"text":text});

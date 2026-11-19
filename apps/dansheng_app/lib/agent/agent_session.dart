@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'agent_campus_link.dart';
 import 'agent_types.dart';
@@ -109,7 +110,7 @@ class AgentSession {
     Future<bool> Function(String query)? approveWebSearch,
     void Function(Iterable<AgentWebLink> links)? onWebLinks,
     void Function(Iterable<AgentCampusLink> links)? onCampusLinks,
-    void Function(AgentAttachment file)? onCourseAttachment,
+    void Function(AgentAttachment file)? onRemoteAttachment,
     void Function()? onRemembered,
   }) async {
     if (_closed || _busy) throw const AgentFailure('当前无法发送，请稍后再试。');
@@ -117,7 +118,7 @@ class AgentSession {
       throw const AgentFailure('请输入消息或添加附件。消息最多 4000 个字符。');
     }
     if (attachments.length > agentMaxAttachments ||
-        attachments.any((file) => file.byteLength <= 0) ||
+        attachments.any((file) => !_canAttach(file)) ||
         attachments.fold(0, (size, file) => size + file.byteLength) >
             agentMaxAttachmentBytes) {
       throw const AgentFailure('每条消息最多附加 3 个文件，总大小不得超过 2 MiB。');
@@ -148,6 +149,7 @@ class AgentSession {
     final usedSources = <AgentSourceKind>{};
     var callCount = 0;
     var attachmentCount = attachments.length;
+    var attachmentLimit = agentMaxAttachmentBytes;
     var attachmentBytes = attachments.fold(
       0,
       (size, file) => size + file.byteLength,
@@ -194,7 +196,7 @@ class AgentSession {
           throw const AgentFailure('已达到本轮查询上限，请缩小查询范围。');
         }
         messages.add(reply);
-        final courseFiles = <AgentAttachment>[];
+        final remoteFiles = <AgentAttachment>[];
         for (final call in reply.calls) {
           final tool = tools[call.name];
           Json result = {'error': '本轮没有启用此工具。'};
@@ -220,7 +222,11 @@ class AgentSession {
                   try {
                     result = await tool
                         .read(args)
-                        .timeout(const Duration(seconds: 35));
+                        .timeout(
+                          Duration(
+                            seconds: tool.source.isRemoteFileSource ? 80 : 35,
+                          ),
+                        );
                   } on TimeoutException {
                     result = {'error': '${tool.source.label}查询超时。'};
                   } on AgentFailure catch (e) {
@@ -263,19 +269,26 @@ class AgentSession {
               }
             }
           }
-          if (result['attachment'] case final AgentAttachment file) {
-            result = Map.of(result)..remove('attachment');
-            if (tool?.source != AgentSourceKind.files ||
-                file.mimeType != 'application/pdf' ||
-                file.byteLength <= 0 ||
-                attachmentCount >= agentMaxAttachments ||
-                attachmentBytes + file.byteLength > agentMaxAttachmentBytes) {
+          if (result.containsKey('attachment')) {
+            result = Map.of(result);
+            final file = result.remove('attachment');
+            final nextLimit = max(
+              attachmentLimit,
+              file is AgentAttachment ? file.maxBytes : 0,
+            );
+            if (file is! AgentAttachment ||
+                tool?.source.isRemoteFileSource != true ||
+                !_canAttach(file)) {
+              result = {'error': '工具返回的文件附件无效或超出大小上限。'};
+            } else if (attachmentCount >= agentMaxAttachments ||
+                attachmentBytes + file.byteLength > nextLimit) {
               result = {'error': '本轮附件已达到数量或大小上限。请缩小文件范围。'};
             } else {
               attachmentCount++;
+              attachmentLimit = nextLimit;
               attachmentBytes += file.byteLength;
-              courseFiles.add(file);
-              onCourseAttachment?.call(file);
+              remoteFiles.add(file);
+              onRemoteAttachment?.call(file);
             }
           }
           final encoded = jsonEncode(result);
@@ -286,11 +299,11 @@ class AgentSession {
             ),
           );
         }
-        if (courseFiles.isNotEmpty) {
+        if (remoteFiles.isNotEmpty) {
           messages.add(
             AgentMessage.user(
-              '以下是刚刚通过课程工具读取的 PDF，请根据用户的问题分析。',
-              attachments: List.unmodifiable(courseFiles),
+              '以下是为本轮问题读取的文件内容。',
+              attachments: List.unmodifiable(remoteFiles),
             ),
           );
         }
@@ -300,4 +313,20 @@ class AgentSession {
       _busy = false;
     }
   }
+}
+
+bool _canAttach(AgentAttachment file) {
+  final size = file.byteLength;
+  if (!isAgentAttachmentType(file.mimeType) ||
+      size <= 0 ||
+      size > file.maxBytes) {
+    return false;
+  }
+  if (!file.isText) return true;
+  final text = file.text;
+  return size <= agentMaxTextAttachmentBytes &&
+      text != null &&
+      text.isNotEmpty &&
+      text.length <= agentMaxTextAttachmentBytes &&
+      utf8.encode(text).length <= agentMaxTextAttachmentBytes;
 }
