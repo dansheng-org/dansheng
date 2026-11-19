@@ -15,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 const _endpoint = 'https://model.example.test/api/v1';
 const _testKey = 'fixture-only-key';
+const _cloudPdf = 'PDF 原件.pdf';
 
 void main() {
   testWidgets('model settings work without a campus account', (tester) async {
@@ -277,14 +278,14 @@ void main() {
       final bridge = _Bridge.configured();
       final models = await _pumpChat(tester, _Controller(bridge));
       await _openComposerOptions(tester);
-      await tester.tap(find.text('添加附件'));
+      await tester.tap(find.text('附加本地文件'));
       await tester.pumpAndSettle();
       expect(find.text('notes.txt'), findsOneWidget);
       await tester.tap(find.byTooltip('移除 notes.txt'));
       await tester.pumpAndSettle();
       expect(find.text('notes.txt'), findsNothing);
       await _openComposerOptions(tester);
-      await tester.tap(find.text('添加附件'));
+      await tester.tap(find.text('附加本地文件'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('发送'));
@@ -332,9 +333,12 @@ void main() {
       final bridge = _Bridge.configured();
       bridge.config!['search_api_key'] = 'fixture-search-key';
       final models = await _pumpChat(tester, _Controller(bridge));
+      await tester.tap(find.byTooltip('开启联网搜索'));
+      await tester.pump();
+      expect(find.byTooltip('关闭联网搜索'), findsOneWidget);
       await _openComposerOptions(tester);
       expect(find.text('通过 Brave Search 搜索'), findsOneWidget);
-      await tester.tap(find.text(AgentSourceKind.web.label));
+      expect(_sourceToggle(tester, AgentSourceKind.web).value, isTrue);
       await _closeComposerOptions(tester);
       await _send(tester, '搜索复旦通知');
       final model = models.single;
@@ -435,7 +439,7 @@ void main() {
   });
 
   testWidgets(
-    'narrow composer picks a friendly model name and keeps the raw ID',
+    'narrow composer picks reasoning and model without losing the conversation',
     (tester) async {
       final bridge = _Bridge.configured();
       bridge.config!['reasoning_effort'] = 'medium';
@@ -457,6 +461,12 @@ void main() {
       );
       await _openComposerOptions(tester);
       expect(find.textContaining(_endpoint), findsOneWidget);
+      expect(find.text('附加本地文件'), findsOneWidget);
+      final cloudTile = find.ancestor(
+        of: find.text('附加云端文件'),
+        matching: find.byType(ListTile),
+      );
+      expect(tester.widget<ListTile>(cloudTile).onTap, isNull);
       await tester.ensureVisible(find.text(AgentSourceKind.web.label));
       expect(
         find.text(AgentSourceKind.web.label).hitTestable(),
@@ -469,6 +479,20 @@ void main() {
         const AgentMessage.assistant('上一条回答'),
       );
       await tester.pumpAndSettle();
+      expect(configs.single.reasoningEffort, AgentReasoningEffort.medium);
+      await tester.tap(find.byKey(const Key('chat-reasoning-picker')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is CheckedPopupMenuItem<AgentReasoningEffort> &&
+              widget.value == AgentReasoningEffort.high,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('推理强度 · 高'), findsOneWidget);
+      expect(bridge.config!['reasoning_effort'], 'high');
+      expect(tester.takeException(), isNull);
       await tester.tap(find.byKey(const Key('chat-model-picker')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Next Generation Flash'));
@@ -477,10 +501,10 @@ void main() {
       expect(find.text('上一条回答'), findsOneWidget);
       expect(bridge.config!['model'], 'next-model');
       expect(bridge.config!['model_label'], 'Next Generation Flash');
-      expect(bridge.config!['reasoning_effort'], 'medium');
+      expect(bridge.config!['reasoning_effort'], 'high');
       await _send(tester, '下一条消息');
       expect(configs.last.model, 'next-model');
-      expect(configs.last.reasoningEffort, AgentReasoningEffort.medium);
+      expect(configs.last.reasoningEffort, AgentReasoningEffort.high);
       expect(
         models.last.requests.single.messages.map((message) => message.text),
         ['上一条消息', '上一条回答', '下一条消息'],
@@ -491,6 +515,93 @@ void main() {
       await tester.pumpAndSettle();
     },
   );
+
+  testWidgets('edit and retry keep context and preserve a stopped answer', (
+    tester,
+  ) async {
+    final bridge = _Bridge.configured();
+    final models = await _pumpChat(tester, _Controller(bridge));
+
+    Future<void> reply(String text) async {
+      models.last.requests.last.reply.complete(AgentMessage.assistant(text));
+      await tester.pumpAndSettle();
+    }
+
+    await _send(tester, '第一问');
+    await reply('第一条回答');
+    await _send(tester, '第二问');
+    await reply('原来的回答');
+
+    await tester.tap(find.byTooltip('重新生成'));
+    await tester.pump();
+    expect(models, hasLength(2));
+    final retry = models.last.requests.single;
+    expect(retry.messages.map((message) => message.text), [
+      '第一问',
+      '第一条回答',
+      '第二问',
+    ]);
+    await tester.tap(find.byTooltip('停止生成'));
+    await tester.pumpAndSettle();
+    expect(find.text('原来的回答'), findsOneWidget);
+    retry.reply.complete(const AgentMessage.assistant('停止后到达的回答'));
+    await tester.pumpAndSettle();
+    expect(find.text('停止后到达的回答'), findsNothing);
+
+    await tester.enterText(_field('消息'), '保留我的草稿');
+    await tester.tap(find.byTooltip('编辑上一条消息'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      '修改第二问',
+    );
+    await tester.pump();
+    await tester.tap(find.text('重新发送'));
+    await tester.pumpAndSettle();
+    expect(models, hasLength(3));
+    expect(
+      models.last.requests.single.messages.map((message) => message.text),
+      ['第一问', '第一条回答', '修改第二问'],
+    );
+    await reply('编辑后的回答');
+    expect(find.text('编辑后的回答'), findsOneWidget);
+    expect(find.text('原来的回答'), findsNothing);
+    expect(tester.widget<TextField>(_field('消息')).controller!.text, '保留我的草稿');
+    final turns = bridge.histories[null]!.values.single['turns'] as List;
+    expect(turns.last['question'], '修改第二问');
+    expect(turns.last['answer'], '编辑后的回答');
+  });
+
+  testWidgets('cloud file joins the draft and is sent after approval', (
+    tester,
+  ) async {
+    final bridge = _Bridge.configured();
+    final models = await _pumpChat(tester, _Controller(bridge, account: 'A'));
+    await _openComposerOptions(tester);
+    await tester.tap(find.text('附加云端文件'));
+    await tester.pumpAndSettle();
+    for (final label in ['复旦云盘', '个人目录', _cloudPdf]) {
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text(_cloudPdf), findsOneWidget);
+    expect(models, isEmpty);
+    await _send(tester, '概括这份文件');
+    expect(find.text('发送附件？'), findsOneWidget);
+    expect(models, isEmpty);
+    await tester.tap(find.text('发送附件'));
+    await tester.pumpAndSettle();
+    final request = models.single.requests.single;
+    final selected = request.messages.last.attachments.single;
+    expect(selected.name, _cloudPdf);
+    expect(selected.mimeType, 'application/pdf');
+    expect(utf8.decode(base64Decode(selected.base64Data)), '%PDF-fixture');
+    request.reply.complete(const AgentMessage.assistant('已读取'));
+    await tester.pumpAndSettle();
+  });
 
   testWidgets('a durable grant skips repeat prompts and can be revoked', (
     tester,
@@ -733,6 +844,29 @@ class _Bridge implements DanshengBridge {
           'name': 'notes.txt',
           'mime_type': 'text/plain',
           'data': base64Encode(utf8.encode('file fixture')),
+        });
+      case 'fudan.cloud.roots':
+        expect(params['account_id'], 'A');
+        return jsonEncode([
+          {'kind': 'personal', 'name': '个人目录', 'path': 'personal-root'},
+        ]);
+      case 'fudan.cloud.list':
+        expect(params['path'], 'personal-root');
+        return jsonEncode({
+          'items': [
+            {'name': _cloudPdf, 'path': 'personal-root/original'},
+          ],
+        });
+      case 'agent.remoteFile.read':
+        expect(params, {
+          'account_id': 'A',
+          'source': 'cloud',
+          'path': 'personal-root/original',
+        });
+        return jsonEncode({
+          'name': _cloudPdf,
+          'mime_type': 'application/pdf',
+          'data': base64Encode(utf8.encode('%PDF-fixture')),
         });
       case 'agent.mcp.status':
         legacyAccount = params['account_id'] as String?;

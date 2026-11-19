@@ -4,7 +4,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter/services.dart';
 
 import '../../../agent/agent_campus_link.dart';
 import '../../../agent/agent_history.dart';
@@ -18,10 +18,12 @@ import '../../core/dansheng_state.dart';
 import '../campus_api.dart';
 import 'agent_approval_store.dart';
 import 'agent_approvals_dialog.dart';
+import 'agent_answer_content.dart';
 import 'agent_attachment_picker.dart';
 import 'agent_campus_navigation.dart';
 import 'agent_chat_composer.dart';
 import 'agent_chat_settings.dart';
+import 'agent_cloud_attachment_picker.dart';
 import 'agent_course_files.dart';
 import 'agent_history_dialog.dart';
 import 'agent_history_store.dart';
@@ -117,7 +119,9 @@ class _AgentChatPageState extends State<AgentChatPage> {
   DialogRoute<ModelCatalogEntry>? _modelRoute;
   DialogRoute<void>? _grantsRoute;
   ModalBottomSheetRoute<AgentComposerAction>? _composerRoute;
-  bool _savingModel = false;
+  MaterialPageRoute<AgentAttachment>? _cloudAttachmentRoute;
+  DialogRoute<String>? _editRoute;
+  bool _savingConfig = false;
   late _AccountState _account;
   AgentModelConfig? _config;
   bool _loading = true;
@@ -125,6 +129,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
   AgentSession? _session;
   CampusApi? _sessionApi;
   _ChatTurn? _activeTurn;
+  _ChatTurn? _replacedTurn;
   String? _toolLabel;
   DialogRoute<_ShareChoice>? _approvalRoute;
   MaterialPageRoute<void>? _settingsRoute;
@@ -238,10 +243,14 @@ class _AgentChatPageState extends State<AgentChatPage> {
     _dismissRoute(_modelRoute);
     _dismissRoute(_grantsRoute);
     _dismissRoute(_composerRoute);
+    _dismissRoute(_cloudAttachmentRoute);
+    _dismissRoute(_editRoute);
     _historyRoute = null;
     _modelRoute = null;
     _grantsRoute = null;
     _composerRoute = null;
+    _cloudAttachmentRoute = null;
+    _editRoute = null;
   }
 
   void _closeSession() {
@@ -251,6 +260,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
     _session = null;
     _sessionApi = null;
     _activeTurn = null;
+    _replacedTurn = null;
     _toolLabel = null;
     _approvalRoute = null;
     session?.close();
@@ -275,6 +285,11 @@ class _AgentChatPageState extends State<AgentChatPage> {
     final turn = _activeTurn;
     if (turn == null) return;
     setState(() {
+      if (_replacedTurn case final original?) {
+        _turns[_turns.length - 1] = original;
+        _closeSession();
+        return;
+      }
       if (turn.streamedAnswer.isNotEmpty) {
         turn.answer = turn.streamedAnswer.toString();
         turn.streamedAnswer.clear();
@@ -328,6 +343,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
     final id = _conversationId;
     if (id == null ||
         _turns.isEmpty ||
+        _replacedTurn != null ||
         _currentAccount != _account ||
         _account.changing) {
       return;
@@ -459,11 +475,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
 
   Future<void> _pickModel() async {
     final config = _config;
-    if (config == null ||
-        _activeTurn != null ||
-        _savingModel ||
-        _modelRoute != null ||
-        _account.changing) {
+    if (config == null || !_canEditComposer || _modelRoute != null) {
       return;
     }
     FocusScope.of(context).unfocus();
@@ -496,17 +508,47 @@ class _AgentChatPageState extends State<AgentChatPage> {
     final label =
         model.label ?? (model.id == config.model ? config.modelLabel : null);
     if (model.id == config.model && label == config.modelLabel) return;
-    final store = _store;
-    final updated = AgentModelConfig(
-      provider: config.provider,
-      baseUrl: config.baseUrl,
-      model: model.id,
-      modelLabel: label,
-      apiKey: config.apiKey,
-      searchApiKey: config.searchApiKey,
-      reasoningEffort: config.reasoningEffort,
+    await _saveComposerConfig(
+      AgentModelConfig(
+        provider: config.provider,
+        baseUrl: config.baseUrl,
+        model: model.id,
+        modelLabel: label,
+        apiKey: config.apiKey,
+        searchApiKey: config.searchApiKey,
+        reasoningEffort: config.reasoningEffort,
+      ),
+      '无法切换模型，请重试。',
     );
-    setState(() => _savingModel = true);
+  }
+
+  Future<void> _selectReasoning(AgentReasoningEffort effort) async {
+    final config = _config;
+    if (config == null ||
+        !_canEditComposer ||
+        effort == config.reasoningEffort) {
+      return;
+    }
+    await _saveComposerConfig(
+      AgentModelConfig(
+        provider: config.provider,
+        baseUrl: config.baseUrl,
+        model: config.model,
+        modelLabel: config.modelLabel,
+        apiKey: config.apiKey,
+        searchApiKey: config.searchApiKey,
+        reasoningEffort: effort,
+      ),
+      '无法保存推理强度，请重试。',
+    );
+  }
+
+  Future<void> _saveComposerConfig(
+    AgentModelConfig updated,
+    String error,
+  ) async {
+    final store = _store;
+    setState(() => _savingConfig = true);
     try {
       await store.save(updated);
       if (!mounted || !identical(store, _store)) return;
@@ -515,17 +557,14 @@ class _AgentChatPageState extends State<AgentChatPage> {
         _config = updated;
       });
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('无法切换模型，请重试。')));
-      }
+      if (mounted && identical(store, _store)) _showNotice(error);
     } finally {
-      if (mounted) setState(() => _savingModel = false);
+      if (mounted) setState(() => _savingConfig = false);
     }
   }
 
   Future<void> _openSettings() async {
-    if (_settingsRoute != null || _loading || _savingModel) return;
+    if (_settingsRoute != null || _loading || _savingConfig) return;
     _stop();
     final store = _store;
     final scope = _account;
@@ -577,7 +616,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
     if (identical(_settingsRoute, route)) _settingsRoute = null;
   }
 
-  AgentSession _startSession(AgentModelConfig config) {
+  AgentSession _startSession(AgentModelConfig config, {_ChatTurn? excluding}) {
     final api = CampusApi.forAccount(widget.controller);
     try {
       final registry = campusAgentTools(
@@ -595,6 +634,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
         history: _turns
             .where(
               (turn) =>
+                  !identical(turn, excluding) &&
                   turn.remember &&
                   turn.answer != null &&
                   turn.destination == _destination(config),
@@ -634,7 +674,16 @@ class _AgentChatPageState extends State<AgentChatPage> {
       _activeTurn == null &&
       !_account.changing &&
       !_pickingAttachment &&
-      !_savingModel;
+      !_savingConfig;
+
+  void _toggleWeb() {
+    if (!_canEditComposer || !_sourceAvailable(AgentSourceKind.web)) return;
+    setState(() {
+      if (!_sources.remove(AgentSourceKind.web)) {
+        _sources.add(AgentSourceKind.web);
+      }
+    });
+  }
 
   Future<void> _openComposerOptions(AgentModelConfig config) async {
     if (!_canEditComposer || _composerRoute != null) return;
@@ -690,8 +739,12 @@ class _AgentChatPageState extends State<AgentChatPage> {
     _composerRoute = null;
     if (!isCurrent()) return;
     switch (action) {
-      case AgentComposerAction.attach:
+      case AgentComposerAction.localAttachment:
         if (_attachments.length < agentMaxAttachments) await _pickAttachment();
+      case AgentComposerAction.cloudAttachment:
+        if (scope.id != null && _attachments.length < agentMaxAttachments) {
+          await _pickAttachment(cloud: true);
+        }
       case AgentComposerAction.manageApprovals:
         await _manageApprovals();
       case null:
@@ -843,30 +896,43 @@ class _AgentChatPageState extends State<AgentChatPage> {
         _sourceAvailable(AgentSourceKind.web);
   }
 
-  Future<void> _pickAttachment() async {
+  Future<void> _pickAttachment({bool cloud = false}) async {
     final generation = _draftGeneration;
     setState(() => _pickingAttachment = true);
     try {
-      final attachment = await AgentAttachmentPicker(widget.controller.client)
-          .pick();
+      final attachment = cloud
+          ? await _openCloudPicker()
+          : await AgentAttachmentPicker(widget.controller.client).pick();
       if (!mounted || generation != _draftGeneration || attachment == null) {
         return;
       }
-      final total = _attachments.fold(
-        attachment.byteLength,
-        (sum, item) => sum + item.byteLength,
-      );
-      if (total > agentMaxAttachmentBytes) {
-        throw const AgentFailure('每条消息的附件总大小不得超过 2 MiB。');
+      final pending = [..._attachments, attachment];
+      final size = pending.fold(0, (sum, item) => sum + item.byteLength);
+      final limit = agentAttachmentBudget(pending);
+      if (size > limit) {
+        throw AgentFailure('每条消息的附件总大小不得超过 ${limit ~/ (1024 * 1024)} MiB。');
       }
       setState(() => _attachments.add(attachment));
     } on AgentFailure catch (error) {
       if (mounted && generation == _draftGeneration) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error.message)));
+        _showNotice(error.message);
       }
     } finally {
       if (mounted) setState(() => _pickingAttachment = false);
+    }
+  }
+
+  Future<AgentAttachment?> _openCloudPicker() async {
+    final api = CampusApi.forAccount(widget.controller);
+    final route = MaterialPageRoute<AgentAttachment>(
+      builder: (_) => AgentCloudAttachmentPicker(api: api),
+    );
+    _cloudAttachmentRoute = route;
+    try {
+      return await Navigator.of(context).push(route);
+    } finally {
+      api.accountScope!.dispose();
+      if (identical(_cloudAttachmentRoute, route)) _cloudAttachmentRoute = null;
     }
   }
 
@@ -899,12 +965,86 @@ class _AgentChatPageState extends State<AgentChatPage> {
     }
   }
 
-  Future<void> _send() async {
+  bool _canReplay(_ChatTurn turn) {
     final config = _config;
-    final text = _draft.text.trim();
+    return config != null &&
+        _canEditComposer &&
+        _approvalRoute == null &&
+        identical(_turns.lastOrNull, turn) &&
+        turn.attachmentNames.isEmpty &&
+        turn.question.trim().isNotEmpty &&
+        turn.destination == _destination(config);
+  }
+
+  Future<void> _editQuestion(_ChatTurn turn) async {
+    if (!_canReplay(turn) || _editRoute != null) return;
+    final draft = TextEditingController(text: turn.question);
+    final route = DialogRoute<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('编辑消息'),
+        scrollable: true,
+        content: TextField(
+          controller: draft,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 5,
+          maxLength: 4000,
+          decoration: const InputDecoration(labelText: '消息'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          ValueListenableBuilder(
+            valueListenable: draft,
+            builder: (_, value, _) => FilledButton(
+              onPressed: value.text.trim().isEmpty
+                  ? null
+                  : () {
+                      final text = draft.text.trim();
+                      if (text.isNotEmpty) {
+                        Navigator.of(dialogContext).pop(text);
+                      }
+                    },
+              child: const Text('重新发送'),
+            ),
+          ),
+        ],
+      ),
+    );
+    _editRoute = route;
+    final edited = await Navigator.of(context).push(route);
+    unawaited(route.completed.whenComplete(draft.dispose));
+    if (!identical(_editRoute, route)) return;
+    _editRoute = null;
+    if (mounted && edited != null) await _send(replacing: turn, edited: edited);
+  }
+
+  void _showNotice(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _copyAnswer(String answer) async {
+    final scope = _account;
+    try {
+      await Clipboard.setData(ClipboardData(text: answer));
+      if (mounted && scope == _account) _showNotice('已复制回答');
+    } catch (_) {
+      if (mounted && scope == _account) _showNotice('无法复制回答，请重试。');
+    }
+  }
+
+  Future<void> _send({_ChatTurn? replacing, String? edited}) async {
+    final config = _config;
+    final text = (edited ?? replacing?.question ?? _draft.text).trim();
+    if (replacing != null && !_canReplay(replacing)) return;
     if (config == null ||
         _activeTurn != null ||
-        _savingModel ||
+        _savingConfig ||
         _approvalRoute != null ||
         _pickingAttachment ||
         _currentAccount != _account ||
@@ -912,7 +1052,9 @@ class _AgentChatPageState extends State<AgentChatPage> {
         (text.isEmpty && _attachments.isEmpty)) {
       return;
     }
-    final attachments = List<AgentAttachment>.of(_attachments);
+    final attachments = replacing == null
+        ? List<AgentAttachment>.of(_attachments)
+        : const <AgentAttachment>[];
     final names = attachments.map((item) => item.name).toList();
     if (attachments.isNotEmpty) {
       final generation = _draftGeneration;
@@ -941,24 +1083,29 @@ class _AgentChatPageState extends State<AgentChatPage> {
     final sources = _sources.where(_sourceAvailable).toSet();
     final AgentSession session;
     try {
-      session = _session ?? _startSession(config);
+      if (replacing != null) _closeSession();
+      session = _session ?? _startSession(config, excluding: replacing);
     } catch (_) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('无法启动模型会话，请检查模型设置。')));
+      _showNotice('无法启动模型会话，请检查模型设置。');
       return;
     }
     FocusScope.of(context).unfocus();
     if (_scroll.hasClients) _scroll.jumpTo(0);
     setState(() {
       _identifyConversation(turn);
-      _turns.add(turn);
+      _replacedTurn = replacing;
+      if (replacing == null) {
+        _turns.add(turn);
+        _draft.clear();
+        _attachments.clear();
+      } else {
+        _turns[_turns.length - 1] = turn;
+      }
       _activeTurn = turn;
-      _draft.clear();
-      _attachments.clear();
     });
 
     try {
-      await _saveConversation();
+      if (replacing == null) await _saveConversation();
       if (!_isActive(session, turn)) return;
       final answer = await session.send(
         text.isEmpty ? '请分析所附文件。' : text,
@@ -1029,9 +1176,18 @@ class _AgentChatPageState extends State<AgentChatPage> {
     } finally {
       if (_isActive(session, turn)) {
         setState(() {
-          _activeTurn = null;
-          _toolLabel = null;
+          if (replacing != null && turn.notice != null) {
+            _turns[_turns.length - 1] = replacing;
+            _closeSession();
+          } else {
+            _replacedTurn = null;
+            _activeTurn = null;
+            _toolLabel = null;
+          }
         });
+        if (replacing != null && turn.notice != null) {
+          _showNotice(turn.notice!);
+        }
         unawaited(_saveConversation());
       }
     }
@@ -1079,7 +1235,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
           ),
           IconButton(
             tooltip: '模型设置',
-            onPressed: _loading || _savingModel ? null : _openSettings,
+            onPressed: _loading || _savingConfig ? null : _openSettings,
             icon: const Icon(Icons.settings_outlined),
           ),
         ],
@@ -1154,6 +1310,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
         final turn = _turns[_turns.length - 1 - index];
         final active = identical(turn, _activeTurn);
         final answer = turn.answer ?? turn.streamedAnswer.toString();
+        final canReplay = _canReplay(turn);
         return Padding(
           key: ObjectKey(turn),
           padding: const EdgeInsets.only(bottom: 16),
@@ -1199,28 +1356,31 @@ class _AgentChatPageState extends State<AgentChatPage> {
                   ),
                 ),
               ),
+              if (canReplay)
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: IconButton(
+                    tooltip: '编辑上一条消息',
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    onPressed: () => _editQuestion(turn),
+                  ),
+                ),
               if (answer.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 if (turn.model case final String model)
                   Text(model, style: theme.textTheme.labelSmall),
-                if (turn.campusLinks.isEmpty && turn.webLinks.isEmpty)
-                  SelectableText(answer)
-                else
-                  MarkdownBody(
-                    data: answer,
-                    selectable: true,
-                    imageBuilder: (_, _, _) => const SizedBox.shrink(),
-                    onTapLink: (_, href, _) {
-                      final uri = Uri.tryParse(href ?? '');
-                      if (turn.campusLinks[uri]
-                          case final AgentCampusLink link) {
-                        _openCampusLink(link);
-                      } else if (turn.webLinks[uri]
-                          case final AgentWebLink link) {
-                        _openWebLink(link);
-                      }
-                    },
-                  ),
+                AgentAnswerContent(
+                  data: answer,
+                  onLink: (href) {
+                    final uri = Uri.tryParse(href);
+                    if (turn.campusLinks[uri] case final AgentCampusLink link) {
+                      _openCampusLink(link);
+                    } else if (turn.webLinks[uri]
+                        case final AgentWebLink link) {
+                      _openWebLink(link);
+                    }
+                  },
+                ),
               ],
               if (turn.campusLinks.isNotEmpty)
                 ExpansionTile(
@@ -1272,6 +1432,23 @@ class _AgentChatPageState extends State<AgentChatPage> {
                   ),
                 ),
               ],
+              if (!active && (answer.isNotEmpty || canReplay))
+                Wrap(
+                  children: [
+                    if (answer.isNotEmpty)
+                      IconButton(
+                        tooltip: '复制回答',
+                        icon: const Icon(Icons.content_copy_outlined, size: 18),
+                        onPressed: () => _copyAnswer(answer),
+                      ),
+                    if (canReplay)
+                      IconButton(
+                        tooltip: '重新生成',
+                        icon: const Icon(Icons.refresh_rounded, size: 20),
+                        onPressed: () => _send(replacing: turn),
+                      ),
+                  ],
+                ),
             ],
           ),
         );
@@ -1287,11 +1464,14 @@ class _AgentChatPageState extends State<AgentChatPage> {
     canEdit: _canEditComposer,
     generating: _activeTurn != null,
     switchingAccount: _account.changing,
-    savingModel: _savingModel,
+    savingConfig: _savingConfig,
     pickingAttachment: _pickingAttachment,
+    webEnabled: _sources.contains(AgentSourceKind.web),
     onChanged: () => setState(() {}),
     onOptions: () => _openComposerOptions(config),
     onModel: _pickModel,
+    onReasoning: _selectReasoning,
+    onToggleWeb: _toggleWeb,
     onDeleteAttachment: (file) => setState(() => _attachments.remove(file)),
     onSend:
         _canEditComposer &&

@@ -14,11 +14,14 @@ class AgentChatComposer extends StatelessWidget {
     required this.canEdit,
     required this.generating,
     required this.switchingAccount,
-    required this.savingModel,
+    required this.savingConfig,
     required this.pickingAttachment,
+    required this.webEnabled,
     required this.onChanged,
     required this.onOptions,
     required this.onModel,
+    required this.onReasoning,
+    required this.onToggleWeb,
     required this.onDeleteAttachment,
     required this.onSend,
     required this.onStop,
@@ -33,11 +36,14 @@ class AgentChatComposer extends StatelessWidget {
   final bool canEdit;
   final bool generating;
   final bool switchingAccount;
-  final bool savingModel;
+  final bool savingConfig;
   final bool pickingAttachment;
+  final bool webEnabled;
   final VoidCallback onChanged;
   final VoidCallback onOptions;
   final VoidCallback onModel;
+  final ValueChanged<AgentReasoningEffort> onReasoning;
+  final VoidCallback onToggleWeb;
   final ValueChanged<AgentAttachment> onDeleteAttachment;
   final VoidCallback? onSend;
   final VoidCallback onStop;
@@ -51,8 +57,10 @@ class AgentChatComposer extends StatelessWidget {
         ? '正在切换账号…'
         : pickingAttachment
         ? '正在读取附件…'
+        : savingConfig
+        ? '正在保存模型选项…'
         : null;
-    final modelLabel = savingModel ? '正在切换模型…' : config.displayModel;
+    final modelLabel = config.displayModel;
     final optionsLabel = sourceCount == 0
         ? '添加与信息源'
         : '添加与信息源，已启用 $sourceCount 项';
@@ -211,6 +219,48 @@ class AgentChatComposer extends StatelessWidget {
                           ),
                         ),
                       ),
+                      PopupMenuButton<AgentReasoningEffort>(
+                        key: const Key('chat-reasoning-picker'),
+                        tooltip: '推理强度 · ${config.reasoningEffort.label}',
+                        enabled: canEdit,
+                        initialValue: config.reasoningEffort,
+                        onSelected: onReasoning,
+                        itemBuilder: (context) => [
+                          for (final effort in AgentReasoningEffort.values)
+                            CheckedPopupMenuItem(
+                              value: effort,
+                              checked: effort == config.reasoningEffort,
+                              child: Text(effort.label),
+                            ),
+                        ],
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              minHeight: 48,
+                              minWidth: 48,
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text('推理', style: theme.textTheme.labelMedium),
+                                Text(
+                                  config.reasoningEffort.label,
+                                  style: theme.textTheme.labelSmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: webEnabled ? '关闭联网搜索' : '开启联网搜索',
+                        isSelected: webEnabled,
+                        selectedIcon: const Icon(Icons.language),
+                        icon: const Icon(Icons.language_outlined),
+                        color: webEnabled ? theme.colorScheme.primary : null,
+                        onPressed: canEdit ? onToggleWeb : null,
+                      ),
                       const SizedBox(width: 4),
                       IconButton.filled(
                         tooltip: generating ? '停止生成' : '发送',
@@ -231,7 +281,7 @@ class AgentChatComposer extends StatelessWidget {
   }
 }
 
-enum AgentComposerAction { attach, manageApprovals }
+enum AgentComposerAction { localAttachment, cloudAttachment, manageApprovals }
 
 class AgentComposerOptions extends StatelessWidget {
   const AgentComposerOptions({
@@ -263,12 +313,24 @@ class AgentComposerOptions extends StatelessWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.attach_file),
-              title: const Text('添加附件'),
+              title: const Text('附加本地文件'),
               subtitle: canAttach
                   ? null
                   : Text('每条消息最多 $agentMaxAttachments 个附件'),
               onTap: canAttach
-                  ? () => Navigator.of(context).pop(AgentComposerAction.attach)
+                  ? () =>
+                        Navigator.of(context)
+                            .pop(AgentComposerAction.localAttachment)
+                  : null,
+            ),
+            ListTile(
+              leading: const Icon(Icons.cloud_outlined),
+              title: const Text('附加云端文件'),
+              subtitle: Text(hasAccount ? 'eLearning、复旦云盘' : '登录校园账号后可用'),
+              onTap: canAttach && hasAccount
+                  ? () =>
+                        Navigator.of(context)
+                            .pop(AgentComposerAction.cloudAttachment)
                   : null,
             ),
             ListTile(
