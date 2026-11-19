@@ -61,7 +61,7 @@ void main() {
     'only approved, projected campus data leaves the app in this turn',
     () async {
       final model = _Model([
-        const AgentMessage.assistant(''),
+        const AgentMessage.assistant('可以帮你查作业。'),
         const AgentMessage.assistant('', [_courseCall, _assignmentCall]),
         const AgentMessage.assistant('有一门课布置了作业'),
         const AgentMessage.assistant('继续聊天'),
@@ -141,14 +141,14 @@ void main() {
         ],
       });
       expect(results[1].text, contains('2099-01-01T18:00:00+08:00'));
-      expect(model.requests.last, hasLength(3));
+      expect(model.requests.last, hasLength(5));
       expect(
         model.requests.last.every((message) => message.role != AgentRole.tool),
         isTrue,
       );
       expect(
         model.requests.last.any((message) => message.text.contains('有一门课')),
-        isFalse,
+        isTrue,
       );
     },
   );
@@ -278,8 +278,15 @@ void main() {
     expect(jsonDecode(tool.text), {'file': pdf.name});
     expect(model.requests[1].last.attachments, [pdf]);
     await _send(session, approve: (_) async => false);
-    expect(model.requests.last, hasLength(1));
-    expect(model.requests.last.single.attachments, isEmpty);
+    expect(model.requests.last.map((message) => message.text), [
+      '概括作业说明',
+      '概括了文件',
+      '有哪些作业？',
+    ]);
+    expect(
+      model.requests.last.every((message) => message.attachments.isEmpty),
+      isTrue,
+    );
   });
 
   test(

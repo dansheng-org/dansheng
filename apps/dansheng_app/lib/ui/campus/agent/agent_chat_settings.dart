@@ -35,6 +35,7 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
 
   final _form = GlobalKey<FormState>();
   late ModelProvider _provider;
+  late AgentReasoningEffort _reasoningEffort;
   late final TextEditingController _baseUrl;
   late final TextEditingController _model;
   late final TextEditingController _apiKey;
@@ -60,7 +61,7 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
   bool _matchesSavedDestination(Uri? prefix) =>
       prefix != null &&
       prefix == _savedPrefix &&
-      _provider == _savedConfig?.provider;
+      _provider.usesBearerAuth == _savedConfig?.provider.usesBearerAuth;
 
   String get _effectiveApiKey {
     final key = _apiKey.text.trim();
@@ -91,6 +92,8 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
     super.initState();
     final config = _savedConfig = widget.config;
     _provider = config?.provider ?? ModelProvider.openAi;
+    _reasoningEffort =
+        config?.reasoningEffort ?? AgentReasoningEffort.defaultEffort;
     final address =
         config?.baseUrl ?? AgentModelConfig.defaultBaseUrl(_provider);
     _baseUrl = TextEditingController(text: address.toString());
@@ -122,16 +125,21 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
 
   void _changeProvider(ModelProvider? provider) {
     if (provider == null || provider == _provider) return;
+    final previousProvider = _provider;
+    final previousPrefix = _editedPrefix;
     final previousDefault = AgentModelConfig.defaultBaseUrl(_provider);
     setState(() {
       if (_editedPrefix == normalizeModelApiPrefix(previousDefault)) {
         final address = AgentModelConfig.defaultBaseUrl(provider);
         _baseUrl.text = address.toString();
-        _editedPrefix = normalizeModelApiPrefix(address);
       }
       _provider = provider;
+      _editedPrefix = _parsePrefix(_baseUrl.text);
       _selectedModel = null;
-      _apiKey.clear();
+      if (previousProvider.usesBearerAuth != provider.usesBearerAuth ||
+          previousPrefix != _editedPrefix) {
+        _apiKey.clear();
+      }
       _queueCatalog();
     });
   }
@@ -152,6 +160,7 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
     try {
       return normalizeModelApiPrefix(
         AgentModelConfig.parseBaseUrl(value.trim()),
+        provider: _provider,
       );
     } on FormatException {
       return null;
@@ -272,6 +281,7 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
       model: model,
       modelLabel: modelLabel,
       apiKey: _effectiveApiKey,
+      reasoningEffort: _reasoningEffort,
       searchApiKey: searchKey.isNotEmpty
           ? searchKey
           : (_removeSearchKey ? null : _savedSearchKey),
@@ -393,6 +403,10 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
                       child: Text('OpenAI 兼容'),
                     ),
                     DropdownMenuItem(
+                      value: ModelProvider.openAiResponses,
+                      child: Text('OpenAI Responses'),
+                    ),
+                    DropdownMenuItem(
                       value: ModelProvider.anthropic,
                       child: Text('Anthropic 兼容'),
                     ),
@@ -475,6 +489,41 @@ class _AgentChatSettingsState extends State<AgentChatSettings> {
                   ],
                 ),
                 Text(_catalogStatus),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<AgentReasoningEffort>(
+                  initialValue: _reasoningEffort,
+                  decoration: const InputDecoration(
+                    labelText: '推理强度',
+                    helperText: '默认沿用原有行为。支持推理的模型可选择低、中、高。',
+                    helperMaxLines: 2,
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: AgentReasoningEffort.defaultEffort,
+                      child: Text('默认'),
+                    ),
+                    DropdownMenuItem(
+                      value: AgentReasoningEffort.low,
+                      child: Text('低'),
+                    ),
+                    DropdownMenuItem(
+                      value: AgentReasoningEffort.medium,
+                      child: Text('中'),
+                    ),
+                    DropdownMenuItem(
+                      value: AgentReasoningEffort.high,
+                      child: Text('高'),
+                    ),
+                  ],
+                  onChanged: _saving
+                      ? null
+                      : (effort) {
+                          if (effort != null) {
+                            setState(() => _reasoningEffort = effort);
+                          }
+                        },
+                ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _searchApiKey,

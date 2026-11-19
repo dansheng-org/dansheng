@@ -83,8 +83,10 @@ class AgentSession {
     }
   }
 
-  static const _maxCalls = 12;
-  static const _maxRounds = 4;
+  static const _maxCalls = 20;
+  static const _maxToolRounds = 8;
+  static const _maxToolResultBytes = 56 * 1024;
+  static const _maxHistoryBytes = 28 * 1024;
   final AgentModel _model;
   final AgentToolRegistry _registry;
   final _history = <AgentMessage>[];
@@ -92,10 +94,31 @@ class AgentSession {
   bool _busy = false;
 
   void _remember(AgentMessage user, AgentMessage reply) {
+    final replyBytes = utf8.encode(reply.text);
+    final available = _maxHistoryBytes - utf8.encode(user.text).length;
+    if (replyBytes.length > available && available >= 64) {
+      // Keep the start and the conclusion of an unusually long response.
+      const separator = '\n\n［中段已省略］\n\n';
+      var head = (available - utf8.encode(separator).length) ~/ 2;
+      var tail = replyBytes.length - head;
+      while ((replyBytes[head] & 0xc0) == 0x80) {
+        head--;
+      }
+      while ((replyBytes[tail] & 0xc0) == 0x80) {
+        tail++;
+      }
+      reply = AgentMessage.assistant(
+        '${utf8.decode(replyBytes.sublist(0, head))}$separator'
+        '${utf8.decode(replyBytes.sublist(tail))}',
+      );
+    }
     _history.addAll([user, reply]);
-    while (_history.length > 12 ||
-        _history.fold(0, (length, message) => length + message.text.length) >
-            16000) {
+    while (_history.length > 20 ||
+        _history.fold(
+              0,
+              (length, message) => length + utf8.encode(message.text).length,
+            ) >
+            _maxHistoryBytes) {
       _history.removeRange(0, 2);
     }
   }
@@ -155,6 +178,10 @@ class AgentSession {
     final answer = StringBuffer();
     final usedSources = <AgentSourceKind>{};
     var callCount = 0;
+    var toolRounds = 0;
+    var toolResultBytes = 0;
+    var retriedAnswer = false;
+    var hasAnswerText = false;
     var attachmentCount = attachments.length;
     var attachmentLimit = agentMaxAttachmentBytes;
     var attachmentBytes = attachments.fold(
@@ -162,12 +189,16 @@ class AgentSession {
       (size, file) => size + file.byteLength,
     );
     try {
-      for (var round = 0; round <= _maxRounds; round++) {
+      while (true) {
         checkSession();
         if (usedSources.any((source) => !_registry.sourceAvailable(source))) {
           throw const AgentFailure('本轮信息源已停用。');
         }
-        final tools = (round == _maxRounds || callCount == _maxCalls)
+        final finalOnly =
+            retriedAnswer ||
+            toolRounds >= _maxToolRounds ||
+            callCount >= _maxCalls;
+        final tools = finalOnly
             ? <String, AgentTool>{}
             : {
                 for (final entry in enabled.entries)
@@ -188,20 +219,49 @@ class AgentSession {
         );
         checkSession();
         if (reply.text.isNotEmpty) {
+          if (!streamedText) {
+            if (answer.isNotEmpty) onText('\n\n');
+            onText(reply.text);
+          }
           if (answer.isNotEmpty) answer.write('\n\n');
           answer.write(reply.text);
         }
         if (reply.calls.isEmpty) {
-          if (callCount == 0 && attachments.isEmpty) {
-            _remember(user, reply);
-            if (reply.text.isNotEmpty) onRemembered?.call();
+          hasAnswerText |= reply.text.trim().isNotEmpty;
+          if (!retriedAnswer && (reply.outputTruncated || !hasAnswerText)) {
+            retriedAnswer = true;
+            if (reply.text.trim().isNotEmpty) messages.add(reply);
+            messages.add(
+              AgentMessage.user(
+                hasAnswerText
+                    ? '请从中断处继续直接作答，不重复已给出的内容。'
+                    : '请根据已有信息直接回答最初的问题；如果缺少必要信息，请说明具体缺少什么。',
+              ),
+            );
+            continue;
+          }
+          if (hasAnswerText) {
+            // Only the answer shown in the transcript follows the next turn.
+            // Local files, provider reasoning, and structured tool rows are not replayed.
+            _remember(
+              AgentMessage.user(user.text),
+              AgentMessage.assistant(answer.toString()),
+            );
+            onRemembered?.call();
+          }
+          if (reply.outputTruncated) {
+            throw const AgentFailure('模型达到输出上限。你可以回复「继续」接着问。');
+          }
+          if (!hasAnswerText || (retriedAnswer && reply.text.trim().isEmpty)) {
+            throw const AgentFailure('模型未生成有效回答。请降低推理强度或重试。');
           }
           return answer.toString();
         }
         callCount += reply.calls.length;
-        if (callCount > _maxCalls || round == _maxRounds) {
+        if (callCount > _maxCalls || finalOnly) {
           throw const AgentFailure('已达到本轮查询上限，请缩小查询范围。');
         }
+        toolRounds++;
         messages.add(reply);
         final remoteFiles = <AgentAttachment>[];
         for (final call in reply.calls) {
@@ -302,10 +362,15 @@ class AgentSession {
             }
           }
           final encoded = jsonEncode(result);
+          final size = utf8.encode(encoded).length;
+          final fits =
+              encoded.length <= 12000 &&
+              toolResultBytes + size <= _maxToolResultBytes;
+          if (fits) toolResultBytes += size;
           messages.add(
             AgentMessage.tool(
               call.id,
-              encoded.length <= 12000 ? encoded : '{"error":"结果过大，请缩小查询范围。"}',
+              fits ? encoded : '{"error":"工具结果超出本轮上下文限额，请缩小查询范围。"}',
             ),
           );
         }
@@ -318,7 +383,6 @@ class AgentSession {
           );
         }
       }
-      throw const AgentFailure('已达到本轮查询上限，请缩小查询范围。');
     } finally {
       _busy = false;
     }

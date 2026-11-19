@@ -21,7 +21,8 @@ internal object AgentModelSettings {
             val key = params.getString("api_key")
             val searchKey = params.opt("search_api_key")
             val modelLabel = params.opt("model_label")
-            if (provider !in setOf("openAi", "anthropic") || address.length !in 1..2048 ||
+            val reasoningEffort = params.opt("reasoning_effort")
+            if (provider !in setOf("openAi", "openAiResponses", "anthropic") || address.length !in 1..2048 ||
                 model.length !in 1..256 || model.isBlank() || key.length !in 1..4096 ||
                 key.any { it.code !in 33..126 }
             ) throw PortError("InvalidInput")
@@ -30,6 +31,9 @@ internal object AgentModelSettings {
             ) throw PortError("InvalidInput")
             if (modelLabel != null && (modelLabel !is String ||
                 modelLabel.isBlank() || modelLabel.length > 256 || modelLabel.any { Character.isISOControl(it) })
+            ) throw PortError("InvalidInput")
+            if (reasoningEffort != null && (reasoningEffort !is String ||
+                reasoningEffort !in setOf("low", "medium", "high"))
             ) throw PortError("InvalidInput")
             val uri = try { URI(address) } catch (_: Exception) { throw PortError("InvalidInput") }
             if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.rawUserInfo != null ||
@@ -40,6 +44,7 @@ internal object AgentModelSettings {
                 fields.forEach { field -> value.put(field, params.getString(field)) }
                 if (searchKey != null) value.put("search_api_key", searchKey)
                 if (modelLabel != null) value.put("model_label", modelLabel)
+                if (reasoningEffort != null) value.put("reasoning_effort", reasoningEffort)
             }.toString())
             JSONObject().put("saved", true)
         }
