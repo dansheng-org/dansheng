@@ -182,6 +182,9 @@ try {
     $env:GITHUB_RUN_ID = '987700'; $env:GITHUB_JOB = 'sweeper'; $env:GITHUB_RUN_ATTEMPT = '1'
     $layout = Get-DanshengCiLayout
     $runtimeRoot = Join-Path $env:DANSHENG_CI_ROOT 'runtime'
+    $removedRun = [IO.Directory]::CreateDirectory((Join-Path $runtimeRoot '987599'))
+    [IO.Directory]::Delete($removedRun.FullName)
+    Assert (@(Get-CiChildDirectories $removedRun).Count -eq 0) 'A concurrently removed run stopped the sweep.'
     $stale = Join-Path $runtimeRoot '987600/old-job/1'
     $staleUnmarked = Join-Path $runtimeRoot '987601/crashed-job/1'
     $markedRecently = Join-Path $runtimeRoot '987602/long-job/1'

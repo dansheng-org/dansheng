@@ -50,6 +50,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
+          # The stable SDK lock can point to the earlier commit that built Core.
+          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/initialize-ci
         with:

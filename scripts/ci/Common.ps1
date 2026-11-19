@@ -110,6 +110,13 @@ function Limit-DanshengCiBuildCache([string]$Path, [long]$MaxBytes) {
 # any job may run (Actions caps jobs at 6 h). Running runtimes are never
 # finished-marked and are younger than the cutoff, so neither pass touches them.
 # Failures only warn: another runner may be removing the same directory.
+function Get-CiChildDirectories([IO.DirectoryInfo]$Directory) {
+    try { $Directory.GetDirectories() }
+    catch [IO.DirectoryNotFoundException] {
+        # A concurrent sweep can remove an empty parent after we observed it.
+    }
+}
+
 function Clear-DanshengCiRuntimes($Layout, [switch]$Superseded, [TimeSpan]$MaxAge = [TimeSpan]::FromHours(24)) {
     $root = Assert-CiPlainPath (Join-Path $Layout.root 'runtime')
     if (-not [IO.Directory]::Exists($root)) { return }
@@ -125,12 +132,12 @@ function Clear-DanshengCiRuntimes($Layout, [switch]$Superseded, [TimeSpan]$MaxAg
         try { $Item.Refresh(); if (-not $Item.EnumerateFileSystemInfos().GetEnumerator().MoveNext()) { $Item.Delete() } } catch { }
     }
     $removed = 0
-    foreach ($run in [IO.DirectoryInfo]::new($root).GetDirectories()) {
+    foreach ($run in (Get-CiChildDirectories ([IO.DirectoryInfo]::new($root)))) {
         if (($run.Attributes -band $link) -or $run.Name -notmatch '^\d+$') { continue }
-        foreach ($job in $run.GetDirectories()) {
+        foreach ($job in (Get-CiChildDirectories $run)) {
             if (($job.Attributes -band $link) -or $job.Name -notmatch '^[A-Za-z0-9_-]+$') { continue }
             if ($Superseded -and $job.Name -cne $jobName) { continue }
-            foreach ($attempt in $job.GetDirectories()) {
+            foreach ($attempt in (Get-CiChildDirectories $job)) {
                 if (($attempt.Attributes -band $link) -or $attempt.Name -notmatch '^\d+$') { continue }
                 if ($attempt.FullName -ceq $Layout.runtime) { continue }
                 if ($Superseded) {
