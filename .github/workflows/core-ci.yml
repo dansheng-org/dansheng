@@ -21,9 +21,11 @@ jobs:
         include:
           - os: ubuntu-latest
             labels: [self-hosted, linux, x64, 1402ubuntu]
+            hosted: [ubuntu-24.04]
           - os: windows-latest
             labels: [self-hosted, windows, x64, dansheng-win]
-    runs-on: ${{ matrix.labels }}
+            hosted: [windows-2025]
+    runs-on: ${{ github.repository == 'DANSHENG/dansheng' && matrix.labels || matrix.hosted }}
     env:
       # Keep native test binaries small; test assertions remain enabled.
       CARGO_PROFILE_DEV_DEBUG: '0'
@@ -38,23 +40,15 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
-      - name: Initialize preinstalled Windows environment
+      - uses: ./.github/actions/initialize-ci
+        with:
+          role: Native
+      - name: Keep Windows test binaries small
         if: runner.os == 'Windows'
-        working-directory: ${{ github.workspace }}
         run: |
-          ./scripts/ci/Initialize-Runner.ps1 -Role Native
           # GNU COFF symbol tables account for roughly a third of test EXE size.
           'CARGO_PROFILE_DEV_STRIP=symbols' >> $env:GITHUB_ENV
           'CARGO_PROFILE_TEST_STRIP=symbols' >> $env:GITHUB_ENV
-      - name: Initialize preinstalled Linux environment
-        if: runner.os == 'Linux'
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
-          source "$DANSHENG_CI_ROOT/runner-env.sh"
-          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Native
       - name: Test affected-check scheduling
         if: runner.os == 'Linux' && !inputs.smoke
         working-directory: ${{ github.workspace }}
@@ -93,20 +87,15 @@ jobs:
         run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE
   sdk:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, 1402ubuntu]
+    runs-on: ${{ fromJSON(github.repository == 'DANSHENG/dansheng' && '["self-hosted","linux","x64","1402ubuntu"]' || '["ubuntu-24.04"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Initialize preinstalled Linux environment
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
-          source "$DANSHENG_CI_ROOT/runner-env.sh"
-          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Sdk
+      - uses: ./.github/actions/initialize-ci
+        with:
+          role: Sdk
       - run: npm ci --ignore-scripts
         if: ${{ !inputs.smoke }}
         working-directory: core/sdk
@@ -122,22 +111,15 @@ jobs:
         run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE
   android:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, 1402ubuntu]
-    env:
-      ANDROID_NDK_VERSION: '30.0.16138531'
+    runs-on: ${{ fromJSON(github.repository == 'DANSHENG/dansheng' && '["self-hosted","linux","x64","1402ubuntu"]' || '["ubuntu-24.04"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Initialize preinstalled Linux environment
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
-          source "$DANSHENG_CI_ROOT/runner-env.sh"
-          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Android
+      - uses: ./.github/actions/initialize-ci
+        with:
+          role: Android
       - name: Build Android core libraries
         if: ${{ !inputs.smoke }}
         shell: bash

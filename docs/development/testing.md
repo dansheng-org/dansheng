@@ -25,7 +25,22 @@ App 包含锁定 Pub 解析、手写格式、analyze、test、Pigeon 生成及�
 
 Core 包含 `cargo fmt --all -- --check`、`cargo test --workspace --all-features --all-targets --locked` 和 strict Clippy。插件 SDK 使用自身 npm lock、类型检查和 Node tests。精确 CI 命令见 [app-ci.yml](../../.github/workflows/app-ci.yml) 和 [core-ci.yml](../../.github/workflows/core-ci.yml)。
 
-自托管 Windows/Linux runner 的分工、预装环境接口、缓存/签名隔离与 smoke 验收见 [自托管 CI](self-hosted-ci.md)。CI 手写 Dart 格式检查使用相对路径、每批最多 32 个文件，并排除 Pigeon 生成的 `lib/bridge.g.dart`。
+个人仓 `DANSHENG/dansheng` 使用[自托管 Windows/Linux runner](self-hosted-ci.md) 和仓库签名 Secrets。组织仓 `dansheng-org/dansheng` 同步同一份工作流，使用 GitHub 托管的 `ubuntu-24.04` 和 `windows-2025`，在任务开始时准备需要的固定版本工具。两个仓库都运行 App 和 Core 检查，Android 签名 Pre-release 由个人仓发布。
+
+手动运行 **App and Core checks** 时，可设置 `smoke=true` 验证七个任务的调度和工具环境。完整检查用默认的 `smoke=false`。CI 手写 Dart 格式检查使用相对路径、每批最多 32 个文件，并排除 Pigeon 生成的 `lib/bridge.g.dart`。
+
+## 手动同步组织仓
+
+在个人仓的 `main` 完成验收后，从组织仓的本地副本执行以下命令。`upstream` 指向个人仓，`origin` 指向组织仓。
+
+```powershell
+git switch main
+git fetch upstream
+git push origin upstream/main:refs/heads/main
+git pull --ff-only origin main
+```
+
+推送成功后，在组织仓检查同一个提交的 Actions 结果。若推送因历史分叉被拒绝，先在个人仓处理差异，再重新同步。
 
 Native CI 的 Rust fmt、全 workspace 测试和严格 Clippy 仍按原命令执行。耗时较长的 worktree/依赖隔离夹具按变更范围调度：工作区工具、构建脚本或 CI 配置发生变化时执行；已知类型的普通业务源码、测试与文档变动不重复执行这些 Git 夹具。`pubspec.yaml` 只有版本行变化时也按产品变动处理，依赖与 SDK 配置变化仍执行夹具。未知文件、手动全量运行，以及无法可靠取得比较基线或变更清单的情况，均执行完整夹具。判定步骤自身失败也回退到完整执行。调度决定和原因会写入 job 日志。
 

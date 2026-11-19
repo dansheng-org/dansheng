@@ -15,12 +15,12 @@ concurrency:
 
 jobs:
   checks:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.repository == 'DANSHENG/dansheng' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/app-ci.yml
   build:
     needs: checks
     if: >-
-      always() && !cancelled() &&
+      always() && !cancelled() && github.repository == 'DANSHENG/dansheng' &&
       ((github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
@@ -44,14 +44,9 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
-      - name: Initialize preinstalled Linux environment
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
-          source "$DANSHENG_CI_ROOT/runner-env.sh"
-          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Release
+      - uses: ./.github/actions/initialize-ci
+        with:
+          role: Release
       - name: Select exact App and Core identities
         id: identity
         run: |
@@ -134,13 +129,9 @@ jobs:
         with:
           ref: ${{ needs.build.outputs.commit }}
           persist-credentials: false
-      - name: Initialize preinstalled Linux environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
-          source "$DANSHENG_CI_ROOT/runner-env.sh"
-          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Publish
+      - uses: ./.github/actions/initialize-ci
+        with:
+          role: Publish
       - name: Download audited release payload
         env:
           GH_TOKEN: ${{ github.token }}

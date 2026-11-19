@@ -1,5 +1,7 @@
 # 自托管 CI
 
+本文记录个人仓 `DANSHENG/dansheng` 的预装工具、自托管 runner 和签名配置。组织仓的 GitHub 托管检查与手动同步流程见 [测试与验收](testing.md)。
+
 ## 调度与检查
 
 所有执行 job 均使用自托管 runner；reusable workflow 的 `core`、`checks` 继续调用同一套检查，不另占 hosted runner。

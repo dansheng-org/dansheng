@@ -3,7 +3,7 @@
 param([Parameter(Mandatory)][ValidateSet('Workspace','Flutter','Native','Sdk','Android','AndroidSource','Release','Publish')][string]$Role)
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $layout = Get-DanshengCiLayout
-if ($IsWindows) {
+if ($IsWindows -and $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
     # Linux sources runner-env.sh before starting portable PowerShell.
     $entry = Join-Path $layout.root 'runner-env.ps1'
     if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { throw 'Missing runner-env.ps1 in DANSHENG_CI_ROOT.' }
@@ -107,7 +107,7 @@ foreach ($name in $exportNames | Sort-Object -Unique) {
         foreach ($part in $parts) { Add-Content -LiteralPath $env:GITHUB_PATH -Value $part -Encoding utf8 }
     } else { Add-Content -LiteralPath $env:GITHUB_ENV -Value "$name=$value" -Encoding utf8 }
 }
-# Preinstalled tools only. A version mismatch fails rather than installing tools.
+# Validate the tools selected by the runner bootstrap.
 function Check-Tool([string]$Command, [string[]]$Arguments, [string]$Pattern) {
     $output = @(& $Command @Arguments 2>&1) -join "`n"
     if ($LASTEXITCODE -ne 0 -or $output -notmatch $Pattern) { throw "Preinstalled $Command failed its pinned health check ($Pattern)." }
@@ -152,4 +152,4 @@ if ($Role -in @('AndroidSource','Release')) {
     }
 }
 if ($Role -in @('Release','Publish')) { Check-Tool gh @('--version') '^gh version ' }
-Write-Host "CI runtime prepared; $Role preinstalled tool health checks passed."
+Write-Host "CI runtime prepared; $Role tool health checks passed."

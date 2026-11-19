@@ -22,7 +22,7 @@ concurrency:
 jobs:
   workspace-scripts:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, dansheng-scripts]
+    runs-on: ${{ fromJSON(github.repository == 'DANSHENG/dansheng' && '["self-hosted","linux","x64","dansheng-scripts"]' || '["ubuntu-24.04"]') }}
     defaults:
       run:
         shell: bash
@@ -32,19 +32,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Initialize preinstalled Linux environment
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
-          source "$DANSHENG_CI_ROOT/runner-env.sh"
-          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Workspace
+      - uses: ./.github/actions/initialize-ci
+        with:
+          role: Workspace
       - name: Core dependency path and payload fixtures
         if: ${{ !inputs.smoke }}
         run: |
           set -euo pipefail
-          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
-          source "$DANSHENG_CI_ROOT/runner-env.sh"
+          if [[ "$RUNNER_ENVIRONMENT" == self-hosted ]]; then
+            source "${DANSHENG_CI_ROOT:?Runner CI root is missing}/runner-env.sh"
+          fi
           pwsh -NoLogo -NoProfile -File ../../scripts/ci/Test-WorkspaceScripts.ps1
           python ./scripts/tests/audit-paths.test.py
       - name: Keep only this job's latest runtime and clean build outputs
@@ -54,7 +51,7 @@ jobs:
         run: ./scripts/ci/Clear-Runtime.ps1 -Checkout $env:GITHUB_WORKSPACE
   flutter:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, 1402ubuntu]
+    runs-on: ${{ fromJSON(github.repository == 'DANSHENG/dansheng' && '["self-hosted","linux","x64","1402ubuntu"]' || '["ubuntu-24.04"]') }}
     defaults:
       run:
         working-directory: apps/dansheng_app
@@ -65,14 +62,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Initialize preinstalled Linux environment
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
-          source "$DANSHENG_CI_ROOT/runner-env.sh"
-          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role Flutter
+      - uses: ./.github/actions/initialize-ci
+        with:
+          role: Flutter
       - name: Reject local Pub overrides
         if: ${{ !inputs.smoke }}
         shell: bash
@@ -107,7 +99,7 @@ jobs:
       smoke: ${{ inputs.smoke || false }}
   android-source-sdk:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, 1402ubuntu]
+    runs-on: ${{ fromJSON(github.repository == 'DANSHENG/dansheng' && '["self-hosted","linux","x64","1402ubuntu"]' || '["ubuntu-24.04"]') }}
     timeout-minutes: 120
     defaults:
       run:
@@ -120,14 +112,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Initialize preinstalled Linux environment
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
-          source "$DANSHENG_CI_ROOT/runner-env.sh"
-          pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role AndroidSource
+      - uses: ./.github/actions/initialize-ci
+        with:
+          role: AndroidSource
       - name: Build exact checkout SDK and compile App Kotlin/Pigeon
         if: ${{ !inputs.smoke }}
         run: |

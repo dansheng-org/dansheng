@@ -13,7 +13,8 @@ $app = Join-Path $repo 'apps/dansheng_app'
 $core = Join-Path $repo 'core'
 # Production scripts isolate their Cargo/Pub/Gradle homes beneath RuntimeRoot.
 # Reuse only public dependency bytes; do not change their source/output guards.
-Sync-CiPublicDependencies $cache $layout.runtime -Direction CacheToRuntime
+$usesPersistentCache = $env:RUNNER_ENVIRONMENT -ne 'github-hosted'
+if ($usesPersistentCache) { Sync-CiPublicDependencies $cache $layout.runtime -Direction CacheToRuntime }
 try {
     if ($Mode -eq 'SourceSdk') {
         if ($Commit -notmatch '^[0-9a-f]{40}$') { throw 'Pass the exact checked-out source SHA.' }
@@ -25,5 +26,5 @@ try {
     }
     if ($LASTEXITCODE -ne 0) { throw 'Android production script failed.' }
 } finally {
-    Sync-CiPublicDependencies $layout.runtime $cache -Direction RuntimeToCache
+    if ($usesPersistentCache) { Sync-CiPublicDependencies $layout.runtime $cache -Direction RuntimeToCache }
 }

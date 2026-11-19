@@ -1,0 +1,39 @@
+name: Initialize Dansheng CI
+description: Prepare the tools and runtime for this job on the selected runner
+inputs:
+  role:
+    description: CI role for tool selection
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Initialize self-hosted Linux environment
+      if: runner.environment == 'self-hosted' && runner.os == 'Linux'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        DANSHENG_CI_ROLE: ${{ inputs.role }}
+      run: |
+        set -euo pipefail
+        : "${DANSHENG_CI_ROOT:?Runner parent must supply DANSHENG_CI_ROOT}"
+        source "$DANSHENG_CI_ROOT/runner-env.sh"
+        pwsh -NoLogo -NoProfile -File scripts/ci/Initialize-Runner.ps1 -Role "$DANSHENG_CI_ROLE"
+    - name: Initialize self-hosted Windows environment
+      if: runner.environment == 'self-hosted' && runner.os == 'Windows'
+      shell: pwsh
+      working-directory: ${{ github.workspace }}
+      env:
+        DANSHENG_CI_ROLE: ${{ inputs.role }}
+      run: ./scripts/ci/Initialize-Runner.ps1 -Role $env:DANSHENG_CI_ROLE
+    - name: Select Node.js 22 on GitHub-hosted runners
+      if: runner.environment == 'github-hosted' && inputs.role == 'Sdk'
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: '22'
+    - name: Initialize GitHub-hosted environment
+      if: runner.environment == 'github-hosted'
+      shell: pwsh
+      working-directory: ${{ github.workspace }}
+      env:
+        DANSHENG_CI_ROLE: ${{ inputs.role }}
+      run: ./scripts/ci/Initialize-HostedRunner.ps1 -Role $env:DANSHENG_CI_ROLE
