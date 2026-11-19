@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dansheng_app/agent/agent_session.dart';
 import 'package:dansheng_app/agent/agent_types.dart';
@@ -103,7 +104,7 @@ void main() {
     'answers Assignment 1 from its PDF and continues the conversation',
     () async {
       const question = '检查我芯片导论的assignment1的第一题，给出解答';
-      const firstQuestion = '第 1 题（合成夹具）：求给定模块的输出。';
+      final pdf = utf8.encode('%PDF-1.7\n第 1 题（合成夹具）：求给定模块的输出。');
       const firstPart = '第一题的解法如下。先列出题设关系。';
       const secondPart = '代入题设数值后得到结果，再做一次核对。';
       bridge.respond = (method, params) => switch (method) {
@@ -130,10 +131,9 @@ void main() {
         ],
         'canvas.materials.sync' => [],
         'agent.remoteFile.read' => {
-          'name': '说明.pdf.txt',
-          'mime_type': 'text/plain',
-          'data': base64Encode(utf8.encode(firstQuestion)),
-          'extracted': true,
+          'name': '说明.pdf',
+          'mime_type': 'application/pdf',
+          'data': base64Encode(pdf),
         },
         _ => throw StateError('Unexpected route: $method'),
       };
@@ -165,14 +165,6 @@ void main() {
             'file_id': '20',
           }),
         ]),
-        const AgentMessage.assistant('', [
-          AgentToolCall('page', 'campus_read_course_file', {
-            'course_id': '42',
-            'assignment_id': '7',
-            'file_id': '20',
-            'page': 1,
-          }),
-        ]),
         const AgentMessage.assistantTruncated(firstPart),
         const AgentMessage.assistant(secondPart),
         const AgentMessage.assistant('沿用上一题的推导。'),
@@ -192,7 +184,7 @@ void main() {
       );
       expect(await send(question), '$firstPart\n\n$secondPart');
       expect(approvals, [AgentSourceKind.learning, AgentSourceKind.files]);
-      final outgoing = model.requests[5];
+      final outgoing = model.requests[4];
       final toolText = outgoing
           .where((entry) => entry.role == AgentRole.tool)
           .map((entry) => entry.text)
@@ -200,8 +192,11 @@ void main() {
       expect(toolText, contains('题目见附件'));
       expect(toolText, isNot(contains('Assignment 10')));
       expect(toolText, isNot(contains('fixture-secret')));
-      expect(outgoing.last.attachments.single.text, firstQuestion);
-      expect(model.requests[6].any((entry) => entry.text == firstPart), isTrue);
+      final attachment = outgoing.last.attachments.single;
+      expect(attachment.name, '说明.pdf');
+      expect(attachment.mimeType, 'application/pdf');
+      expect(base64Decode(attachment.base64Data), pdf);
+      expect(model.requests[5].any((entry) => entry.text == firstPart), isTrue);
       expect(await send('为什么用刚才那个公式？'), '沿用上一题的推导。');
       final followup = model.requests.last;
       expect(followup.map((entry) => entry.text), [
@@ -259,11 +254,11 @@ void main() {
       expect(method, 'canvas.materials.sync');
       return [
         {'id': 1, 'filename': 'Week-One.PNG', 'display_name': '图表'},
-        {'id': 2, 'filename': 'week-two.pdf', 'size': agentMaxCampusFileBytes},
+        {'id': 2, 'filename': 'week-two.pdf', 'size': agentMaxDeepSeekPdfBytes},
         {
           'id': 3,
           'filename': 'week-three.pdf',
-          'size': agentMaxCampusFileBytes + 1,
+          'size': agentMaxDeepSeekPdfBytes + 1,
         },
         {'id': 4, 'filename': 'week-four.docx'},
         {'id': 5, 'filename': 'week-five.txt', 'hidden_for_user': true},
@@ -283,13 +278,7 @@ void main() {
         'file_id': '2',
         'name': 'week-two.pdf',
         'mime_type': 'application/pdf',
-        'size': agentMaxCampusFileBytes,
-      },
-      {
-        'file_id': '7',
-        'name': 'week-seven.csv',
-        'mime_type': 'text/csv',
-        'size': 24 * 1024 + 1,
+        'size': agentMaxDeepSeekPdfBytes,
       },
       {'file_id': '9', 'name': 'week-nine.md', 'mime_type': 'text/markdown'},
     ]);
@@ -298,6 +287,7 @@ void main() {
   test(
     'assignment-only files retain exact IDs without leaking link URLs',
     () async {
+      final pdf = utf8.encode('%PDF-1.7\n原始文档');
       bridge.respond = (method, _) => switch (method) {
         'canvas.assignments.sync' => [
           {
@@ -325,11 +315,9 @@ void main() {
           {'id': 21, 'filename': '未被链接.pdf'},
         ],
         'agent.remoteFile.read' => {
-          'name': '研究 & 讲义.pdf.txt',
-          'mime_type': 'text/plain',
-          'data': base64Encode(utf8.encode('提取的中文内容')),
-          'extracted': true,
-          'truncated': false,
+          'name': '研究 & 讲义.pdf',
+          'mime_type': 'application/pdf',
+          'data': base64Encode(pdf),
         },
         _ => throw StateError('Unexpected method $method'),
       };
@@ -359,10 +347,12 @@ void main() {
         'assignment_id': '7',
         'file_id': '12',
       });
-      expect(result['extracted'], isTrue);
-      expect(result['truncated'], isFalse);
       expect(result['data'], isNull);
-      expect((result['attachment'] as AgentAttachment).text, '提取的中文内容');
+      expect(result['mime_type'], 'application/pdf');
+      expect(
+        base64Decode((result['attachment'] as AgentAttachment).base64Data),
+        pdf,
+      );
     },
   );
 
@@ -530,33 +520,50 @@ void main() {
     },
   );
 
-  test(
-    'large PDFs can be read by page without forwarding the raw file',
-    () async {
-      final read = cloud['campus_cloud_read']!;
-      expect(read.accepts({'path': 'fixture', 'page': 12}), isTrue);
-      expect(read.accepts({'path': 'fixture', 'page': 0}), isFalse);
-      expect(read.accepts({'path': 'fixture', 'page': '12'}), isFalse);
-      bridge.respond = (method, params) {
-        expect(method, 'agent.remoteFile.read');
-        expect(params, {'source': 'cloud', 'path': 'fixture', 'page': 12});
-        return {
-          'name': '课程讲义.pdf.txt',
-          'mime_type': 'text/plain',
-          'data': base64Encode(utf8.encode('这是指定页的文字。')),
-          'page': 12,
-          'page_count': 103,
-          'preview': 'page_text',
-          'truncated': true,
-        };
+  test('large cloud PDFs stream the whole cached original', () async {
+    final read = cloud['campus_cloud_read']!;
+    expect(read.accepts({'path': 'fixture', 'page': 12}), isFalse);
+    final directory = await Directory.systemTemp.createTemp(
+      'dansheng-test-pdf-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File.fromUri(directory.uri.resolve('cached-fixture'));
+    final size = agentMaxCampusPdfBytes + 1;
+    final signature = ascii.encode('%PDF-');
+    final writer = file.openSync(mode: FileMode.write);
+    writer
+      ..writeFromSync(signature)
+      ..truncateSync(size)
+      ..setPositionSync(size - 1)
+      ..writeByteSync(0x5a)
+      ..closeSync();
+    bridge.respond = (method, params) {
+      expect(method, 'agent.remoteFile.read');
+      expect(params, {'source': 'cloud', 'path': 'fixture'});
+      return {
+        'name': '课程讲义.pdf',
+        'mime_type': 'application/pdf',
+        'cache_path': file.path,
+        'size': size,
       };
-      final result = await read.read({'path': 'fixture', 'page': 12});
-      expect(result['page'], 12);
-      expect(result['page_count'], 103);
-      expect(result['preview'], 'page_text');
-      expect(result['truncated'], isTrue);
-      expect((result['attachment'] as AgentAttachment).text, '这是指定页的文字。');
-      expect(result.containsKey('data'), isFalse);
-    },
-  );
+    };
+    final result = await read.read({'path': 'fixture'});
+    final attachment = result.remove('attachment') as AgentAttachment;
+    expect(result, {
+      'source': '复旦云盘',
+      'name': '课程讲义.pdf',
+      'mime_type': 'application/pdf',
+      'size': size,
+    });
+    expect(attachment.base64Data, isEmpty);
+    var bytesRead = 0;
+    var lastByte = -1;
+    await for (final chunk in attachment.openCachedPdf!()) {
+      if (bytesRead == 0) expect(chunk.take(5), signature);
+      bytesRead += chunk.length;
+      lastByte = chunk.last;
+    }
+    expect(bytesRead, size);
+    expect(lastByte, 0x5a);
+  });
 }

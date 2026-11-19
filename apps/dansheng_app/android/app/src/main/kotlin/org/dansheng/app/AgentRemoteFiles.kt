@@ -2,17 +2,27 @@
 
 package org.dansheng.app
 
+import android.os.Process
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.dansheng.android.PortError
 import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.Base64
 
 /** Adapts account-owned Core assets to the same validated input as a local attachment. */
 internal class AgentRemoteFiles(
-    private val previewPdf: (id: String, size: Long, page: Int, checkAccount: () -> Unit) -> AgentPdfPreview.Page,
+    private val coreDataDir: File,
+    private val verifyCachedPdf: (File, Long, ByteArray) -> Unit = ::verifyOpenCachedPdf,
 ) {
     private enum class Source(val method: String, val id: String, val owner: String) {
         CANVAS("canvas.material.download", "official.canvas.materials", "service:canvas"),
@@ -33,7 +43,6 @@ internal class AgentRemoteFiles(
             "cloud" -> Source.CLOUD
             else -> throw PortError("InvalidInput")
         }
-        val page = requestedPage(params)
         val request = JSONObject().put("account_id", account).put("max_bytes", MAX_DOWNLOAD_BYTES)
         when (source) {
             Source.CANVAS -> {
@@ -54,78 +63,66 @@ internal class AgentRemoteFiles(
         checkAccount()
         val id = assetId(asset, account, source)
         if (asset.optString("state") != "ready") throw PortError("FileUnavailable")
-        val size = asset.optLong("size", -1)
+        val size = when (val raw = asset.opt("size")) {
+            is Int -> raw.toLong()
+            is Long -> raw
+            else -> throw PortError("AttachmentInvalidContent")
+        }
         if (size <= 0) throw PortError("AttachmentInvalidContent")
-        if (size > MAX_DOWNLOAD_BYTES) throw PortError("AttachmentTooLarge")
 
-        val name = asset.optString("name")
-        val kind = AgentAttachmentPicker.resolveKind(asset.optString("mime_type"), name)
+        val name = asset.opt("name") as? String ?: throw PortError("SourceSchemaChanged")
+        val mime = asset.opt("mime_type") as? String ?: throw PortError("SourceSchemaChanged")
+        val kind = AgentAttachmentPicker.resolveKind(mime, name)
         val assetParams = JSONObject().put("account_id", account).put("asset_id", id)
-        if (page != null && kind != AgentAttachmentPicker.Kind.PDF) throw PortError("InvalidInput")
         if (kind == AgentAttachmentPicker.Kind.PDF) {
-            if (page != null || size > MAX_INLINE_PDF_BYTES) {
-                val pageNumber = page ?: 1
+            if (size > MAX_AGENT_PDF_BYTES) throw PortError("AgentPdfTooLarge")
+            if (size > MAX_INLINE_PDF_BYTES) {
                 val prefix = readChunk(
-                    assetParams, id, size, 0, minOf(size.toInt(), PDF_SIGNATURE.length), checkAccount, core,
+                    assetParams, id, size, 0, PDF_SIGNATURE.length, checkAccount, core,
                 )
                 if (prefix.toString(Charsets.US_ASCII) != PDF_SIGNATURE) {
                     throw PortError("AttachmentInvalidContent")
                 }
-                val preview = withContext(Dispatchers.IO) {
+                val file = withContext(Dispatchers.IO) {
                     checkAccount()
-                    previewPdf(id, size, pageNumber, checkAccount)
+                    cachedPdf(id, size, prefix)
                 }
-                checkAccount()
-                val extracted = preview.kind.isText
-                return@scoped AgentAttachmentPicker.payload(name, preview.kind, preview.bytes)
-                    .put("page", pageNumber).put("page_count", preview.pageCount)
-                    .put("preview", if (extracted) "page_text" else "page_image")
-                    .put("extracted", extracted).put("truncated", preview.truncated || preview.pageCount > 1)
-            }
-            readText(assetParams, name, id, checkAccount, core, allowPdfFallback = true)?.let {
-                return@scoped it
+                return@scoped JSONObject()
+                    .put("name", AgentAttachmentPicker.attachmentName(name, kind))
+                    .put("mime_type", kind.mime)
+                    .put("size", size)
+                    .put("cache_path", file.path)
             }
         }
         if (kind.isText && size > AgentAttachmentPicker.MAX_TEXT_BYTES) {
-            return@scoped readText(assetParams, name, id, checkAccount, core, allowPdfFallback = false)
-                ?: throw PortError("AttachmentInvalidContent")
+            throw PortError("AttachmentTextTooLarge")
         }
-        val limit = when {
-            kind == AgentAttachmentPicker.Kind.PDF -> MAX_INLINE_PDF_BYTES
-            kind.isText -> AgentAttachmentPicker.MAX_TEXT_BYTES
-            else -> AgentAttachmentPicker.MAX_BINARY_BYTES
+        if (kind != AgentAttachmentPicker.Kind.PDF && !kind.isText && size > AgentAttachmentPicker.MAX_BINARY_BYTES) {
+            throw PortError("AttachmentTooLarge")
         }
-        if (size > limit) throw PortError("AttachmentTooLarge")
         val bytes = readBytes(assetParams, id, size.toInt(), checkAccount, core)
         AgentAttachmentPicker.payload(name, kind, bytes, pdfLimit = MAX_INLINE_PDF_BYTES)
     }
 
-    private fun readText(
-        params: JSONObject,
-        name: String,
-        id: String,
-        checkAccount: () -> Unit,
-        core: (String, JSONObject) -> Any?,
-        allowPdfFallback: Boolean,
-    ): JSONObject? {
-        checkAccount()
-        val result = try {
-            core("files.text", params) as? JSONObject ?: throw PortError("SourceSchemaChanged")
-        } catch (error: PortError) {
-            // A small scanned, encrypted, or complex PDF can still be passed
-            // to a model that supports the file format directly.
-            if (allowPdfFallback && error.code in TEXT_FALLBACK_ERRORS) return null
-            throw error
+    private fun cachedPdf(id: String, size: Long, prefix: ByteArray): File {
+        try {
+            val directory = coreDataDir.absoluteFile
+            val root = File(directory.parentFile!!.canonicalFile, directory.name)
+            val assets = File(root, "assets")
+            val file = File(assets, id)
+            if (file.parentFile != assets || file.canonicalFile != file ||
+                !Files.isDirectory(root.toPath(), NOFOLLOW_LINKS) ||
+                !Files.isDirectory(assets.toPath(), NOFOLLOW_LINKS)
+            ) throw PortError("FileUnavailable")
+            val attributes = Files.readAttributes(file.toPath(), BasicFileAttributes::class.java, NOFOLLOW_LINKS)
+            if (!attributes.isRegularFile || attributes.size() != size) throw PortError("FileUnavailable")
+            verifyCachedPdf(file, size, prefix)
+            return file
+        } catch (_: IOException) {
+            throw PortError("FileUnavailable")
+        } catch (_: SecurityException) {
+            throw PortError("FileUnavailable")
         }
-        checkAccount()
-        if (result.optString("asset_id") != id) throw PortError("FileUnavailable")
-        val text = result.opt("text") as? String ?: throw PortError("SourceSchemaChanged")
-        val (bytes, truncated) = boundedAgentText(sequenceOf(text))
-        if (bytes.isEmpty() || (allowPdfFallback && bytes.toString(Charsets.UTF_8).isBlank())) return null
-        val payload = AgentAttachmentPicker.payload(name, AgentAttachmentPicker.Kind.TEXT, bytes)
-            .put("extracted", allowPdfFallback).put("truncated", truncated || result.optBoolean("truncated"))
-        if (!allowPdfFallback) payload.put("preview", "text_excerpt")
-        return payload
     }
 
     private fun readBytes(
@@ -233,17 +230,6 @@ internal class AgentRemoteFiles(
     private fun canvasId(params: JSONObject, field: String): String =
         (params.opt(field) as? String)?.takeIf(CANVAS_ID::matches) ?: throw PortError("InvalidInput")
 
-    private fun requestedPage(params: JSONObject): Int? {
-        if (!params.has("page")) return null
-        val value = when (val raw = params.opt("page")) {
-            is Int -> raw.toLong()
-            is Long -> raw
-            else -> throw PortError("InvalidInput")
-        }
-        if (value !in 1L..Int.MAX_VALUE.toLong()) throw PortError("InvalidInput")
-        return value.toInt()
-    }
-
     private fun assetId(asset: JSONObject, account: String, source: Source): String {
         val id = asset.optString("asset_id")
         if (asset.optString("account_id") != account || asset.optString("source_id") != source.id ||
@@ -255,14 +241,37 @@ internal class AgentRemoteFiles(
     private companion object {
         const val MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
         const val MAX_INLINE_PDF_BYTES = 8 * 1024 * 1024
+        const val MAX_AGENT_PDF_BYTES = 100 * 1024 * 1024
         const val CHUNK_BYTES = 128 * 1024
         const val CACHE_PAGE_SIZE = 128
         const val MAX_CACHE_PAGES = 64
         val CANVAS_ID = Regex("[1-9][0-9]{0,23}")
         val UUID_V4 = Regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
-        val TEXT_FALLBACK_ERRORS = setOf(
-            "CapabilityUnavailable", "MethodNotFound", "DocumentParseError", "DocumentTooComplex",
-            "DocumentTooLarge", "EncryptedDocument", "UnsupportedContent", "NoExtractableText",
-        )
+    }
+}
+
+// Verify the actual open file before exposing its path to the caller.
+private fun verifyOpenCachedPdf(file: File, size: Long, prefix: ByteArray) {
+    try {
+        val uid = Process.myUid()
+        val expected = Os.lstat(file.path)
+        if (!OsConstants.S_ISREG(expected.st_mode) || expected.st_size != size || expected.st_uid != uid) {
+            throw PortError("FileUnavailable")
+        }
+        val fd = Os.open(file.path, OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW or OsConstants.O_NONBLOCK, 0)
+        try {
+            val opened = Os.fstat(fd)
+            if (!OsConstants.S_ISREG(opened.st_mode) || opened.st_size != size || opened.st_uid != uid ||
+                opened.st_dev != expected.st_dev || opened.st_ino != expected.st_ino
+            ) throw PortError("FileUnavailable")
+            val header = ByteArray(prefix.size)
+            if (Os.pread(fd, header, 0, header.size, 0L) != header.size || !header.contentEquals(prefix)) {
+                throw PortError("AttachmentInvalidContent")
+            }
+        } finally {
+            runCatching { Os.close(fd) }
+        }
+    } catch (_: ErrnoException) {
+        throw PortError("FileUnavailable")
     }
 }

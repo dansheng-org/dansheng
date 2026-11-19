@@ -51,15 +51,13 @@ Iterable<AgentTool> courseFileAgentTools(CampusApi api) => [
   AgentTool(
     spec: const AgentToolSpec(
       'campus_read_course_file',
-      '读取 Canvas 课程文件列表返回的文件。请使用同一条结果的课程 ID、文件 ID 及作业 ID（如果有）。'
-          'PDF 和 UTF-8 文本最多 200 MiB。指定 page 可读 PDF 某一页，大 PDF 按页返回，长文本返回节选。图片最多 2 MiB。',
+      '附上 Canvas 课程文件列表返回的原始文件。请使用同一条结果的课程 ID、文件 ID 及作业 ID（如果有）。',
       {
         'type': 'object',
         'properties': {
           'course_id': _idField,
           'file_id': _idField,
           'assignment_id': _idField,
-          'page': agentFilePageField,
         },
         'required': ['course_id', 'file_id'],
         'additionalProperties': false,
@@ -234,7 +232,6 @@ Future<Json> _readCourseFile(CampusApi api, Json args) {
     'course_id': courseId,
     'file_id': fileId,
     'assignment_id': ?assignmentId,
-    'page': ?args['page'],
   });
 }
 

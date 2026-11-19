@@ -258,7 +258,7 @@ void main() {
       ]);
       final upload = client.requests.first;
       expect(upload.headers.value('authorization'), 'Bearer $_key');
-      expect(utf8.decode(upload.body), contains('text_recognition'));
+      expect(utf8.decode(upload.body), contains('rich_layout_recognition'));
       expect(utf8.decode(upload.body), contains('%PDF-'));
       for (final request in client.requests.skip(1)) {
         expect(request.json['input'][0]['content'], [
@@ -271,6 +271,53 @@ void main() {
           },
         ]);
       }
+    });
+
+    test('streams the entire cached PDF with its original filename', () async {
+      final client = _Client([
+        _Response.json('{"id":"file-api-cached-pdf"}'),
+        _Response.sse(_responsesTerminal([_responsesMessage('Read.')])),
+      ]);
+      final model = _model(
+        ModelProvider.openAiResponses,
+        client,
+        base: 'https://api.deepseek.com',
+        name: 'deepseek-flash',
+      );
+      addTearDown(model.close);
+      final pdf = Uint8List(agentMaxCampusPdfBytes + 1);
+      pdf.setAll(0, ascii.encode('%PDF-1.7\n'));
+      pdf.last = 0x5a;
+      final attachment = AgentAttachment.cachedPdf(
+        name: '课程图表.pdf',
+        size: pdf.length,
+        openRead: () => Stream.fromIterable([
+          Uint8List.sublistView(pdf, 0, 3),
+          Uint8List.sublistView(pdf, 3),
+        ]),
+      );
+      await model.complete(
+        messages: [
+          AgentMessage.user('读图。', attachments: [attachment]),
+        ],
+        tools: [],
+        onText: (_) {},
+      );
+      final upload = client.requests.first;
+      final boundary = upload.headers.contentType!.parameters['boundary'];
+      final suffix = ascii.encode('\r\n--$boundary--\r\n');
+      final body = upload.body;
+      final start = body.length - pdf.length - suffix.length;
+      final prefix = utf8.decode(Uint8List.sublistView(body, 0, start));
+      expect(prefix, contains('filename="课程图表.pdf"'));
+      expect(prefix, contains('rich_layout_recognition'));
+      expect(Uint8List.sublistView(body, start, start + pdf.length), pdf);
+      expect(Uint8List.sublistView(body, start + pdf.length), suffix);
+      expect(upload.contentLength, body.length);
+      expect(client.requests.last.json['input'][0]['content'][1], {
+        'type': 'input_file',
+        'file_id': 'file-api-cached-pdf',
+      });
     });
 
     test('streams text immediately and returns at the terminal event', () async {
@@ -972,7 +1019,7 @@ void main() {
           latin1.decode(upload.body),
           '--$boundary\r\n'
           'Content-Disposition: form-data; name="purpose"\r\n\r\n'
-          'text_recognition\r\n'
+          'rich_layout_recognition\r\n'
           '--$boundary\r\n'
           'Content-Disposition: form-data; name="expires_after[anchor]"\r\n\r\n'
           'created_at\r\n'
@@ -980,7 +1027,7 @@ void main() {
           'Content-Disposition: form-data; name="expires_after[seconds]"\r\n\r\n'
           '3600\r\n'
           '--$boundary\r\n'
-          'Content-Disposition: form-data; name="file"; filename="document.pdf"\r\n'
+          'Content-Disposition: form-data; name="file"; filename="syllabus.pdf"\r\n'
           'Content-Type: application/pdf\r\n\r\n'
           '%PDF-1.4\n'
           '\r\n--$boundary--\r\n',
@@ -1887,6 +1934,16 @@ class _Request implements HttpClientRequest {
 
   @override
   void add(List<int> data) => _body.add(data);
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await for (final chunk in stream) {
+      add(chunk);
+    }
+  }
+
+  @override
+  void abort([Object? exception, StackTrace? stackTrace]) {}
 
   @override
   Future<HttpClientResponse> close() => _response();

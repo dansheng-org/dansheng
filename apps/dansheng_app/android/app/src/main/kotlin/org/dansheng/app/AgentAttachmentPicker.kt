@@ -69,9 +69,11 @@ internal object AgentAttachmentPicker {
             if (kind.isText) "AttachmentTextTooLarge" else "AttachmentTooLarge",
         )
         if (!hasExpectedContent(kind, bytes)) throw PortError("AttachmentInvalidContent")
-        return JSONObject().put("name", nameForKind(safeName(displayName), kind))
+        return JSONObject().put("name", attachmentName(displayName, kind))
             .put("mime_type", kind.mime).put("data", Base64.getEncoder().encodeToString(bytes))
     }
+
+    fun attachmentName(displayName: String, kind: Kind): String = nameForKind(safeName(displayName), kind)
 
     private fun safeName(displayName: String?): String = displayName.orEmpty()
         .substringAfterLast('/').substringAfterLast('\\')
